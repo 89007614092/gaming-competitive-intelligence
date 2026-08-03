@@ -30,6 +30,7 @@ const TRANSCRIPT_SCRIPT = path.join(__dirname, "transcript.py");
 
 // ===== DuckDuckGo Search via Python duckduckgo_search library =====
 // Free, no API key, no sign-in, no token limits.
+// When Python is unavailable, falls back to cached news data.
 
 function ddgSearch(query, limit = 10) {
   return new Promise((resolve, reject) => {
@@ -631,6 +632,12 @@ app.post("/api/search", async (req, res) => {
 });
 
 // GET /api/news — free DuckDuckGo news search across competitors
+// Falls back to pre-generated cache when Python/search is unavailable
+let newsCache = null;
+try {
+  newsCache = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "news-cache.json"), "utf8"));
+} catch (_) { /* no cache file yet */ }
+
 app.get("/api/news", async (req, res) => {
   try {
     // Use 8 random keywords each time for variety, always with 2026
@@ -677,13 +684,37 @@ app.get("/api/news", async (req, res) => {
     // Sort by recency/heuristic: prefer articles with longer descriptions (more substantive)
     articles.sort((a, b) => (b.description || "").length - (a.description || "").length);
 
+    const finalArticles = articles.slice(0, 30);
+
+    // Update cache with fresh results
+    if (finalArticles.length > 0) {
+      newsCache = {
+        generatedAt: new Date().toISOString(),
+        source: "Live DuckDuckGo search",
+        count: finalArticles.length,
+        articles: finalArticles
+      };
+    }
+
     res.json({
       success: true,
-      count: articles.length,
-      articles: articles.slice(0, 30),
+      count: finalArticles.length,
+      articles: finalArticles,
       searchedAt: new Date().toISOString(),
+      live: true,
     });
   } catch (err) {
+    // Fall back to cache if available
+    if (newsCache && newsCache.articles?.length) {
+      return res.json({
+        success: true,
+        count: newsCache.articles.length,
+        articles: newsCache.articles,
+        searchedAt: newsCache.generatedAt,
+        live: false,
+        cached: true,
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -928,6 +959,115 @@ app.get("/api/regulatory-timeline", (req, res) => {
       );
     }
     res.json({ success: true, data: regulatoryTimelineCache });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/regulatory-scan — search for new AI regulatory developments
+app.post("/api/regulatory-scan", async (req, res) => {
+  try {
+    const scanQueries = [
+      "EU AI Act 2026 2027 new regulation deadline compliance",
+      "UK AI regulation 2026 2027 new bill law policy",
+      "AI Act high-risk systems enforcement 2026 2027",
+      "EU digital regulation AI gaming 2026",
+    ];
+
+    const results = await Promise.allSettled(
+      scanQueries.map(async (q) => {
+        try {
+          const items = await ddgSearch(q, 3);
+          return { query: q, results: items };
+        } catch (_) { return { query: q, results: [] }; }
+      })
+    );
+
+    // Collect all results and filter for regulatory relevance
+    const seen = new Set();
+    const developments = [];
+
+    const regulatoryTerms = [
+      "AI Act", "regulation", "compliance", "deadline", "law", "legislation",
+      "directive", "enforcement", "prohibited", "high-risk", "GPAI", "DMA",
+      "liability", "governance", "regulatory", "fine", "sanction", "ICO",
+      "European Commission", "parliament", "council", "data protection",
+      "copyright", "transparency", "watermark", "digital"
+    ];
+
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      for (const item of r.value.results || []) {
+        if (!item.url || seen.has(item.url)) continue;
+        const text = ((item.title || "") + " " + (item.description || "")).toLowerCase();
+        const matchCount = regulatoryTerms.filter(t => text.includes(t.toLowerCase())).length;
+        if (matchCount < 2) continue; // Must match at least 2 regulatory terms
+
+        seen.add(item.url);
+        developments.push({
+          title: item.title,
+          url: item.url,
+          description: item.description,
+          source: "Web search",
+          foundAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      count: developments.length,
+      developments: developments.slice(0, 15),
+      scannedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/knowledge-scan — search for new AI/gaming regulatory knowledge
+app.post("/api/knowledge-scan", async (req, res) => {
+  try {
+    const scanQueries = [
+      "AI gaming regulation compliance 2026",
+      "generative AI game development law EU UK 2026",
+      "AI copyright gaming industry 2026",
+      "world models AI regulation 2026",
+    ];
+
+    const results = await Promise.allSettled(
+      scanQueries.map(async (q) => {
+        try {
+          const items = await ddgSearch(q, 3);
+          return { query: q, results: items };
+        } catch (_) { return { query: q, results: [] }; }
+      })
+    );
+
+    const seen = new Set();
+    const items = [];
+
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      for (const item of r.value.results || []) {
+        if (!item.url || seen.has(item.url)) continue;
+        seen.add(item.url);
+        items.push({
+          title: item.title,
+          url: item.url,
+          description: item.description,
+          source: "Web search",
+          foundAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      count: items.length,
+      items: items.slice(0, 10),
+      scannedAt: new Date().toISOString(),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

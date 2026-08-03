@@ -9,11 +9,14 @@ let savedReports = JSON.parse(localStorage.getItem("savedReports") || "[]");
 
 // ===== Init =====
 document.addEventListener("DOMContentLoaded", () => {
+  restoreTabOrder();
   setupNavigation();
   setupSettings();
   checkApiStatus();
   loadKnowledgeBase();
   setupSubTabs();
+  setupTabDragDrop();
+  setupAutoUpdate();
 });
 
 // ===== Navigation =====
@@ -84,6 +87,102 @@ function setupNavigation() {
 
   // Toggle full content
   document.getElementById("toggleFullContent").addEventListener("click", toggleFullContent);
+}
+
+// ===== Drag-and-Drop Tab Reordering =====
+const TAB_ORDER_KEY = "tabOrder";
+
+function getTabOrder() {
+  const stored = localStorage.getItem(TAB_ORDER_KEY);
+  if (stored) {
+    try { return JSON.parse(stored); } catch (_) { /* ignore */ }
+  }
+  // Default order
+  return [
+    "knowledge-base", "news-view", "search-view", "reports",
+    "spider-web", "tencent-products", "gaming-trends",
+    "current-use-cases", "regulatory-timeline", "risks", "company-map"
+  ];
+}
+
+function saveTabOrder(order) {
+  localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
+}
+
+function restoreTabOrder() {
+  const order = getTabOrder();
+  const nav = document.getElementById("tabNav");
+  if (!nav) return;
+  const buttons = nav.querySelectorAll(".nav-btn");
+  const btnMap = {};
+  buttons.forEach(b => { btnMap[b.dataset.view] = b; });
+  // Re-append in saved order (buttons already in DOM will be moved)
+  order.forEach(viewId => {
+    if (btnMap[viewId]) nav.appendChild(btnMap[viewId]);
+  });
+}
+
+function getCurrentTabOrder() {
+  const nav = document.getElementById("tabNav");
+  if (!nav) return [];
+  return [...nav.querySelectorAll(".nav-btn")].map(b => b.dataset.view);
+}
+
+function setupTabDragDrop() {
+  const nav = document.getElementById("tabNav");
+  if (!nav) return;
+
+  let draggedEl = null;
+
+  nav.addEventListener("dragstart", (e) => {
+    const btn = e.target.closest(".nav-btn");
+    if (!btn) return;
+    draggedEl = btn;
+    btn.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", btn.dataset.view);
+  });
+
+  nav.addEventListener("dragend", (e) => {
+    const btn = e.target.closest(".nav-btn");
+    if (btn) btn.classList.remove("dragging");
+    // Remove all drag-over highlights
+    nav.querySelectorAll(".nav-btn.drag-over").forEach(b => b.classList.remove("drag-over"));
+    draggedEl = null;
+    saveTabOrder(getCurrentTabOrder());
+  });
+
+  nav.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const btn = e.target.closest(".nav-btn");
+    if (!btn || btn === draggedEl) return;
+    // Remove previous highlights
+    nav.querySelectorAll(".nav-btn.drag-over").forEach(b => b.classList.remove("drag-over"));
+    btn.classList.add("drag-over");
+  });
+
+  nav.addEventListener("dragleave", (e) => {
+    const btn = e.target.closest(".nav-btn");
+    if (btn) btn.classList.remove("drag-over");
+  });
+
+  nav.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const targetBtn = e.target.closest(".nav-btn");
+    if (!targetBtn || !draggedEl || targetBtn === draggedEl) return;
+    targetBtn.classList.remove("drag-over");
+
+    // Insert dragged element before or after target based on position
+    const rect = targetBtn.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      nav.insertBefore(draggedEl, targetBtn);
+    } else {
+      nav.insertBefore(draggedEl, targetBtn.nextSibling);
+    }
+    saveTabOrder(getCurrentTabOrder());
+  });
 }
 
 // ===== Sub-Tab Navigation =====
@@ -166,8 +265,14 @@ async function loadNews(forceRefresh = false) {
     }
 
     document.getElementById("articleCount").textContent = data.count;
-    document.getElementById("lastUpdated").textContent =
-      "Last updated: " + new Date(data.searchedAt).toLocaleTimeString();
+
+    const updatedEl = document.getElementById("lastUpdated");
+    if (data.cached) {
+      updatedEl.innerHTML = '<span style="color:#d97706;">&#x26A0; Cached results</span> &mdash; ' +
+        new Date(data.searchedAt).toLocaleString();
+    } else {
+      updatedEl.textContent = "Last updated: " + new Date(data.searchedAt).toLocaleTimeString();
+    }
 
     // Extract unique competitors from keywords
     const competitors = new Set();
@@ -2364,4 +2469,139 @@ function renderRisks(filter = "all") {
   });
 
   categoriesEl.innerHTML = catHtml || '<div class="empty-state"><p>No risks match the selected filter</p></div>';
+}
+
+// ===== Auto-Update: Regulatory Timeline & Knowledge Base =====
+const SCAN_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const LAST_SCAN_KEY = "lastAutoScan";
+const REGULATORY_UPDATES_KEY = "regulatoryUpdates";
+const KNOWLEDGE_UPDATES_KEY = "knowledgeUpdates";
+
+function setupAutoUpdate() {
+  // Check on app open
+  checkAndScan();
+
+  // Set up periodic scan every 12 hours
+  setInterval(checkAndScan, SCAN_INTERVAL_MS);
+
+  // Also re-check when tab becomes visible (user returns to app)
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) checkAndScan();
+  });
+}
+
+async function checkAndScan() {
+  const lastScan = localStorage.getItem(LAST_SCAN_KEY);
+  const now = Date.now();
+
+  if (lastScan && (now - parseInt(lastScan)) < SCAN_INTERVAL_MS) {
+    // Less than 12 hours since last scan — still show stored updates
+    showStoredUpdates();
+    return;
+  }
+
+  // Time to scan
+  localStorage.setItem(LAST_SCAN_KEY, now.toString());
+
+  try {
+    const [regRes, kbRes] = await Promise.allSettled([
+      fetch(`${API_BASE}/regulatory-scan`, { method: "POST" }),
+      fetch(`${API_BASE}/knowledge-scan`, { method: "POST" }),
+    ]);
+
+    let regulatoryNew = [];
+    let knowledgeNew = [];
+
+    if (regRes.status === "fulfilled" && regRes.value.ok) {
+      const data = await regRes.value.json();
+      if (data.success && data.developments?.length) {
+        // Compare with previously stored updates to find truly new items
+        const prevUpdates = JSON.parse(localStorage.getItem(REGULATORY_UPDATES_KEY) || "[]");
+        const prevUrls = new Set(prevUpdates.map(u => u.url));
+        regulatoryNew = data.developments.filter(d => !prevUrls.has(d.url));
+        if (regulatoryNew.length) {
+          localStorage.setItem(REGULATORY_UPDATES_KEY,
+            JSON.stringify([...regulatoryNew, ...prevUpdates].slice(0, 30)));
+        }
+      }
+    }
+
+    if (kbRes.status === "fulfilled" && kbRes.value.ok) {
+      const data = await kbRes.value.json();
+      if (data.success && data.items?.length) {
+        const prevUpdates = JSON.parse(localStorage.getItem(KNOWLEDGE_UPDATES_KEY) || "[]");
+        const prevUrls = new Set(prevUpdates.map(u => u.url));
+        knowledgeNew = data.items.filter(d => !prevUrls.has(d.url));
+        if (knowledgeNew.length) {
+          localStorage.setItem(KNOWLEDGE_UPDATES_KEY,
+            JSON.stringify([...knowledgeNew, ...prevUpdates].slice(0, 30)));
+        }
+      }
+    }
+
+    if (regulatoryNew.length || knowledgeNew.length) {
+      showUpdateNotification(regulatoryNew.length, knowledgeNew.length);
+    }
+
+    // Update UI badges
+    updateAutoUpdateBadges();
+  } catch (_) {
+    // Silent failure — will retry next interval
+  }
+}
+
+function showUpdateNotification(regCount, kbCount) {
+  const parts = [];
+  if (regCount) parts.push(`${regCount} regulatory update${regCount > 1 ? "s" : ""}`);
+  if (kbCount) parts.push(`${kbCount} knowledge item${kbCount > 1 ? "s" : ""}`);
+  if (!parts.length) return;
+
+  const msg = parts.join(" and ");
+  showToast(`Auto-scan found ${msg}. Check the timeline and knowledge base.`, "info");
+}
+
+function showStoredUpdates() {
+  updateAutoUpdateBadges();
+}
+
+function updateAutoUpdateBadges() {
+  const regUpdates = JSON.parse(localStorage.getItem(REGULATORY_UPDATES_KEY) || "[]");
+  const kbUpdates = JSON.parse(localStorage.getItem(KNOWLEDGE_UPDATES_KEY) || "[]");
+
+  updateTabBadge("regulatory-timeline", regUpdates.length);
+  updateTabBadge("knowledge-base", kbUpdates.length);
+}
+
+function updateTabBadge(viewId, count) {
+  const btn = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
+  if (!btn) return;
+
+  // Remove existing badge
+  const existingBadge = btn.querySelector(".tab-badge");
+  if (existingBadge) existingBadge.remove();
+
+  if (count > 0) {
+    const badge = document.createElement("span");
+    badge.className = "tab-badge";
+    badge.textContent = count > 99 ? "99+" : count;
+    btn.appendChild(badge);
+  }
+}
+
+// ===== Toast notifications =====
+let activeToastTimer = null;
+function showToast(message, type = "info") {
+  // Remove existing toast
+  const existing = document.querySelector(".toast-notification");
+  if (existing) existing.remove();
+  if (activeToastTimer) clearTimeout(activeToastTimer);
+
+  const toast = document.createElement("div");
+  toast.className = `toast-notification toast-${type}`;
+  toast.innerHTML = `<span>${message}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
+  document.body.appendChild(toast);
+
+  activeToastTimer = setTimeout(() => {
+    if (toast.parentElement) toast.remove();
+  }, 6000);
 }
