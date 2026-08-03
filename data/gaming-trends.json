@@ -1,0 +1,398 @@
+{
+  "title": "AI Gaming Trends — How AI is Reshaping Games",
+  "description": "Nine key trends in how LLMs and generative AI are being integrated into video games, from intelligent NPCs to world-generation engines. Drawn from proprietary competitive intelligence research and live internet search.",
+  "trends": [
+    {
+      "id": "political-weather",
+      "title": "1. Political Weather — Dynamic Narrative Systems",
+      "shortTitle": "Political Weather",
+      "icon": "🌍",
+      "category": "Narrative & World",
+      "summary": "AI-driven narrative engines that adjust faction relationships, dialogue trees, and quest lines in real-time based on player decisions across the entire game world.",
+      "details": "Traditional RPGs hardcode branching dialogue and faction reputation tables. With LLMs, the entire political landscape of a game world can be fluid — alliances shift organically, NPCs gossip about player actions, and quest availability changes based on emergent faction dynamics. The AI tracks every player interaction and propagates consequences through a living world-state graph, making each playthrough genuinely unique.",
+      "examples": [
+        "Dynamic faction reputation systems that evolve via NLP understanding of player dialogue choices, not just binary flags",
+        "NPCs that reference recent player actions in natural conversation without scripted triggers",
+        "Quest gates that open/close based on emergent political conditions rather than linear progression"
+      ],
+      "companies": ["NetEase (Eggy Party dynamic UGC)", "Meaning Machine (Dead Meat interrogation)", "Ubisoft (Ghostwriter narrative AI)"],
+      "knowledgeBaseRef": "LLMs in Games — 9 Emerging Use Cases",
+      "searchKeywords": "AI dynamic narrative games LLM faction system 2025 2026",
+      "sources": [
+        {"label": "Ubisoft Neo NPCs — GDC 2024 AI prototype", "url": "https://news.ubisoft.com/en-us/article/7iNXgmSNSnohlSFrGCZZ7W/ubisofts-neo-npcs-and-how-generative-ai-is-revolutionizing-gaming"},
+        {"label": "Ubisoft Ghostwriter AI dialogue tool", "url": "https://zddgame.com/ghostwriter-ai-tool-for-game-development-announced-by-ubisoft-2757.htm"},
+        {"label": "NVIDIA ACE — Autonomous game characters at CES 2025", "url": "https://www.nvidia.com/en-us/geforce/news/nvidia-ace-autonomous-ai-companions-pubg-naraka-bladepoint/"}
+      ]
+    },
+    {
+      "id": "long-term-memory",
+      "title": "2. Characters with Long-Term Memory",
+      "shortTitle": "NPC Memory",
+      "icon": "🧠",
+      "category": "NPC Behavior",
+      "summary": "NPCs that remember every past interaction with the player — across sessions, across playthroughs — creating persistent, evolving relationships.",
+      "details": "This is perhaps the most transformative NPC innovation: characters that don't reset when you reload. Using vector databases and SLMs running locally on-device, NPCs build persistent memory stores of player interactions. A shopkeeper remembers your last 20 purchases and comments on them. A companion recalls a conversation from 10 hours ago. The technical challenge is memory management — what to retain, compress, and discard — but the design payoff is NPCs that feel like real beings rather than dialogue dispensers. The dead-meat case study showed 95% player enjoyment and 75% felt more creative self-expression vs traditional dialogue trees.",
+      "examples": [
+        "Dead Meat (Meaning Machine + NVIDIA Minitron SLM) — NPCs remember interrogation history and adapt responses",
+        "Companion NPCs that recall specific player promises or actions from hours earlier",
+        "Vendor NPCs that learn player preferences and adjust inventory/pricing accordingly"
+      ],
+      "companies": ["NVIDIA (ACE platform, Minitron SLM)", "Meaning Machine (Game Conscious AI)", "ElevenLabs (NPC voice synthesis)", "Inworld AI"],
+      "knowledgeBaseRef": "Dead Meat case study; LLMs in Games Use Cases",
+      "searchKeywords": "AI NPC long term memory game development LLM 2025 2026",
+      "sources": [
+        {"label": "Dead Meat — NVIDIA ACE on-device SLM (GDC 2025)", "url": "https://www.nvidia.com/en-us/on-demand/session/gdc25-gdc1010"},
+        {"label": "95% of players enjoy AI NPCs — University of Bristol study", "url": "https://www.gamesindustry.biz/new-research-shows-over-90-of-gamers-find-playing-with-ai-powered-npcs-to-be-enjoyable-and-rewarding"},
+        {"label": "NVIDIA ACE & Dead Meat — TechPowerUp CES 2025 coverage", "url": "https://www.techpowerup.com/330824/nvidia-redefines-game-ai-with-ace-autonomous-game-characters"},
+        {"label": "Dead Meat — First Person Talker interview (Premortem Games)", "url": "https://premortem.games/2024/01/19/literally-talk-to-the-murder-suspect-in-dead-meat-ai-enabled-dialogue-is-only-as-good-as-the-humans-behind-it/"}
+      ]
+    },
+    {
+      "id": "dynamic-info-networks",
+      "title": "3. Dynamic Information Networks",
+      "shortTitle": "Information Networks",
+      "icon": "🕸️",
+      "category": "World Systems",
+      "summary": "Evolving knowledge ecosystems where rumors spread organically between NPCs, news travels through the game world, and the player's intelligence-gathering changes game state.",
+      "details": "Imagine a living gossip network within a game: NPCs trade information, rumors degrade or embellish as they spread, and the player can tap into these information flows. An overheard conversation in a tavern might contain actionable intelligence about a hidden dungeon — or misinformation planted by an enemy faction. The AI models how information propagates through social graphs, creating emergent gameplay around gathering, verifying, and acting on intelligence. This is particularly powerful in open-world RPGs, detective games, and strategy titles.",
+      "examples": [
+        "Rumor propagation systems where NPC conversations seed information that spreads geographically",
+        "Player intelligence networks — building informant webs that feed real-time world-state data",
+        "Disinformation mechanics — enemy factions that deliberately plant false leads the player must verify"
+      ],
+      "companies": ["Google DeepMind (world-state simulation)", "NetEase", "Tencent (NPC-LLM research)"],
+      "knowledgeBaseRef": "LLMs in Games — 9 Emerging Use Cases",
+      "searchKeywords": "dynamic information networks games AI NPC rumor propagation 2025 2026",
+      "sources": [
+        {"label": "Inworld AI — NPC memory, personality & real-time reactions", "url": "https://inworld.ai/blog/new-ai-infrastructure-scaling-games-media-characters"},
+        {"label": "Xbox x Inworld AI — generative AI tools for game devs", "url": "https://biz.zhiding.cn/2023/1108/3153573.shtml"}
+      ]
+    },
+    {
+      "id": "pressure-cooker",
+      "title": "4. Pressure-Cooker Systems",
+      "shortTitle": "Pressure-Cooker",
+      "icon": "⏰",
+      "category": "Gameplay Mechanics",
+      "summary": "Time-sensitive AI systems that generate dynamic tension — escalating stakes, consequences, and narrative urgency based on real-time player (in)action.",
+      "details": "Deadlines and time pressure are hard to do well in games because scripted timers feel arbitrary. AI pressure-cooker systems solve this by dynamically adjusting tension parameters: as a deadline approaches, enemy patrol patterns intensify, NPC dialogue becomes more urgent, environmental cues shift (music, lighting, weather), and mission consequences compound. The AI doesn't just track a timer — it orchestrates the entire sensory and mechanical experience of mounting pressure. This creates genuine emotional stakes without feeling like an artificial countdown.",
+      "examples": [
+        "Escalating enemy response as mission timers tick down — reinforcement waves, lockdown protocols",
+        "Narrative urgency that compounds — NPC allies becoming increasingly desperate in communications",
+        "Environmental pressure cues — weather deterioration, crowd panic, infrastructure collapse"
+      ],
+      "companies": ["Rockstar Games (dynamic wanted systems)", "IO Interactive (Hitman adaptive AI)", "Ubisoft"],
+      "knowledgeBaseRef": "LLMs in Games — 9 Emerging Use Cases",
+      "searchKeywords": "AI dynamic difficulty tension games pressure system procedural 2025 2026",
+      "sources": [
+        {"label": "GDC 2026 — 52% of developers oppose generative AI", "url": "https://winbuzzer.com/2026/03/23/generative-ai-gaming-gdc-2026-developer-opposition-xcxwbn/"},
+        {"label": "GDC 2026 — AI in game production reality check", "url": "https://new.qq.com/rain/a/20260415A000CU00"}
+      ]
+    },
+    {
+      "id": "contextual-framing",
+      "title": "5. Contextual Framing — Narrative Reinterpretation",
+      "shortTitle": "Contextual Framing",
+      "icon": "🎭",
+      "category": "Narrative & World",
+      "summary": "AI that reinterprets the game narrative, dialogue, and visual presentation based on the player's current context — inventory, relationships, past choices, and inferred playstyle.",
+      "details": "Every player approaches a game differently — some are completionists, some speedrunners, some explorers. Contextual framing uses AI to read the player's current state (what they carry, who they've befriended, what they've ignored) and reframe the experience accordingly. A quest-giver might acknowledge your pacifist run: 'I know you prefer words to weapons, so here's a diplomatic path.' Environmental storytelling shifts based on what the AI knows the player has experienced. The same game feels authored for each individual player.",
+      "examples": [
+        "Quest dialogue that dynamically references player inventory, companion relationships, and moral history",
+        "Environmental storytelling that reshuffles — the dragon skeleton appears only if you killed the dragon",
+        "Tutorial and hint systems that adapt to detected player confusion or mastery patterns"
+      ],
+      "companies": ["Tencent (Hunyuan narrative capabilities)", "Ubisoft (Ghostwriter contextual dialogue)", "NetEase (Model AIGC personalization)"],
+      "knowledgeBaseRef": "LLMs in Games; Game Design Mimetics — personalized content on demand",
+      "searchKeywords": "contextual AI narrative games personalization player context 2025 2026",
+      "sources": [
+        {"label": "Ubisoft Neo NPCs — player-NPC conversation with generative AI", "url": "https://news.ubisoft.com/en-us/article/7iNXgmSNSnohlSFrGCZZ7W/ubisofts-neo-npcs-and-how-generative-ai-is-revolutionizing-gaming"},
+        {"label": "Tencent Hunyuan GameCraft — interactive game video generation", "url": "https://it.sohu.com/a/907901299_122014422"}
+      ]
+    },
+    {
+      "id": "world-state-propagation",
+      "title": "6. World-State Propagation",
+      "shortTitle": "World Propagation",
+      "icon": "🌊",
+      "category": "World Systems",
+      "summary": "Ripple effects from player actions that cascade organically through the game world — not scripted cause-and-effect, but AI-generated emergent consequences.",
+      "details": "Games have always struggled with consequence: you kill a dragon and the village still treats you like a stranger. World-state propagation uses LLMs to model how actions ripple through complex systems. Burn down a forest → nearby town experiences resource shortage → prices rise → banditry increases → a new questline emerges naturally. The AI doesn't need every path scripted; it understands the causal chains and generates them in real-time. This moves beyond binary 'good ending/bad ending' into truly emergent storytelling with millions of consequence permutations.",
+      "examples": [
+        "Economic ripple effects — player destroys a mine, metal prices rise, blacksmith quests change",
+        "Ecological propagation — player actions affect weather patterns, wildlife migration, NPC settlement locations",
+        "Social propagation — killing a faction leader doesn't just change flags; it reshapes the entire social graph"
+      ],
+      "companies": ["Google DeepMind (world models)", "Odyssey (generative world engine)", "Tencent (Hunyuan-Gamecraft)", "Tripo AI (Project Eden world model)"],
+      "knowledgeBaseRef": "Game Design Mimetics — 'Seed trees replace save files'; LLMs in Games",
+      "searchKeywords": "game world state propagation emergent gameplay AI simulation 2025 2026",
+      "sources": [
+        {"label": "Google DeepMind Genie 3 — interactive 3D worlds from text", "url": "https://deepmind.google/discover/blog/genie-3-a-new-frontier-for-world-models/"},
+        {"label": "Odyssey AI — $27M raised for generative world engine", "url": "https://techcrunch.com/2025/05/28/odysseys-new-ai-model-streams-3d-interactive-worlds/"},
+        {"label": "Tencent Hunyuan-GameCraft — high-dynamic game video generation", "url": "https://it.sohu.com/a/907901299_122014422"}
+      ]
+    },
+    {
+      "id": "dynamic-pacing",
+      "title": "7. Dynamic Pacing Management",
+      "shortTitle": "Dynamic Pacing",
+      "icon": "📊",
+      "category": "Gameplay Mechanics",
+      "summary": "AI that monitors real-time player engagement signals — session length, failure patterns, exploration ratios — and adjusts difficulty, narrative density, and encounter frequency accordingly.",
+      "details": "Game designers have long used heuristics for pacing (easy level → hard level → boss). AI pacing is a paradigm shift: the game watches how you play and adapts. Are you dying repeatedly on the same encounter? The AI subtly adjusts enemy aggression. Are you exploring every corner? The AI seeds more environmental storytelling. Are you speeding through main quests? The AI trims filler content. This isn't just difficulty adjustment — it's a holistic experience manager that ensures every player stays in their personal 'flow channel,' maximizing engagement without frustration or boredom.",
+      "examples": [
+        "Real-time difficulty curves that respond to player death patterns, not just preset difficulty levels",
+        "Narrative density adjustment — more/less exposition based on detected player engagement with lore",
+        "Session management — AI detects fatigue from play patterns and offers natural break points or shifts tone"
+      ],
+      "companies": ["EA (dynamic difficulty patents)", "Sony (PlayStation user engagement analytics)", "Unity (ML-Agents for playtesting)"],
+      "knowledgeBaseRef": "LLMs in Games; Consumer Attitudes — GDC 2026 findings",
+      "searchKeywords": "AI dynamic game pacing difficulty adjustment player engagement 2025 2026",
+      "sources": [
+        {"label": "GDC 2026 — AI in games: 52% adoption vs 52% opposition", "url": "https://winbuzzer.com/2026/03/23/generative-ai-gaming-gdc-2026-developer-opposition-xcxwbn/"},
+        {"label": "GDC 2026 — AI field discussion (Tencent QQ)", "url": "https://new.qq.com/rain/a/20260329A05QQ600"}
+      ]
+    },
+    {
+      "id": "personal-curator",
+      "title": "8. Personal Curator Systems",
+      "shortTitle": "Personal Curator",
+      "icon": "🎨",
+      "category": "Content & UGC",
+      "summary": "Personalized content engines that understand individual player preferences and generate bespoke side quests, dialogue styles, combat encounters, and aesthetic treatments.",
+      "details": "The ultimate vision of 'games as a service' meets AI: every player gets a game tailored to their taste. The curator system learns from play patterns — do you prefer stealth? Comedy? High difficulty? Emotional storytelling? — and generates content that matches. Side quests appear based on your interests, not random assignment. Visual styles shift (within bounds) toward your aesthetic preferences. Dialogue tone adapts to your interaction style. This is distinct from difficulty adjustment; it's about content personalization at the level of taste. NetEase's Eggy Party already demonstrates the core mechanic with UGC generation from natural language prompts.",
+      "examples": [
+        "Personalized side quest generation — the game creates missions that match your preferred gameplay style",
+        "Aesthetic adaptation — UI themes, color palettes, music styles that evolve with player preference",
+        "Content discovery — AI surfaces hidden game content based on inferred player interests"
+      ],
+      "companies": ["NetEase (Eggy Party — 1M+ player-created maps)", "Tencent (WorkSolo/WorkRally AIGC platform)", "Roblox (AI-assisted creation tools)"],
+      "knowledgeBaseRef": "Eggy Party case study; LLMs in Games; Game Design Mimetics",
+      "searchKeywords": "AI personalized game content curation procedural generation player preference 2025 2026",
+      "sources": [
+        {"label": "NetEase Eggy Party — 50M creators, AI 3D generation", "url": "https://m.xianjichina.com/special/detail_590800.html"},
+        {"label": "Roblox Cube 3D — native AI 3D generation at GDC 2025", "url": "https://about.roblox.com/newsroom/2025/03/unveiling-future-creation-native-3d-generation-collaborative-studio-tools-economy-expansion"},
+        {"label": "NetEase Eggy Party x Volcano Engine — AI UGC generation", "url": "https://m.sohu.com/a/942959043_122362510"}
+      ]
+    },
+    {
+      "id": "in-fiction-narrator",
+      "title": "9. In-Fiction Narrators — AI Storytellers",
+      "shortTitle": "AI Narrators",
+      "icon": "🎙️",
+      "category": "Narrative & World",
+      "summary": "AI-generated narrative commentary — like a dungeon master, sports commentator, or in-world bard — that reacts to player actions in real-time, providing context, humor, and cohesion.",
+      "details": "The narrator is one of gaming's oldest devices (Bastion, Stanley Parable, Disco Elysium) but has always been pre-recorded and limited. AI narrators generate commentary on-the-fly, understanding what the player just did and weaving it into a coherent story. An AI dungeon master describes your actions with dramatic flair. A sports commentator calls your plays with genuine surprise. An in-fiction bard sings about your deeds, and the song changes every time. This makes every playthrough feel like a unique story being told, not just a sequence of levels being completed. Combined with ElevenLabs-quality voice synthesis, the narrator becomes a real-time storytelling companion.",
+      "examples": [
+        "AI Dungeon Master that narrates tabletop-style, adapting tone to match player decisions (serious, humorous, horror)",
+        "Sports commentator AI that calls esports or racing gameplay with context-aware play-by-play",
+        "In-world bard/storyteller NPCs that compose and perform ballads about the player's actual exploits"
+      ],
+      "companies": ["ElevenLabs (voice AI)", "Tencent (Hunyuan + GVoice + Voicemod)", "OpenAI (GPT voice for interactive fiction)"],
+      "knowledgeBaseRef": "LLMs in Games — 9 Emerging Use Cases; ElevenLabs competitor profile",
+      "searchKeywords": "AI narrator game dungeon master storytelling real-time commentary 2025 2026",
+      "sources": [
+        {"label": "ElevenLabs — AI voice for conversational gaming", "url": "https://elevenlabs.io/"},
+        {"label": "ElevenLabs v3 — multi-speaker dialogue for NPCs", "url": "https://tech-now.io/en/blogs/elevenlabs-v3-next-gen-ai-voices-features-use-cases-pricing-2025"},
+        {"label": "NVIDIA ACE + ElevenLabs at Computex", "url": "https://www.nvidia.com/en-us/geforce/news/nvidia-ace-autonomous-ai-companions-pubg-naraka-bladepoint/"}
+      ]
+    }
+  ],
+  "ecosystemContext": {
+    "title": "The Broader AI Gaming Ecosystem",
+    "sections": [
+      {
+        "title": "Runtime Generative AI — From Offline to Live",
+        "content": "The ecosystem is shifting from offline AI-assisted asset production (concept art, textures) to real-time, runtime generative engines. Vanguard studios deploy generative AI directly into game executable code. Enabling technologies: on-device small language models (SLMs), real-time diffusion-based rendering, and LLM-integrated NPC behavior systems. Google's GameNGen runs at 20 FPS on a single TPU. Decart x Etched's Oasis renders playable Minecraft in real-time via AI. Tripo AI's API provides production-grade 3D asset generation, rigging and animation for game engines including Unity, Unreal, Cocos and Godot.",
+        "sources": [
+          {"label": "Google GameNGen — Diffusion Models Are Real-Time Game Engines (arXiv)", "url": "https://arxiv.org/abs/2408.14837"},
+          {"label": "Decart Oasis — first playable open-world AI model", "url": "https://techcrunch.com/2024/10/31/decarts-ai-simulates-a-real-time-playable-version-of-minecraft/"},
+          {"label": "Tripo Developer API — text/image-to-3D, rigging, animation", "url": "https://developers.tripo3d.ai/en"}
+        ]
+      },
+      {
+        "title": "World Models & Generative Game Engines",
+        "content": "Key projects: Odyssey (Odyssey-2, Starchild-1), Fei-fei Li's World Labs, Tencent's Hunyuan-Gamecraft, and Tripo AI's Project Eden — a persistent multiplayer world model that decouples world state from visual rendering. The vision: games become 'a mix of shipping an AI model + saturation logic' — the engine generates worlds, NPCs, and narratives on-demand rather than serving pre-built assets. GDC 2026 predicts console TPU integration as the next hardware standard.",
+        "sources": [
+          {"label": "Odyssey AI — interactive video worlds, $27M raised", "url": "https://techcrunch.com/2025/05/28/odysseys-new-ai-model-streams-3d-interactive-worlds/"},
+          {"label": "Tencent Hunyuan 3D World Model 1.0 — open source", "url": "https://www.qbitai.com/2025/07/316251.html"},
+          {"label": "Genie 3 — GDC 2026 standing-room-only presentation", "url": "https://deepmind.google/discover/blog/genie-3-a-new-frontier-for-world-models/"},
+          {"label": "Tripo Project Eden — persistent multiplayer world model", "url": "https://www.tripo3d.ai/research/project-eden"}
+        ]
+      },
+      {
+        "title": "AI-Powered NPCs — The Voice & Personality Revolution",
+        "content": "Companies like ElevenLabs (voice cloning), NVIDIA ACE (animation + dialogue), and Inworld AI (NPC brains) are building the infrastructure stack for truly intelligent NPCs. The Dead Meat case study (Meaning Machine + NVIDIA Minitron) proved players not only accept but prefer AI-driven NPCs — 95% enjoyment, 75% reporting more creative self-expression than traditional dialogue trees.",
+        "sources": [
+          {"label": "95% player enjoyment — University of Bristol & Meaning Machine study", "url": "https://www.gamesindustry.biz/new-research-shows-over-90-of-gamers-find-playing-with-ai-powered-npcs-to-be-enjoyable-and-rewarding"},
+          {"label": "Dead Meat — Meaning Machine + NVIDIA Minitron SLM (GDC 2025)", "url": "https://www.nvidia.com/en-us/on-demand/session/gdc25-gdc1010"},
+          {"label": "Inworld AI — character engine for Xbox, Ubisoft, NVIDIA", "url": "https://inworld.ai/blog/new-ai-infrastructure-scaling-games-media-characters"}
+        ]
+      },
+      {
+        "title": "UGC Explosion — Natural Language as the Creation Interface",
+        "content": "NetEase's Eggy Party proves the model: let players describe what they want in natural language, and AI generates it in real-time. 1M+ player-created map items. This transforms retention loops into self-sustaining UGC platforms. The barrier to creation drops to zero — you don't need modding tools, just an idea you can describe.",
+        "sources": [
+          {"label": "Eggy Party — 50M creators, AI 3D model generation in 3 min", "url": "https://m.xianjichina.com/special/detail_590800.html"},
+          {"label": "Roblox RDC 2025 — Cube 3D, 4D objects, text-to-speech API", "url": "https://ir.roblox.com/news/news-details/2025/Roblox-Unveils-AI-Monetization-and-Performance-Innovations-for-Creators/default.aspx"}
+        ]
+      },
+      {
+        "title": "Consumer Attitudes — The 'Gameslop' Risk",
+        "content": "GDC 2026 findings show rising consumer concern: 'Gameslop' describes the flood of low-quality AI-generated content eroding trust. Steam now requires AI content transparency labeling. UK consumers express concern about AI NPC quality/authenticity, personalized storytelling privacy, creative job displacement, and fear of 'soulless' AI content. But when done well (Dead Meat), AI-enhanced games score higher on player satisfaction than traditional approaches. Transparency is both a regulatory AND commercial requirement.",
+        "sources": [
+          {"label": "GDC 2026 — 52% developer opposition to AI, Steam AI labels at 30% of new releases", "url": "https://winbuzzer.com/2026/03/23/generative-ai-gaming-gdc-2026-developer-opposition-xcxwbn/"},
+          {"label": "Steam AI disclosure policy — 10,000+ games disclosed by 2025", "url": "https://legalmoveslawfirm.com/steam-ai-policy/"},
+          {"label": "AI gameslop — Pocketpair rejects AI, Steam 30% AI-labelled (GamerSky)", "url": "https://www.gamersky.com/news/202601/2078596.shtml"},
+          {"label": "AI game backlash — Pocketpair interview on AI content", "url": "https://ishare.ifeng.com/c/s/v002xf8dfFCWRe9YY1rsOs9YX7xXAR09xsn56yMO5BQm288__"}
+        ]
+      },
+      {
+        "title": "The Generative Kernel — Games That Never End",
+        "content": "The end-state vision: games become 'generative kernels' — shipping less about a complete game and more about a system that produces new content on demand. 'Seed trees' replace save files. One game kernel produces millions of unique player experiences. Differentiation shifts from exact content to how well the game adapts to user wants while remaining cohesive. This fundamentally challenges the AAA model of shipping fixed 60-hour experiences.",
+        "sources": [
+          {"label": "Google GameNGen — neural game engine replacing traditional engines", "url": "https://gamengen.github.io/"},
+          {"label": "Decart Oasis — AI Minecraft without a game engine", "url": "https://www.decart.ai/publications/oasis-interactive-ai-video-game-model"}
+        ]
+      }
+    ]
+  },
+  "patentLandscape": {
+    "title": "Game Technology Patent Signals",
+    "description": "Patent activity highlighted in the supplied research shows how major publishers are protecting AI-driven NPC behavior, procedural animation, physical simulation, continuous world delivery, anti-cheat systems, adaptive music, and multiplayer matchmaking.",
+    "sourceNote": "Summarized from Patents.pdf. Patent links open the corresponding Google Patents record; the Activision Blizzard analysis links to GreyB's patent review.",
+    "companies": [
+      {
+        "name": "Rockstar Games / Take-Two Interactive",
+        "summary": "Rockstar and Take-Two's portfolio concentrates on making open worlds feel more autonomous and physically responsive: individualized NPC behavior, context-aware movement assembly, dynamic material effects, motion prediction, continuous streaming, and cheat detection.",
+        "patents": [
+          {
+            "number": "US11684855B2",
+            "title": "Individualized NPC personality and behavior",
+            "description": "Each non-player character can receive its own personality parameters, including aggression, patience, and reactions to weather. The system supports large libraries of ambient dialogue that trigger only when multiple contextual conditions are simultaneously satisfied, such as time of day, weather, witnessed crimes, and recognition of the player.",
+            "trendLinks": ["NPC Behavior", "Dynamic Narrative", "Contextual Dialogue"],
+            "url": "https://patents.google.com/patent/US11684855B2/en"
+          },
+          {
+            "number": "US11620781B1",
+            "title": "Real-time modular character movement",
+            "description": "Character movement is assembled in real time from modular motion blocks according to factors such as injury state, fatigue, terrain, and weather, rather than relying only on fixed animation clips.",
+            "trendLinks": ["Procedural Animation", "Context Awareness"],
+            "url": "https://patents.google.com/patent/US11620781B1/en"
+          },
+          {
+            "number": "US10685152B2",
+            "title": "Dynamic fluid and surface simulation",
+            "description": "Sweat, blood, rain, and other fluids are simulated dynamically on 3D surfaces in real time according to the properties of the surface and material involved.",
+            "trendLinks": ["Physical Simulation", "Rendering"],
+            "url": "https://patents.google.com/patent/US10685152B2/en"
+          },
+          {
+            "number": "US11951384B2",
+            "title": "AI-assisted body-part motion prediction",
+            "description": "Motion-capture data is used to predict how individual body parts should move during an action. Instead of simply replaying a complete animation clip, the system predicts movement as the action unfolds.",
+            "trendLinks": ["Motion Prediction", "Character Animation"],
+            "url": "https://patents.google.com/patent/US11951384B2/en"
+          },
+          {
+            "number": "US11794114B2",
+            "title": "Continuous world streaming between sessions",
+            "description": "Technology for reducing or eliminating loading screens between online sessions through continuous world streaming, supporting a more persistent and uninterrupted player experience.",
+            "trendLinks": ["World Streaming", "Persistent Worlds"],
+            "url": "https://patents.google.com/patent/US11794114B2/en"
+          },
+          {
+            "number": "US11273380B1",
+            "title": "AI-based anti-cheat detection",
+            "description": "An anti-cheat system intended to identify cheating behavior in online play. The supplied research notes that this type of detection is computationally intensive but strategically important for live-service integrity.",
+            "trendLinks": ["Trust & Safety", "Live Services"],
+            "url": "https://patents.google.com/patent/US11273380B1/en"
+          }
+        ],
+        "sources": [
+          {
+            "label": "Google Patents database",
+            "url": "https://patents.google.com"
+          }
+        ]
+      },
+      {
+        "name": "Activision Blizzard",
+        "summary": "Activision Blizzard's highlighted patent activity points to adaptive player experiences: machine-learning-generated music that responds to how a player is playing, alongside systems for multiplayer matchmaking.",
+        "patents": [
+          {
+            "number": "AI-powered adaptive music system",
+            "title": "Personalized music generated from play style",
+            "description": "A machine-learning system generates or adapts music to match how an individual player is interacting with the game, with the aim of increasing immersion through a responsive audio experience.",
+            "trendLinks": ["Adaptive Audio", "Player Personalization"],
+            "url": "https://insights.greyb.com/activision-blizzard-patents/"
+          },
+          {
+            "number": "US20160001181A1",
+            "title": "Multiplayer video-game matchmaking",
+            "description": "A patented system and method for matching players in multiplayer video games, reflecting the strategic importance of matchmaking design to engagement, competition, and online retention.",
+            "trendLinks": ["Matchmaking", "Player Engagement"],
+            "url": "https://patents.google.com/patent/US20160001181A1/en"
+          }
+        ],
+        "sources": [
+          {
+            "label": "GreyB — Activision Blizzard patent analysis",
+            "url": "https://insights.greyb.com/activision-blizzard-patents/"
+          }
+        ]
+      }
+    ]
+  },
+  "currentUseEvidence": {
+    "title": "How AI Is Already Used in Shipped Games",
+    "description": "The supplied AI Existing Uses research broadens the trends view beyond LLMs. Most successful current implementations are bounded, designer-controlled systems: planning, simulation, adaptation, procedural generation, and machine learning applied to specific subsystems.",
+    "sections": [
+      {
+        "title": "Planning, Perception & Tactical Behavior",
+        "content": "F.E.A.R.'s GOAP, Halo 2's hierarchical behavior architecture, Dishonored 2's crew AI, The Last of Us Part II's partial-knowledge searches, and GROUND BRANCH's utility scoring demonstrate that authored decision systems still produce some of gaming's most convincing intelligence.",
+        "games": ["F.E.A.R.", "Halo 2", "Dishonored 2", "The Last of Us Part II", "GROUND BRANCH"],
+        "sources": [
+          {"label": "F.E.A.R. AI - GDC paper", "url": "https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf"},
+          {"label": "Halo 2 AI - GDC proceeding", "url": "https://www.gamedeveloper.com/programming/gdc-2005-proceeding-handling-complexity-in-the-i-halo-2-i-ai"}
+        ]
+      },
+      {
+        "title": "Persistent Worlds & Emergent Narrative",
+        "content": "Radiant AI, A-Life, the Nemesis System, Watch Dogs: Legion's Census, Dwarf Fortress, RimWorld, and Kenshi generate stories by simulating schedules, hierarchies, relationships, factions, needs, and consequences over time rather than generating free-form prose.",
+        "games": ["Oblivion", "S.T.A.L.K.E.R.", "Shadow of Mordor", "Watch Dogs: Legion", "Dwarf Fortress", "RimWorld", "Kenshi"],
+        "sources": [
+          {"label": "S.T.A.L.K.E.R. A-Life developer interview", "url": "https://www.gamedeveloper.com/pc/interview-inside-the-ai-of-i-s-t-a-l-k-e-r-i-"},
+          {"label": "Watch Dogs: Legion simulation breakdown", "url": "https://www.gamedeveloper.com/design/how-watch-dogs-legion-s-play-as-anyone-simulation-works"}
+        ]
+      },
+      {
+        "title": "Adaptive Pacing & Player Modeling",
+        "content": "Left 4 Dead's Director, Alien: Isolation's tension director, Metal Gear Solid V's preparedness system, Will You Snail?'s predictive traps, and RimWorld's storytellers respond to performance or behavior to keep challenge and pacing within a designed range.",
+        "games": ["Left 4 Dead", "Alien: Isolation", "Metal Gear Solid V", "Will You Snail?", "RimWorld"],
+        "sources": [
+          {"label": "Valve - AI Systems of Left 4 Dead", "url": "https://steamcdn-a.akamaihd.net/apps/valve/2009/ai_systems_of_l4d_mike_booth.pdf"},
+          {"label": "Alien: Isolation AI analysis", "url": "https://www.gamedeveloper.com/design/the-perfect-organism-the-ai-of-alien-isolation"}
+        ]
+      },
+      {
+        "title": "Machine Learning & Generative AI",
+        "content": "Confirmed uses are narrower than marketing often implies: ARC Raiders applies reinforcement learning to locomotion; AI Dungeon generates interactive narrative; Mantella connects speech recognition, LLM dialogue, memory, and voice synthesis; High on Life used Midjourney in production art.",
+        "games": ["ARC Raiders", "AI Dungeon", "Skyrim - Mantella", "High on Life"],
+        "sources": [
+          {"label": "Mantella official repository", "url": "https://github.com/art-from-the-machine/Mantella"},
+          {"label": "AI Dungeon original repository", "url": "https://github.com/latitudegames/AIDungeon"}
+        ]
+      },
+      {
+        "title": "Procedural Content & Ecosystems",
+        "content": "No Man's Sky, Rain World, Prison Architect, The Long Dark, and Dwarf Fortress use procedural rules and agent simulations to generate worlds, ecology, population behavior, and survival pressure. These systems predate current generative AI but remain commercially important AI use cases.",
+        "games": ["No Man's Sky", "Rain World", "Prison Architect", "The Long Dark", "Dwarf Fortress"],
+        "sources": [
+          {"label": "No Man's Sky world-generation GDC talk", "url": "https://www.gdcvault.com/play/1024265/Building-Worlds-in-No-Man-s"},
+          {"label": "Rain World procedural design", "url": "https://unity3d.com/blog/exploring-procedural-design-rain-world"}
+        ]
+      }
+    ]
+  }
+}

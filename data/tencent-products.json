@@ -1,0 +1,131 @@
+{
+  "center": {
+    "id": "tencent",
+    "name": "Tencent",
+    "description": "Tencent's AI and gaming technology portfolio spanning foundation models, game development, creative tools, cloud infrastructure, audio, 3D, and interactive media."
+  },
+  "sectors": [
+    { "id": "foundation", "label": "Foundation Models & AI", "color": "#6366f1", "bg": "#eef2ff" },
+    { "id": "gamedev", "label": "Game Development", "color": "#0891b2", "bg": "#ecfeff" },
+    { "id": "creative", "label": "Creative & Design", "color": "#d946ef", "bg": "#fdf4ff" },
+    { "id": "cloud", "label": "Cloud & Infrastructure", "color": "#f59e0b", "bg": "#fffbeb" },
+    { "id": "audio", "label": "Audio & Voice", "color": "#10b981", "bg": "#ecfdf5" },
+    { "id": "3d", "label": "3D & Visual", "color": "#ef4444", "bg": "#fef2f2" },
+    { "id": "interactive", "label": "Interactive & Media", "color": "#8b5cf6", "bg": "#f5f3ff" },
+    { "id": "agentic", "label": "Agentic & Developer Tools", "color": "#ec4899", "bg": "#fdf2f8" }
+  ],
+  "products": [
+    {
+      "id": "hunyuan",
+      "name": "Hunyuan",
+      "sectors": ["foundation"],
+      "description": "Tencent's flagship foundation model family. Powers Tencent's internal AI capabilities across chat, content generation, code, and enterprise applications. Comparable to GPT-4 class models.",
+      "url": "https://hunyuan.tencent.com/"
+    },
+    {
+      "id": "hunyuan-gamecraft",
+      "name": "Hunyuan-Gamecraft",
+      "sectors": ["foundation", "gamedev"],
+      "description": "Interactive game video generation framework. Turns a single image + text + action commands into high-definition dynamic game videos. Supports first-person parkour, third-person exploration, and open-world scenes. Open-sourced on GitHub with 13B model supporting consumer-grade hardware.",
+      "url": "https://hunyuan-gamecraft.github.io/"
+    },
+    {
+      "id": "giinex",
+      "name": "GiiNEX",
+      "sectors": ["gamedev"],
+      "description": "Full-stack game development solution. Provides AI-powered tools for the entire game creation pipeline — from concept art to runtime systems. https://giinex.tencent.com/",
+      "url": "https://giinex.tencent.com/#/solution"
+    },
+    {
+      "id": "magicdawn",
+      "name": "MagicDawn",
+      "sectors": ["gamedev", "cloud", "3d"],
+      "description": "Next-generation AI-powered global illumination engine. GPU-distributed cloud baking delivers up to 40x faster lighting bake times. Supports dynamic time-of-day GI, real-time preview, and cross-engine toolchain (UE, Unity, Godot). Deployed in Wuthering Waves, Honor of Kings: World, Arena Breakout and more. Strategic partnership with Arm for AI rendering lab.",
+      "url": "https://magicdawn.tencent.com/"
+    },
+    {
+      "id": "miora",
+      "name": "Miora",
+      "sectors": ["creative", "agentic"],
+      "description": "AI-native creative agent studio (妙境 Tencent Design Miora). Multi-agent collaborative platform that delivers complete brand visual suites, images, video, 3D assets, and UI/UX from natural language briefs. Features memory system that learns user aesthetic preferences. Built on same architecture as CodeBuddy/WorkBuddy. Launched globally July 2026 — #1 on Product Hunt.",
+      "url": "https://miora.design/"
+    },
+    {
+      "id": "tencent-cloud",
+      "name": "Tencent Cloud",
+      "sectors": ["cloud"],
+      "description": "Cloud infrastructure platform with European expansion (Frankfurt AZ, 3 German availability zones as of 2026). Powers AI workloads, GPU compute, model hosting, and game server infrastructure globally.",
+      "url": "https://www.tencentcloud.com/"
+    },
+    {
+      "id": "tencent-pioneer",
+      "name": "Tencent Pioneer",
+      "sectors": ["cloud", "gamedev"],
+      "description": "Official cloud gaming platform (腾讯先锋, formerly Tencent Xianyou). Streams high-fidelity mobile and PC games directly to players without local hardware requirements. Features instant-play across devices with no downloads needed, covering titles like Honor of Kings, Game for Peace, and more.",
+      "url": "https://gamer.qq.com/"
+    },
+    {
+      "id": "gvoice",
+      "name": "GVoice",
+      "sectors": ["audio", "gamedev"],
+      "description": "Tencent Games Voice — AI-powered game voice chat solution serving 1B+ daily minutes across 200+ countries. Features real-time voice, 3D spatial audio, voice messages, speech-to-text, simultaneous interpretation across 125 languages, and AI voice changing. Integrated into Honor of Kings, PUBG MOBILE, Delta Force, and 6,000+ games. Only Chinese voice tool certified for Nintendo Switch and PlayStation.",
+      "url": "https://intl.cloud.tencent.com/products/tgv"
+    },
+    {
+      "id": "lightspeed-audio",
+      "name": "LightSpeed Audio",
+      "sectors": ["audio"],
+      "description": "Lightspeed Studios Audio team — internal audio R&D division behind PUBG MOBILE and Game for Peace. Develops Ambisonic spatial audio, AI sound effect retrieval, and Bluetooth latency optimization toolchains. Operates China's first dual-certified Dolby Atmos game mixing studio. Multiple G.A.N.G. and HMMA award wins. (Internal team — no public product page.)",
+      "url": ""
+    },
+    {
+      "id": "voicemod",
+      "name": "Voicemod",
+      "sectors": ["audio", "interactive"],
+      "description": "World-leading real-time AI voice changer and soundboard. 200+ voice filters, AI voice creator, and custom soundboard for gamers, streamers, and creators. Strategic partnership with Tencent Cloud GME for in-game voice transformation — enabling players to sound like game characters in real time. Available on PC and Mac with console support via Voicemod Key hardware.",
+      "url": "https://www.voicemod.net/"
+    },
+    {
+      "id": "visvise",
+      "name": "VISVISE",
+      "sectors": ["3d", "gamedev"],
+      "description": "Full-stack AIGC game creation pipeline. Includes GoSkinning (industry's first universal AI skinning model — 6x efficiency boost, supports humanoid, quadruped, fantasy characters), MotionBlink (first production-grade 3D animation generation model — 200 frames in 4 seconds, quality rivaling optical motion capture), Superman (AAA character animation), and Weaver (3D model generation). Deployed in Wuthering Waves and internally across Tencent studios. Debuted globally at Gamescom 2025.",
+      "url": "https://visvise.com.cn/"
+    },
+    {
+      "id": "hy3d",
+      "name": "Hunyuan 3D / HY 3D",
+      "sectors": ["3d", "foundation"],
+      "description": "Tencent's 3D generation AI engine — globally launched as a creation platform supporting text-to-3D, image-to-3D, and sketch-to-3D. First fully open-sourced production-ready 3D model with PBR material generation. 3M+ community downloads on Hugging Face, recognised as world's most popular 3D open-source model. Integrated with Unity, Unreal Engine, Blender. HY 3D integration planned with Maxon's Cinema 4D. Raises EU AI Act Article 50 transparency questions regarding synthetic-content labelling.",
+      "url": "https://3d-models.hunyuan.tencent.com/"
+    },
+    {
+      "id": "digital-human",
+      "name": "Tencent Cloud Digital Human",
+      "sectors": ["interactive", "foundation", "cloud"],
+      "description": "Next-gen multimodal human-computer interaction platform (腾讯云智能数智人). Supports 5 avatar types (2D live-action, 3D realistic, semi-realistic, cartoon). Used by FAW-Volkswagen (virtual brand officer Ida), CITIC Jiantou Securities (AI account opening), National Museum of China (virtual docent Ai Wenwen), CCTV (sign language digital human for Paralympics), and Mengniu Dairy. Supports both interactive conversational AI and broadcast video generation.",
+      "url": "https://cloud.tencent.com/product/ivh"
+    },
+    {
+      "id": "wechat",
+      "name": "WeChat / Weixin",
+      "sectors": ["interactive", "cloud"],
+      "description": "Super-app platform with 1.3B+ monthly active users. Mini-programs ecosystem hosts millions of third-party apps, AI-powered features, and content distribution. Central to Tencent's consumer AI strategy — integrating Hunyuan model capabilities for chat, search, and content recommendations. Key distribution channel for Tencent's gaming and AI services in China and expanding European market ambitions.",
+      "url": "https://weixin.qq.com/"
+    },
+    {
+      "id": "npc-llm",
+      "name": "NPC-LLM (Mobile)",
+      "sectors": ["gamedev", "foundation", "agentic"],
+      "description": "Cloud-based AI NPC solution powering intelligent game characters via Hunyuan LLM + Tencent Cloud vector database. Enables NPCs with persistent memory, contextual understanding, emotional expression, and natural language interaction — deployed in BUD (碧优蒂的世界) with 20M+ AI dialogues in 3 months and Space Kill (太空杀) for AI vs Human vs AI three-way competitive mode. Research programme includes on-device SLM inference for mobile games.",
+      "url": ""
+    },
+    {
+      "id": "worksolo",
+      "name": "WorkSolo / WorkRally",
+      "sectors": ["creative", "interactive", "agentic"],
+      "description": "Tencent Video's dual-platform AIGC creation ecosystem. WorkRally — industrial-grade AI platform for premium animated series (2D/3D), covering full pipeline from script analysis to final production with S+-level cinematic skill library. WorkSolo — web-based three-mode creator platform (AI short drama, interactive film/game, free canvas), currently in closed beta. Together form Tencent's vision for AI-powered film, television, and interactive content creation at both individual and industrial scale.",
+      "url": ""
+    }
+  ]
+}

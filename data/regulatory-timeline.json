@@ -1,0 +1,171 @@
+{
+  "title": "AI Regulatory Timeline — EU & UK",
+  "subtitle": "Key compliance deadlines and regulatory milestones for AI-enabled products entering European markets",
+  "events": [
+    {
+      "date": "2024-08-01",
+      "label": "1 Aug 2024",
+      "title": "EU AI Act Enters Into Force",
+      "jurisdiction": "EU",
+      "category": "Legislation",
+      "description": "Regulation (EU) 2024/1689 enters into force. Organisations begin preparing compliance programmes, AI inventories, risk assessments and governance structures. The world's first comprehensive AI-specific legal framework becomes law.",
+      "impact": "Foundation — all subsequent deadlines derive from this date.",
+      "link": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=OJ:L_202401689",
+      "linkLabel": "EUR-Lex: Regulation (EU) 2024/1689"
+    },
+    {
+      "date": "2025-02-02",
+      "label": "2 Feb 2025",
+      "title": "EU: Prohibited Practices & AI Literacy",
+      "jurisdiction": "EU",
+      "category": "Compliance Deadline",
+      "description": "Article 5 prohibited practices become applicable. AI literacy obligations also take effect. Certain AI uses are now outright banned across the EU.",
+      "impact": "Companies must ensure no prohibited AI practices are deployed in EU markets.",
+      "link": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/article-5",
+      "linkLabel": "EU AI Act Desk: Article 5 Prohibited Practices"
+    },
+    {
+      "date": "2025-08-02",
+      "label": "2 Aug 2025",
+      "title": "EU: GPAI Obligations Apply",
+      "jurisdiction": "EU",
+      "category": "Compliance Deadline",
+      "description": "General-Purpose AI (GPAI) model obligations become applicable, including technical documentation requirements, copyright compliance policies, and training data summaries. Foundation model developers face new regulatory duties.",
+      "impact": "Foundation model providers must have documentation and copyright compliance in place.",
+      "link": "https://digital-strategy.ec.europa.eu/en/factpages/general-purpose-ai-obligations-under-ai-act",
+      "linkLabel": "EC Digital Strategy: GPAI Obligations Factsheet"
+    },
+    {
+      "date": "2025-12-01",
+      "label": "Late 2025",
+      "title": "UK: ICO ADM Consultation & Code of Practice Begins",
+      "jurisdiction": "UK",
+      "category": "Guidance & Consultation",
+      "description": "ICO consultation on updated guidance for automated decision-making (ADM) and profiling, including AI in recruitment and public services. Work begins toward a statutory AI and ADM Code of Practice under the Data (Use and Access) Act 2025.",
+      "impact": "UK companies should monitor and engage with consultation. ADM governance expectations are rising.",
+      "link": "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/automated-decision-making-and-profiling/",
+      "linkLabel": "ICO: Automated Decision-Making Guidance"
+    },
+    {
+      "date": "2026-03-01",
+      "label": "Mar 2026",
+      "title": "UK: Copyright & AI Report Published",
+      "jurisdiction": "UK",
+      "category": "Policy",
+      "description": "UK Government confirms the broad text-and-data-mining exception is not being taken forward. Licensing, provenance and record-keeping become the practical foundation for lawful AI development. No replacement legislation introduced.",
+      "impact": "AI developers must establish licensing/permissions for training data. Broad TDM exception is off the table.",
+      "link": "https://www.gov.uk/government/publications/report-and-impact-assessment-on-copyright-and-artificial-intelligence/report-on-copyright-and-artificial-intelligence",
+      "linkLabel": "GOV.UK: Report on Copyright and Artificial Intelligence"
+    },
+    {
+      "date": "2026-05-07",
+      "label": "7 May 2026",
+      "title": "EU: Digital Omnibus on AI — Political Agreement",
+      "jurisdiction": "EU",
+      "category": "Legislation",
+      "description": "Political agreement reached on Digital Omnibus amendments to the AI Act. Adjusts compliance timelines for certain high-risk AI systems and refines scope. Prohibits AI 'nudification' apps and non-consensual intimate imagery.",
+      "impact": "Sets the stage for the Dec 2027 high-risk system deadline.",
+      "link": "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_1024",
+      "linkLabel": "EC Press Release: Digital Omnibus Agreement"
+    },
+    {
+      "date": "2026-07-23",
+      "label": "23 Jul 2026",
+      "title": "EU: Google Fined €890M Under DMA",
+      "jurisdiction": "EU",
+      "category": "Enforcement",
+      "description": "European Commission fines Google (Alphabet) €890 million under the Digital Markets Act: €460M for self-preferencing in Google Search, €430M for anti-steering restrictions on Google Play. Demonstrates the enforcement posture for digital regulation.",
+      "impact": "Strong signal that the Commission will levy substantial penalties. AI Act enforcement likely to follow similar pattern.",
+      "link": "https://ec.europa.eu/commission/presscorner/detail/en/ip_26_2480",
+      "linkLabel": "EC Press Release: Google DMA Fine"
+    },
+    {
+      "date": "2026-08-02",
+      "label": "2 Aug 2026",
+      "title": "EU: Major AI Act Obligations Become Operational ⚠️",
+      "jurisdiction": "EU",
+      "category": "Critical Deadline",
+      "description": "The most significant operational deadline. Most AI Act obligations become applicable: transparency duties, provider obligations, deployer obligations, and enforcement mechanisms. Article 50 transparency requirements operational for newly deployed systems. Chatbots must identify as AI, synthetic content must carry machine-readable labelling, deepfake disclosure processes must be operational. Directly impacts products such as MagicDawn, GVoice, AI Voice Studio.",
+      "impact": "CRITICAL. Companies selling AI-enabled products into the EU must have substantially operational compliance programmes by this date.",
+      "link": "https://digital-strategy.ec.europa.eu/en/factpages/quick-facts-transparency-rules-ai-systems",
+      "linkLabel": "EC Factsheet: Article 50 Transparency Rules"
+    },
+    {
+      "date": "2026-12-02",
+      "label": "2 Dec 2026",
+      "title": "EU: Article 50 Deadline & New Prohibitions",
+      "jurisdiction": "EU",
+      "category": "Compliance Deadline",
+      "description": "Article 50 compliance deadline for generative AI systems already on the market before August 2026. New prohibitions relating to non-consensual intimate imagery and AI-generated CSAM become applicable. Transitional period for existing products ends.",
+      "impact": "All generative AI products on EU market must meet transparency requirements by this date.",
+      "link": "https://artificialintelligenceact.eu/article/50/",
+      "linkLabel": "AI Act Explorer: Article 50 Full Text"
+    },
+    {
+      "date": "2026-12-09",
+      "label": "9 Dec 2026",
+      "title": "EU: New Product Liability Directive Implementation",
+      "jurisdiction": "EU",
+      "category": "Compliance Deadline",
+      "description": "Member States must implement the New Product Liability Directive (2024/2853). Software, including AI, now explicitly qualifies as a product. Strict liability applies to AI system providers. Companies should review regulatory compliance, product liability risk profiles, insurance coverage, and supply chain agreements.",
+      "impact": "AI software providers face strict product liability in the EU. Supply chain review essential.",
+      "link": "https://single-market-economy.ec.europa.eu/single-market/goods/free-movement-sectors/liability-defective-products_en",
+      "linkLabel": "EC: New Product Liability Directive Overview"
+    },
+    {
+      "date": "2026-12-31",
+      "label": "Late 2026",
+      "title": "UK: Digital Replicas Consultation Expected",
+      "jurisdiction": "UK",
+      "category": "Policy",
+      "description": "UK government expected to consult on digital replicas. Likely to have direct relevance to product design, talent agreements, consent management and reputational risk controls in games and media.",
+      "impact": "Games and media companies using AI-generated likenesses should prepare for new requirements.",
+      "link": "https://www.gov.uk/government/publications/report-and-impact-assessment-on-copyright-and-artificial-intelligence/report-on-copyright-and-artificial-intelligence",
+      "linkLabel": "GOV.UK: Copyright & AI Report (Digital Replicas section)"
+    },
+    {
+      "date": "2027-05-01",
+      "label": "May 2027",
+      "title": "EU: DMA Cloud Market Investigation Report",
+      "jurisdiction": "EU",
+      "category": "Investigation",
+      "description": "European Commission stakeholder roundtable report expected on cloud computing services under Article 19 of the Digital Markets Act. May influence competition requirements and cloud-provider obligations in Europe.",
+      "impact": "Cloud providers supporting AI deployment may face new market obligations.",
+      "link": "https://digital-markets-act.ec.europa.eu/commission-hosted-stakeholder-roundtable-cloud-computing-services-under-digital-markets-act-2026-07-01_en",
+      "linkLabel": "EC: DMA Cloud Computing Roundtable"
+    },
+    {
+      "date": "2027-12-02",
+      "label": "2 Dec 2027",
+      "title": "EU: Annex III High-Risk AI Systems Become Applicable ⚠️",
+      "jurisdiction": "EU",
+      "category": "Critical Deadline",
+      "description": "Requirements for many Annex III high-risk AI systems become applicable. Covers standalone high-risk systems in employment (recruitment), education (assessment), public services, financial services (credit scoring), and certain law-enforcement applications. Note: this does NOT postpone prohibited-practice rules, GPAI obligations, transparency requirements, or AI-literacy requirements.",
+      "impact": "CRITICAL. Companies with AI systems in recruitment, education, finance, or public-sector use cases must comply with full high-risk requirements.",
+      "link": "https://www.regulation-ai.eu/annex-iii",
+      "linkLabel": "Regulation AI: Annex III High-Risk Categories & Deadlines"
+    },
+    {
+      "date": "2028-08-02",
+      "label": "2 Aug 2028",
+      "title": "EU: Annex I Product-Embedded High-Risk AI — Full Application ⚠️",
+      "jurisdiction": "EU",
+      "category": "Critical Deadline",
+      "description": "High-risk AI embedded within regulated products covered by Annex I legislation becomes fully subject to AI Act requirements. Includes AI integrated into regulated machinery, transport systems, medical products, and industrial technologies. The EU compliance framework reaches near-full implementation.",
+      "impact": "CRITICAL. Full AI Act coverage. All high-risk AI systems in regulated products must comply.",
+      "link": "https://www.regulation-ai.eu/en/ai-act",
+      "linkLabel": "Regulation AI: Complete AI Act Compliance Timeline"
+    },
+    {
+      "date": "2030-01-01",
+      "label": "By 2030",
+      "title": "UK & EU: Expected Developments Through 2030",
+      "jurisdiction": "Both",
+      "category": "Future Outlook",
+      "description": "Expected developments include: increasing UK AI legislation (additional regulator powers, statutory reporting, sector-specific requirements), expansion of AI auditing requirements (independent model audits, algorithmic impact assessments, bias testing), increased liability for AI-generated decisions, AI supply chain governance, and convergence around global standards (transparency, accountability, safety testing, human oversight).",
+      "impact": "Build governance structures now — don't wait for legislation. The organisations most likely to succeed are those building compliance before it becomes mandatory.",
+      "link": "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai",
+      "linkLabel": "EC: AI Regulatory Framework Overview"
+    }
+  ]
+}

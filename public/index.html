@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gaming Competitive Intelligence — Tencent Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Tencent Maps Security Proxy Config (must be set before SDK loads) -->
+  <script>
+    window._TMapSecurityConfig = {
+      serviceHost: 'http://127.0.0.1:__WB_HTTP_PORT__/_TMapService/_wbt/__WB_TMAP_SECRET__',
+    };
+  </script>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="logo-icon">&#x1F3AE;</span>
+        <span class="logo-text">Insights Tool</span>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="knowledge-base">
+          Knowledge Base
+        </button>
+        <button class="nav-btn" data-view="news-view">
+          News
+        </button>
+        <button class="nav-btn" data-view="search-view">
+          Search
+        </button>
+        <button class="nav-btn" data-view="reports">
+          Reports
+        </button>
+        <button class="nav-btn" data-view="spider-web">
+          Competitor Web
+        </button>
+        <button class="nav-btn" data-view="tencent-products">
+          Tencent Products
+        </button>
+        <button class="nav-btn" data-view="gaming-trends">
+          AI Gaming Trends
+        </button>
+        <button class="nav-btn" data-view="current-use-cases">
+          Current Use Cases
+        </button>
+        <button class="nav-btn" data-view="regulatory-timeline">
+          AI Regulatory Timeline
+        </button>
+        <button class="nav-btn" data-view="risks">
+          Risks
+        </button>
+        <button class="nav-btn" data-view="company-map">
+          Company Map
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="api-status" id="apiStatus">
+          <span class="status-dot"></span>
+          <span class="status-label">Checking API...</span>
+        </div>
+        <button class="settings-btn" id="settingsBtn">&#x2699; Settings</button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- ===== NEWS VIEW ===== -->
+      <section class="view" id="news-view">
+        <header class="page-header">
+          <h1>Tencent Gaming Competitive Intelligence</h1>
+          <p class="subtitle">Tracking competitor moves in gaming technology</p>
+          <div class="header-actions">
+            <button class="btn btn-primary" id="refreshNewsBtn">
+              <span class="btn-icon">&#x21BB;</span> Refresh News
+            </button>
+            <span class="last-updated" id="lastUpdated"></span>
+          </div>
+        </header>
+
+        <!-- Stats Cards -->
+        <div class="stats-row" id="statsRow">
+          <div class="stat-card">
+            <div class="stat-value" id="articleCount">--</div>
+            <div class="stat-label">Articles Tracked</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="competitorCount">--</div>
+            <div class="stat-label">Competitors Monitored</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="reportCount">0</div>
+            <div class="stat-label">Reports Generated</div>
+          </div>
+        </div>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="news-view">
+          <button class="sub-tab-btn active" data-target="newsFeedSection">Recent News &amp; Updates</button>
+        </div>
+
+        <!-- News Feed -->
+        <div class="section" id="newsFeedSection">
+          <div class="section-header">
+            <h2>Recent News &amp; Updates</h2>
+            <div class="filter-tags" id="filterTags"></div>
+          </div>
+          <div class="news-feed" id="newsFeed">
+            <div class="loading-state">
+              <div class="spinner"></div>
+              <p>Fetching latest competitor news...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== SEARCH VIEW ===== -->
+      <section class="view" id="search-view">
+        <header class="page-header">
+          <h1>Search &amp; Scrape</h1>
+          <p class="subtitle">Search the web for specific competitive intelligence</p>
+        </header>
+
+        <div class="search-box">
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="e.g., NetEase AI game engine partnership 2026"
+            class="search-input"
+          />
+          <button class="btn btn-primary" id="searchBtn">
+            <span class="btn-icon">&#x1F50D;</span> Search
+          </button>
+          <select id="searchLimit" class="select-input">
+            <option value="5">5 results</option>
+            <option value="10" selected>10 results</option>
+            <option value="20">20 results</option>
+          </select>
+        </div>
+
+        <div class="direct-source-box">
+          <div class="direct-source-copy">
+            <strong>Extract a specific source</strong>
+            <span>Paste an article, webpage, YouTube video, or page with an embedded caption track.</span>
+          </div>
+          <div class="direct-source-actions">
+            <input type="url" id="directSourceUrl" class="text-input" placeholder="https://example.com/article or https://youtube.com/watch?v=..." />
+            <button class="btn btn-primary" id="scrapeDirectSource" type="button">Extract text</button>
+            <button class="btn btn-accent" id="addDirectSourceToReport" type="button">+ Report</button>
+          </div>
+        </div>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="search-view">
+          <button class="sub-tab-btn active" data-target="searchResultsSection">Search Results</button>
+          <button class="sub-tab-btn" data-target="scrapeSection">Scraped Content</button>
+        </div>
+
+        <!-- Search Results -->
+        <div class="search-results" id="searchResultsSection">
+          <div class="empty-state">
+            <div class="empty-icon">&#x1F50D;</div>
+            <p>Enter a search query above to discover competitor intelligence</p>
+          </div>
+        </div>
+
+        <!-- Scrape Panel -->
+        <div class="scrape-panel" id="scrapeSection" style="display:none;">
+          <div class="panel-header">
+            <h3>Scraped Content</h3>
+            <button class="btn btn-sm" id="closeScrape">&#x2715;</button>
+          </div>
+          <div class="panel-body" id="scrapedContent">
+            <div class="loading-state"><div class="spinner"></div></div>
+          </div>
+          <div class="panel-footer">
+            <button class="btn btn-accent" id="addToReport">+ Add to Report</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== REPORTS VIEW ===== -->
+      <section class="view" id="reports">
+        <header class="page-header">
+          <h1>Summarized Reports</h1>
+          <p class="subtitle">Generate and review intelligence reports from scraped data</p>
+        </header>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="reports">
+          <button class="sub-tab-btn active" data-target="reportBuilderSection">New Report</button>
+          <button class="sub-tab-btn" data-target="savedReportsSection">Saved Reports</button>
+        </div>
+
+        <!-- Report Builder -->
+        <div class="report-builder" id="reportBuilderSection">
+          <div class="builder-header">
+            <h3>New Report</h3>
+          </div>
+          <div class="builder-body">
+            <input
+              type="text"
+              id="reportTitle"
+              placeholder="Report name"
+              class="text-input"
+            />
+            <div class="report-source-entry">
+              <input type="url" id="reportSourceUrl" class="text-input" placeholder="Paste an article or video URL to add directly..." />
+              <button class="btn btn-sm" id="reportAddSourceBtn" type="button">Add source</button>
+            </div>
+            <div class="url-list" id="urlList">
+              <p class="hint">Add website or video URLs. Public video captions are extracted as transcripts when available.</p>
+            </div>
+            <button class="btn btn-primary" id="generateReportBtn">
+              <span class="btn-icon">&#x1F4DD;</span> Generate Report
+            </button>
+          </div>
+        </div>
+
+        <!-- Report Result -->
+        <div class="report-result" id="reportResult" style="display:none;">
+          <div class="report-header">
+            <h2 id="reportResultTitle"></h2>
+            <span class="report-date" id="reportDate"></span>
+          </div>
+          <div class="report-findings">
+            <h3>Key Findings</h3>
+            <ul id="reportFindings"></ul>
+          </div>
+          <div class="report-themes" id="reportThemes"></div>
+          <div class="report-sources">
+            <h3>Source Summaries</h3>
+            <ul id="reportSources"></ul>
+          </div>
+          <div class="report-full" id="reportFull" style="display:none;">
+            <h3>Cohesive Report</h3>
+            <div id="reportFullContent"></div>
+          </div>
+          <button class="btn btn-sm" id="toggleFullContent">Show Cohesive Report</button>
+        </div>
+
+        <!-- Saved Reports -->
+        <div class="section" id="savedReportsSection">
+          <h3>Saved Reports</h3>
+          <div id="savedReportsList">
+            <p class="hint">No saved reports yet</p>
+          </div>
+        </div>
+      </section>
+      <!-- ===== KNOWLEDGE BASE VIEW ===== -->
+      <section class="view active" id="knowledge-base">
+        <header class="page-header">
+          <h1>Knowledge Base</h1>
+          <p class="subtitle">AI Regulations, Competitor Profiles, Technology Insights &amp; Tencent Strategy — sourced from proprietary research documents</p>
+        </header>
+
+        <!-- Search -->
+        <div class="search-box">
+          <input
+            type="text"
+            id="kbSearchInput"
+            placeholder="Search knowledge base... e.g. EU AI Act, Stability AI, runtime generative, watermarking"
+            class="search-input"
+          />
+          <button class="btn btn-primary" id="kbSearchBtn">
+            <span class="btn-icon">&#x1F50D;</span> Search
+          </button>
+          <button class="btn btn-sm" id="kbClearBtn">Clear</button>
+        </div>
+
+        <!-- Category Tabs -->
+        <div class="kb-categories" id="kbCategories"></div>
+
+        <!-- Timeline Toggle (shown only for timeline category) -->
+        <div class="timeline-toggle-bar" id="timelineToggleBar" style="display:none;">
+          <button class="btn btn-sm timeline-view-btn active" data-timeline-view="list">&#x1F4CB; List View</button>
+          <button class="btn btn-sm timeline-view-btn" data-timeline-view="visual">&#x1F4C5; Timeline View</button>
+        </div>
+
+        <!-- Content Area -->
+        <div class="kb-content" id="kbContent">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading knowledge base...</p>
+          </div>
+        </div>
+      </section>
+      <!-- ===== SPIDER-WEB COMPETITOR DIAGRAM ===== -->
+      <section class="view" id="spider-web">
+        <header class="page-header">
+          <h1>Competitor Technology Web</h1>
+          <p class="subtitle">Interactive network diagram connecting competitors by shared technology sectors. Coloured by sector, Tencent at centre.</p>
+        </header>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="spider-web">
+          <button class="sub-tab-btn active" data-target="spiderContainerSection">Competitor Network</button>
+        </div>
+
+        <div class="spider-navigation-panel">
+          <div class="spider-toolbar" aria-label="Diagram navigation controls">
+            <button class="spider-tool-btn" id="spiderZoomOut" type="button" title="Zoom out">&#8722;</button>
+            <span class="spider-zoom-level" id="spiderZoomLevel">100%</span>
+            <button class="spider-tool-btn" id="spiderZoomIn" type="button" title="Zoom in">+</button>
+            <button class="spider-tool-btn spider-tool-wide" id="spiderResetView" type="button">Reset view</button>
+            <label class="spider-peer-toggle">
+              <input type="checkbox" id="spiderPeerToggle" />
+              <span>Peer links</span>
+            </label>
+            <button class="spider-tool-btn spider-tool-wide" id="spiderShowAll" type="button">Show all groups</button>
+          </div>
+          <div class="spider-tips">Drag the canvas to pan &middot; Use the mouse wheel or controls to zoom &middot; Select a sector to hide its group</div>
+        </div>
+
+        <div class="spider-controls">
+          <div class="spider-legend" id="spiderLegend" aria-label="Sector visibility controls"></div>
+        </div>
+
+        <div class="spider-container" id="spiderContainerSection">
+          <div class="loading-state" id="spiderLoading">
+            <div class="spinner"></div>
+            <p>Building competitor network...</p>
+          </div>
+        </div>
+
+        <div class="spider-detail" id="spiderDetail" style="display:none;">
+          <div class="detail-close" id="spiderDetailClose">&#x2715;</div>
+          <h3 id="spiderDetailName"></h3>
+          <div id="spiderDetailSectors"></div>
+        </div>
+      </section>
+      <!-- ===== TENCENT PRODUCTS SPIDER-WEB ===== -->
+      <section class="view" id="tencent-products">
+        <header class="page-header">
+          <h1>Tencent AI &amp; Gaming Products</h1>
+          <p class="subtitle">Interactive network of Tencent's AI, gaming, creative, and cloud products — coloured by sector. Connect to explore the product ecosystem.</p>
+        </header>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="tencent-products">
+          <button class="sub-tab-btn active" data-target="tencentProductsContainerSection">Product Map</button>
+        </div>
+
+        <div class="spider-controls">
+          <div class="spider-legend" id="tencentProductsLegend"></div>
+          <div class="spider-tips">
+            <span class="tip">&#x1F4A1; Hover nodes for product details &middot; Coloured by sector</span>
+          </div>
+        </div>
+
+        <div class="spider-container" id="tencentProductsContainerSection">
+          <div class="loading-state" id="tencentProductsLoading">
+            <div class="spinner"></div>
+            <p>Building Tencent product map...</p>
+          </div>
+        </div>
+
+        <div class="spider-detail" id="tencentProductsDetail" style="display:none;">
+          <div class="detail-close" id="tencentProductsDetailClose">&#x2715;</div>
+          <h3 id="tencentProductsDetailName"></h3>
+          <div id="tencentProductsDetailSectors"></div>
+          <p id="tencentProductsDetailDesc" class="detail-desc"></p>
+          <a id="tencentProductsDetailLink" class="tp-detail-link" target="_blank" rel="noopener" style="display:none;">&#x1F517; Visit product page</a>
+        </div>
+      </section>
+
+      <!-- ===== AI REGULATORY TIMELINE ===== -->
+      <section class="view" id="regulatory-timeline">
+        <header class="page-header">
+          <h1>AI Regulatory Timeline</h1>
+          <p class="subtitle">Key compliance deadlines and milestones for the EU AI Act, UK ICO roadmap, and related digital regulation — 2024 through 2030</p>
+        </header>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="regulatory-timeline">
+          <button class="sub-tab-btn active" data-target="regulatoryTimelineContentSection">Regulatory Timeline</button>
+        </div>
+
+        <div class="timeline-filters" id="timelineFilters">
+          <button class="btn btn-sm timeline-filter-btn active" data-filter="all">All</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="EU">&#x1F1EA&#x1F1FA EU</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="UK">&#x1F1EC&#x1F1E7 UK</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="Both">&#x1F310 Both</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="Critical Deadline">&#x26A0; Critical</button>
+        </div>
+
+        <div class="regulatory-timeline-content" id="regulatoryTimelineContentSection">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading regulatory timeline...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== AI GAMING TRENDS ===== -->
+      <section class="view" id="gaming-trends">
+        <header class="page-header">
+          <h1>AI Gaming Trends</h1>
+          <p class="subtitle">How LLMs and generative AI are being integrated into video games — expanded from the 9 trends in the Knowledge Base with live internet research</p>
+        </header>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="gaming-trends">
+          <button class="sub-tab-btn active" data-target="trendsEcosystemSection">Ecosystem Overview</button>
+          <button class="sub-tab-btn" data-target="trendsCurrentUsesSection">Current Shipped Uses</button>
+          <button class="sub-tab-btn" data-target="trendsPatentsSection">Game Technology Patents</button>
+          <button class="sub-tab-btn" data-target="trendsGridSection">Trend Analysis</button>
+        </div>
+
+        <!-- Ecosystem Summary -->
+        <div class="trends-ecosystem" id="trendsEcosystemSection"></div>
+
+        <!-- Current Shipped Uses -->
+        <div class="trends-current-uses" id="trendsCurrentUsesSection"></div>
+
+        <!-- Patent Landscape -->
+        <div class="trends-patents" id="trendsPatentsSection"></div>
+
+        <!-- Trend Cards -->
+        <div class="trends-grid" id="trendsGridSection">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading AI gaming trends...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CURRENT AI USE CASES ===== -->
+      <section class="view" id="current-use-cases">
+        <header class="page-header">
+          <h1>Current Use Cases</h1>
+          <p class="subtitle">Game-by-game evidence of how authored AI, procedural simulation, machine learning, and generative AI are used in released, announced, and community-built experiences</p>
+        </header>
+
+        <div class="stats-row use-cases-stats" id="useCasesStats">
+          <div class="stat-card">
+            <div class="stat-value" id="useCasesGameCount">--</div>
+            <div class="stat-label">Games &amp; Projects</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="useCasesCompanyCount">--</div>
+            <div class="stat-label">Developers Represented</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="useCasesGenerativeCount">--</div>
+            <div class="stat-label">Generative / ML Uses</div>
+          </div>
+        </div>
+
+        <div class="use-case-controls">
+          <input type="search" id="useCaseSearch" class="text-input use-case-search" placeholder="Search games, systems, developers, or techniques..." />
+          <select id="useCaseClassFilter" class="select-input">
+            <option value="all">All AI classes</option>
+          </select>
+          <select id="useCaseCategoryFilter" class="select-input">
+            <option value="all">All categories</option>
+          </select>
+        </div>
+
+        <div class="sub-tab-bar" data-view="current-use-cases">
+          <button class="sub-tab-btn active" data-target="useCasePatternsSection">Cross-Game Patterns</button>
+          <button class="sub-tab-btn" data-target="useCaseCatalogueSection">Game Catalogue</button>
+        </div>
+
+        <section class="use-case-patterns" id="useCasePatternsSection">
+          <div class="loading-state"><div class="spinner"></div><p>Loading cross-game patterns...</p></div>
+        </section>
+
+        <section class="use-case-catalogue" id="useCaseCatalogueSection">
+          <div class="use-case-results-header">
+            <h2>Game Catalogue</h2>
+            <span id="useCaseResultCount"></span>
+          </div>
+          <div class="use-case-grid" id="useCaseGrid">
+            <div class="loading-state"><div class="spinner"></div><p>Loading current use cases...</p></div>
+          </div>
+        </section>
+      </section>
+
+      <!-- ===== RISKS ===== -->
+      <section class="view" id="risks">
+        <header class="page-header">
+          <h1>AI Risks &amp; Compliance Exposure</h1>
+          <p class="subtitle">Cross-referenced risk analysis for products and companies — drawn from the Knowledge Base, Competitor Web, EU AI Act, UK regulation, and proprietary research documents</p>
+        </header>
+
+        <!-- Stats Row -->
+        <div class="stats-row" id="risksStatsRow">
+          <div class="stat-card">
+            <div class="stat-value" id="risksCategoryCount">--</div>
+            <div class="stat-label">Risk Categories</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="risksTotalCount">--</div>
+            <div class="stat-label">Individual Risks</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="risksCriticalCount">--</div>
+            <div class="stat-label">Critical Risks</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="risksCompaniesCount">--</div>
+            <div class="stat-label">Companies Affected</div>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="risks-filters" id="risksFilters">
+          <button class="btn btn-sm risks-filter-btn active" data-filter="all">All</button>
+          <button class="btn btn-sm risks-filter-btn" data-filter="critical">🔴 Critical</button>
+          <button class="btn btn-sm risks-filter-btn" data-filter="high">🟠 High</button>
+          <button class="btn btn-sm risks-filter-btn" data-filter="medium">🟡 Medium</button>
+        </div>
+
+        <!-- Sub-tab Navigation -->
+        <div class="sub-tab-bar" data-view="risks">
+          <button class="sub-tab-btn active" data-target="risksCompaniesSection">Company Risk Profiles</button>
+          <button class="sub-tab-btn" data-target="risksCategoriesSection">Risk Categories &amp; Analysis</button>
+        </div>
+
+        <!-- Company Risk Summaries -->
+        <div class="section" id="risksCompaniesSection">
+          <div class="section-header">
+            <h2>Company Risk Profiles</h2>
+            <span class="section-hint">Key risk exposure summaries for major competitors</span>
+          </div>
+          <div class="risks-companies-grid" id="risksCompaniesGrid">
+            <div class="loading-state">
+              <div class="spinner"></div>
+              <p>Loading risk profiles...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Risk Categories -->
+        <div class="section" id="risksCategoriesSection">
+          <div class="section-header">
+            <h2>Risk Categories &amp; Detailed Analysis</h2>
+            <span class="section-hint">Cross-referenced with Knowledge Base, Competitor Web, and regulatory documents</span>
+          </div>
+          <div class="risks-categories" id="risksCategories">
+            <div class="loading-state">
+              <div class="spinner"></div>
+              <p>Loading risk analysis...</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== COMPANY MAP ===== -->
+      <section class="view" id="company-map">
+        <header class="page-header">
+          <h1>Company &amp; Studio Map</h1>
+          <p class="subtitle">Selected development, research, engine, and regulatory locations directly connected to competitor products and current game-AI use cases across the UK, EU, and North America</p>
+        </header>
+
+        <div class="map-stats-row" id="mapStatsRow">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading map data...</p>
+          </div>
+        </div>
+
+        <div class="map-container" id="companyMapContainer"></div>
+
+        <div class="map-legend" id="mapLegend"></div>
+        <p class="map-hint">Hover to preview each office's function. Click a pin to keep the complete role, relevant products, and source links open.</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Settings</h3>
+        <button class="btn btn-sm" id="closeSettings">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Search is powered by DuckDuckGo — completely free, no sign-in required.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

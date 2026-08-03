@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+__pycache__/
+*.pyc
+.workbuddy/
+data/*_raw.txt
+data/doc*.txt

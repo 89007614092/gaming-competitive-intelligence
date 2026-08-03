@@ -1,0 +1,675 @@
+{
+  "title": "Current AI Use Cases in Games",
+  "description": "A consolidated catalogue of shipped, announced, and community-built AI systems in games mentioned in AI Existing Uses.pdf. It distinguishes conventional authored game AI, procedural simulation, machine learning, and generative AI.",
+  "sourceDocument": "AI Existing Uses.pdf",
+  "methodology": "Where the document described a use, the entry preserves and clarifies that claim. Where it named a game without explaining the AI implementation, the entry uses linked official, developer, GDC, patent, academic, or reputable technical sources. Unconfirmed claims are explicitly labelled.",
+  "patterns": [
+    {
+      "title": "Authored decision systems still dominate",
+      "content": "GOAP, behavior trees, utility scoring, finite-state machines, perception models, and designer-authored rules remain the core of most shipped game AI. F.E.A.R., Halo 2, Dishonored 2, Alien: Isolation, and GROUND BRANCH show how these techniques create behavior that appears intelligent without machine learning.",
+      "games": ["F.E.A.R.", "Halo 2", "Dishonored 2", "Alien: Isolation", "GROUND BRANCH"]
+    },
+    {
+      "title": "Persistent simulation creates emergent stories",
+      "content": "A-Life, Radiant AI, the Nemesis System, AI Storytellers, and procedural citizen systems simulate agents or world state beyond a single encounter. Their value is not generated dialogue alone, but relationships, schedules, memory, hierarchy, and consequences that persist over time.",
+      "games": ["S.T.A.L.K.E.R.: Shadow of Chernobyl", "The Elder Scrolls IV: Oblivion", "Middle-earth: Shadow of Mordor", "RimWorld", "Watch Dogs: Legion"]
+    },
+    {
+      "title": "Adaptation increasingly targets the individual player",
+      "content": "Directors, preparedness systems, predictive traps, adaptive difficulty, and personalized audio respond to play style or current performance. Left 4 Dead, Metal Gear Solid V, Will You Snail?, and RimWorld use different forms of player-responsive pacing without requiring generative AI.",
+      "games": ["Left 4 Dead", "Metal Gear Solid V: The Phantom Pain", "Will You Snail?", "RimWorld"]
+    },
+    {
+      "title": "Machine learning is strongest in bounded subsystems",
+      "content": "Confirmed machine-learning deployments are typically narrow and testable, such as ARC Raiders' learned locomotion or generative language in AI Dungeon and Mantella. This differs from unsupported claims that entire NPC populations learn freely at runtime.",
+      "games": ["ARC Raiders", "AI Dungeon", "Skyrim - Mantella AI NPC Mod"]
+    },
+    {
+      "title": "AI also changes production, not only gameplay",
+      "content": "Generative image tools, automated testing, dialogue assistance, animation prediction, voice synthesis, and asset generation increasingly support development pipelines. High on Life is a documented shipped example of Midjourney-assisted art, while Ubisoft Ghostwriter and Xbox QA illustrate broader production use.",
+      "games": ["High on Life"]
+    }
+  ],
+  "games": [
+    {
+      "id": "fear",
+      "game": "F.E.A.R.",
+      "developer": "Monolith Productions",
+      "publisher": "Vivendi Universal Games",
+      "releaseStatus": "Released",
+      "aiClass": "Authored game AI",
+      "categories": ["Combat AI", "GOAP", "Squad Tactics"],
+      "namedSystem": "Goal-Oriented Action Planning (GOAP)",
+      "summary": "Enemy soldiers plan action sequences at runtime, selecting cover, suppression, repositioning, smart-object use, and recovery actions as circumstances change.",
+      "details": "F.E.A.R. combines STRIPS-inspired GOAP with pathfinding, animation, smart objects, squad orders, and contextual dialogue. The system's emergent replanning makes enemies appear to flank or coordinate even though those outcomes often arise from cover selection and level geometry rather than a single scripted flank command.",
+      "documentReference": "Page 1 - lightweight AI / F.E.A.R.",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["dynamic-pacing", "contextual-framing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Jeff Orkin - Three States and a Plan: The AI of F.E.A.R. (GDC 2006)", "url": "https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf"}
+      ]
+    },
+    {
+      "id": "halo-2",
+      "game": "Halo 2",
+      "developer": "Bungie",
+      "publisher": "Microsoft Game Studios",
+      "releaseStatus": "Released",
+      "aiClass": "Authored game AI",
+      "categories": ["Behavior Trees", "Combat AI", "Perception"],
+      "namedSystem": "Hierarchical behavior DAG",
+      "summary": "Combatants select self-preservation, search, vehicle, combat, and character-specific behaviors through a hierarchical decision structure informed by imperfect knowledge of the world.",
+      "details": "Designer-authored orders, styles, squads, firing positions, stimulus responses, and perceived-world records let Halo 2 combine tactical autonomy with controlled encounter design. The architecture is commonly recognised as an important predecessor to modern behavior trees.",
+      "documentReference": "Page 1 - Halo 2",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["dynamic-info-networks", "contextual-framing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Damian Isla - Handling Complexity in the Halo 2 AI (GDC 2005)", "url": "https://www.gamedeveloper.com/programming/gdc-2005-proceeding-handling-complexity-in-the-i-halo-2-i-ai"}
+      ]
+    },
+    {
+      "id": "oblivion",
+      "game": "The Elder Scrolls IV: Oblivion",
+      "developer": "Bethesda Game Studios",
+      "publisher": "Bethesda Softworks / 2K Games",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["NPC Schedules", "Goal Planning", "World Simulation"],
+      "namedSystem": "Radiant AI",
+      "summary": "NPCs follow schedules and goals for work, food, travel, social activity, and sleep, selecting actions and usable objects instead of relying on a script for every movement.",
+      "details": "Radiant AI gave non-player characters packages and goals that could resolve through different objects or routes. The retail implementation was constrained compared with early demonstrations, but it established Bethesda's schedule-driven approach to populated worlds.",
+      "documentReference": "Page 1 - Bethesda Radiant AI",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["world-state-propagation", "dynamic-info-networks"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "IGN - The Elder Scrolls IV: Oblivion interview", "url": "https://www.ign.com/articles/2004/11/23/the-elder-scrolls-iv-oblivion-2"}
+      ]
+    },
+    {
+      "id": "fallout-3",
+      "game": "Fallout 3",
+      "developer": "Bethesda Game Studios",
+      "publisher": "Bethesda Softworks",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["NPC Packages", "Companion AI", "World Simulation"],
+      "namedSystem": "Radiant AI / GECK AI Packages",
+      "summary": "Conditional AI packages control travel, patrols, guards, sandbox activity, eating, sleeping, following, dialogue, ambushes, fleeing, and object use.",
+      "details": "The package system combines schedules, conditions, navigation, greetings, conversations, combat continuation, and off-screen processing to generate everyday routines and quest behavior from reusable components.",
+      "documentReference": "Page 1 - later Bethesda games",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Fallout 3 GECK documentation - AI Packages", "url": "https://geckwiki.com/index.php?title=Category:Packages"}
+      ]
+    },
+    {
+      "id": "skyrim",
+      "game": "The Elder Scrolls V: Skyrim",
+      "developer": "Bethesda Game Studios",
+      "publisher": "Bethesda Softworks",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["Reactive Quests", "NPC Schedules", "Relationships"],
+      "namedSystem": "Radiant AI and Radiant Story",
+      "summary": "NPC routines reflect occupation, location, relationships, ownership, and player conduct, while Radiant Story fills quest templates with suitable actors, relationships, and locations.",
+      "details": "The story manager can respond to deaths, theft, dropped objects, skills, friendships, and grudges. It provides procedural variation within authored quest structures rather than unrestricted story generation.",
+      "documentReference": "Page 1 - Skyrim / Radiant AI",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["world-state-propagation", "contextual-framing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Game Informer - The technology behind Skyrim", "url": "https://www.gameinformer.com/games/the_elder_scrolls_v_skyrim/b/xbox360/archive/2011/01/17/the-technology-behind-elder-scrolls-v-skyrim.aspx"}
+      ]
+    },
+    {
+      "id": "skyrim-mantella",
+      "game": "Skyrim - Mantella AI NPC Mod",
+      "developer": "Art From The Machine / community project",
+      "publisher": "Community mod",
+      "releaseStatus": "Released mod",
+      "aiClass": "Generative AI",
+      "categories": ["LLM NPCs", "Speech Recognition", "Voice Synthesis", "Memory"],
+      "namedSystem": "Mantella",
+      "summary": "Players speak naturally to NPCs; speech is transcribed, an LLM produces an in-character response using game context, and text-to-speech voices the reply.",
+      "details": "The original pipeline combined Whisper, ChatGPT, and xVASynth, with conversation summaries providing compact memory for future prompts. It is a third-party mod rather than an official Bethesda system and introduces moderation, privacy, voice-rights, and operating-cost considerations.",
+      "documentReference": "Page 2 - Skyrim mod powered by ChatGPT",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["long-term-memory", "in-fiction-narrator"],
+      "riskRefs": ["npc-1", "npc-3", "cp-3"],
+      "sources": [
+        {"label": "Mantella official GitHub repository", "url": "https://github.com/art-from-the-machine/Mantella"},
+        {"label": "IGN - Skyrim mod gives NPCs memory and endless dialogue", "url": "https://www.ign.com/articles/skyrim-mod-uses-chatgpt-and-other-ai-tools-to-give-npcs-a-memory-and-endless-things-to-say"}
+      ]
+    },
+    {
+      "id": "shadow-of-mordor",
+      "game": "Middle-earth: Shadow of Mordor",
+      "developer": "Monolith Productions",
+      "publisher": "Warner Bros. Interactive Entertainment",
+      "releaseStatus": "Released",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["Persistent NPCs", "Memory", "Emergent Narrative"],
+      "namedSystem": "Nemesis System",
+      "summary": "Procedurally configured Orc captains persist across encounters, remember outcomes, reference prior events, gain rank or traits, develop scars, and turn player defeat into personal rivalries.",
+      "details": "The system combines character generation, hierarchy simulation, memory flags, adaptive dialogue, and procedural progression to create player-specific antagonists and stories.",
+      "documentReference": "Page 1 - Nemesis System",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["long-term-memory", "world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Game Developer - Designing Shadow of Mordor's Nemesis System", "url": "https://www.gamedeveloper.com/design/designing-i-shadow-of-mordor-i-s-nemesis-system"},
+        {"label": "Nemesis System patent US10926179B2", "url": "https://patents.google.com/patent/US10926179B2/en"}
+      ]
+    },
+    {
+      "id": "shadow-of-war",
+      "game": "Middle-earth: Shadow of War",
+      "developer": "Monolith Productions",
+      "publisher": "Warner Bros. Interactive Entertainment",
+      "releaseStatus": "Released",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["Social Hierarchy", "Followers", "Emergent Narrative"],
+      "namedSystem": "Expanded Nemesis System",
+      "summary": "The sequel extends persistent rivalries into followers, betrayals, tribes, bodyguards, overlords, dynamic fort leadership, and cross-player vendettas.",
+      "details": "Longer-lived relationships and social roles turn the simulated Orc hierarchy into a source of recruitment stories, loyalty events, betrayal, and personalised stronghold conflicts.",
+      "documentReference": "Page 1 - Mordor games",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["long-term-memory", "political-weather"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Game Developer - How Shadow of War's Nemesis System was designed", "url": "https://www.gamedeveloper.com/design/video-how-the-nemesis-system-in-i-shadow-of-war-i-was-designed"}
+      ]
+    },
+    {
+      "id": "gta-vi",
+      "game": "Grand Theft Auto VI",
+      "developer": "Rockstar Games",
+      "publisher": "Rockstar Games",
+      "releaseStatus": "Announced / unreleased",
+      "aiClass": "Unconfirmed",
+      "categories": ["No Confirmed Public Use"],
+      "namedSystem": "None publicly confirmed",
+      "summary": "Rockstar has not publicly confirmed a machine-learning NPC architecture for GTA VI. Claims that the game will ship with learning NPCs should currently be treated as speculation.",
+      "details": "Take-Two patent activity describes technologies such as navigation and virtual-world behavior, but a patent does not prove that a feature is implemented in GTA VI. This entry deliberately separates verified product information from inference.",
+      "documentReference": "Page 1 - GTA 6 may have machine-learning NPCs",
+      "evidenceOrigin": "Web fact-check",
+      "trendRefs": [],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Official Grand Theft Auto VI page", "url": "https://www.rockstargames.com/VI"},
+        {"label": "Take-Two patent US11684855B2", "url": "https://patents.google.com/patent/US11684855B2/en"}
+      ]
+    },
+    {
+      "id": "red-dead-redemption-2",
+      "game": "Red Dead Redemption 2",
+      "developer": "Rockstar Studios",
+      "publisher": "Rockstar Games",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["Animal AI", "Utility AI", "Procedural Animation"],
+      "namedSystem": "Horse motivation and locomotion system",
+      "summary": "Horse AI predicts terrain, avoids collisions and cliffs, selects gait-aware movement, synchronises rider animation, and responds to predators, gunfire, injury, fatigue, and treatment.",
+      "details": "A utility-like motivation system changes animation and responsiveness according to the horse's internal state and environment. The wider game also uses large-scale authored NPC and wildlife simulation, but claims that characters freely change beliefs or learn remain unsupported.",
+      "documentReference": "Page 1 - multidimensional NPCs and 200 animal species",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["contextual-framing", "world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "GDC Vault - Making the Believable Horse of Red Dead Redemption II", "url": "https://gdcvault.com/play/1027113/AI-Summit-Making-the-Believable"},
+        {"label": "Game Developer - Rockstar's quest for the ultimate video game horse", "url": "https://gamedeveloper.com/design/rockstar-s-quest-for-the-ultimate-video-game-horse"}
+      ]
+    },
+    {
+      "id": "kingdom-come-deliverance",
+      "game": "Kingdom Come: Deliverance",
+      "developer": "Warhorse Studios",
+      "publisher": "Deep Silver",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["NPC Schedules", "Fallback Planning", "World Simulation"],
+      "namedSystem": "Emergent daily-life simulation",
+      "summary": "NPCs follow daily cycles and react to disrupted world conditions, using fallback plans when expected people, locations, or services are unavailable.",
+      "details": "Warhorse described routines capable of producing unscripted outcomes from world state and player actions, such as selecting alternatives or reporting a dead character. Specific pre-release examples should not automatically be assumed to ship exactly as demonstrated.",
+      "documentReference": "Page 1 - Kingdom Come: Deliverance",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "PC Gamer - Kingdom Come: Deliverance preview and AI interview", "url": "https://www.pcgamer.com/kingdom-come-deliverance-preview-the-fantasy-shunning-feudal-rpg/"}
+      ]
+    },
+    {
+      "id": "stalker-shadow-of-chernobyl",
+      "game": "S.T.A.L.K.E.R.: Shadow of Chernobyl",
+      "developer": "GSC Game World",
+      "publisher": "THQ / GSC Game World",
+      "releaseStatus": "Released",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["Artificial Life", "World Simulation", "Navigation"],
+      "namedSystem": "A-Life",
+      "summary": "A-Life maintains NPCs beyond the player's immediate area through lower-detail offline simulation, switching nearby actors into detailed online behavior.",
+      "details": "Global navigation, encounters, goals, smart terrains, faction bases, and ambient routines create the impression of a living Zone. Some ambitious GOAP, inventory, and autonomous-quest features discussed during development were cut and are not attributed here to the retail game.",
+      "documentReference": "Page 1 - A-Life",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["world-state-propagation", "dynamic-info-networks"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Game Developer - Inside the AI of S.T.A.L.K.E.R.", "url": "https://www.gamedeveloper.com/pc/interview-inside-the-ai-of-i-s-t-a-l-k-e-r-i-"}
+      ]
+    },
+    {
+      "id": "civilization-vi",
+      "game": "Civilization VI",
+      "developer": "Firaxis Games",
+      "publisher": "2K",
+      "releaseStatus": "Released",
+      "aiClass": "Authored strategy AI",
+      "categories": ["Strategic Planning", "Behavior Trees", "Diplomacy"],
+      "namedSystem": "Goal-oriented AI and leader agendas",
+      "summary": "Computer civilisations use goal-oriented behavior-tree logic for multi-step planning, while historical and randomised leader agendas shape diplomacy and strategic personality.",
+      "details": "The design includes technology-boost planning, agenda-driven relationships, and composed barbarian responses in which scouts can discover cities and trigger attack forces from camps.",
+      "documentReference": "Page 1 - Civilization VI",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["political-weather", "pressure-cooker"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "GamesBeat - Firaxis on Civilization VI AI", "url": "https://gamesbeat.com/why-firaxis-decided-to-make-drastic-changes-to-cities-in-civilization-vi"},
+        {"label": "IGN - Hidden agendas and improved AI in Civilization VI", "url": "https://uk.ign.com/articles/2016/08/03/hidden-agendas-and-improved-ai-in-civilization-6"}
+      ]
+    },
+    {
+      "id": "dishonored-2",
+      "game": "Dishonored 2",
+      "developer": "Arkane Lyon",
+      "publisher": "Bethesda Softworks",
+      "releaseStatus": "Released",
+      "aiClass": "Authored game AI",
+      "categories": ["Squad Coordination", "Stealth AI", "Influence Maps"],
+      "namedSystem": "Crew AI and influence-map pursuit",
+      "summary": "An overarching crew AI groups NPCs and assigns roles during searches and combat, while an influence-map flooding algorithm creates plausible pursuit routes after guards lose sight of the player.",
+      "details": "Individual agents retain local behavior, and a data-driven rule system selects attacks, dialogue, and animation. The result supports coordinated but readable stealth encounters.",
+      "documentReference": "Page 1 - Dishonored 2",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["dynamic-info-networks", "pressure-cooker"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "GDC Vault - Taking Back What's Ours: The AI of Dishonored 2", "url": "https://www.gdcvault.com/play/1024660/Taking-Back-What-s-Ours"},
+        {"label": "Game AI Pro - Flooding the Influence Map for Chase in Dishonored 2", "url": "http://www.gameaipro.com/GameAIProOnlineEdition2021/GameAIProOnlineEdition2021_Chapter06_Flooding_the_Influence_Map_for_Chase_in_Dishonored_2.pdf"}
+      ]
+    },
+    {
+      "id": "metal-gear-solid-v",
+      "game": "Metal Gear Solid V: The Phantom Pain",
+      "developer": "Kojima Productions",
+      "publisher": "Konami",
+      "releaseStatus": "Released",
+      "aiClass": "Adaptive authored AI",
+      "categories": ["Player Modeling", "Dynamic Difficulty", "Enemy Adaptation"],
+      "namedSystem": "Enemy preparedness system",
+      "summary": "The game tracks recurring player tactics and changes enemy equipment and preparation, adding helmets, night vision, lights, snipers, cameras, mines, armor, or stronger weapons as counters.",
+      "details": "Often called the Revenge System by players, this is best understood as persistent statistics and authored counter-rules rather than machine learning that invents new tactics.",
+      "documentReference": "Page 1 - adapts to player tactics / pattern recognition",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["dynamic-pacing", "contextual-framing"],
+      "riskRefs": ["hr-3"],
+      "sources": [
+        {"label": "Konami support - Enemy Preparedness in The Phantom Pain", "url": "https://eu-support.konami.com/hc/change_language/it?return_to=%2Fhc%2Fit%2Farticles%2F9667929703191-The-Phantom-Pain-Preparazione-del-nemico"}
+      ]
+    },
+    {
+      "id": "rain-world",
+      "game": "Rain World",
+      "developer": "Videocult",
+      "publisher": "Adult Swim Games / Akupara Games",
+      "releaseStatus": "Released",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["Ecosystem Simulation", "Creature AI", "Procedural Animation"],
+      "namedSystem": "Modular creature trackers and relationship tables",
+      "summary": "Creatures operate within a persistent predator-prey ecosystem, using modules for prey, threats, friends, items, dens, and discomfort to prioritise hunting, fleeing, cooperation, and avoidance.",
+      "details": "Procedural animation makes bodies react to terrain while relationship tables and species-specific behavior create an ecosystem that can continue without the player at its centre.",
+      "documentReference": "Page 1 - Rain World / Overgrowth categories",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Unity - Exploring procedural design in Rain World", "url": "https://unity3d.com/blog/exploring-procedural-design-rain-world"}
+      ]
+    },
+    {
+      "id": "arc-raiders",
+      "game": "ARC Raiders",
+      "developer": "Embark Studios",
+      "publisher": "Embark Studios",
+      "releaseStatus": "Released",
+      "aiClass": "Machine learning plus authored AI",
+      "categories": ["Reinforcement Learning", "Locomotion", "Voice Synthesis"],
+      "namedSystem": "Learned locomotion controllers",
+      "summary": "Selected multi-legged ARC machines use reinforcement-learned locomotion controllers rewarded for balance, target orientation, efficient movement, and imitation of authored animation.",
+      "details": "Machine learning controls bounded locomotion behavior rather than combat strategy or live adaptation to a specific player. The game also uses contracted-actor text-to-speech for variable ping vocabulary such as item and location names.",
+      "documentReference": "Page 1 - enemies may use ML",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["dynamic-pacing"],
+      "riskRefs": ["cp-3"],
+      "sources": [
+        {"label": "PCGamesN - Embark explains generative AI and ARC systems", "url": "https://www.pcgamesn.com/arc-raiders/generative-ai-use"},
+        {"label": "GamesRadar - ARC Raiders machine-learning locomotion", "url": "https://www.gamesradar.com/games/third-person-shooter/the-arc-in-arc-raiders-have-multiple-brains-and-they-all-love-pursuing-you-because-embark-gives-them-rewards-in-real-time-via-machine-learning-i-learned-to-walk-on-my-own/"}
+      ]
+    },
+    {
+      "id": "will-you-snail",
+      "game": "Will You Snail?",
+      "developer": "Jonas Tyroller",
+      "publisher": "Jonas Tyroller / FondGame / No Gravity Games",
+      "releaseStatus": "Released",
+      "aiClass": "Predictive authored AI",
+      "categories": ["Prediction", "Dynamic Difficulty", "Procedural Challenges"],
+      "namedSystem": "Squid predictive antagonist",
+      "summary": "The antagonist estimates the player's near-future movement and places spikes, projectiles, and traps in response, while automatic difficulty adjustment keeps the challenge aligned with performance.",
+      "details": "Official descriptions substantiate predictive behavior but do not establish neural networks or machine learning. It is therefore classified conservatively as predictive game logic.",
+      "documentReference": "Page 1 - Will You Snail?",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["pressure-cooker", "dynamic-pacing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Official Steam listing - Will You Snail?", "url": "https://store.steampowered.com/app/1115050/Will_You_Snail"}
+      ]
+    },
+    {
+      "id": "ground-branch",
+      "game": "GROUND BRANCH",
+      "developer": "BlackFoot Studios / MicroProse Software",
+      "publisher": "MicroProse Software",
+      "releaseStatus": "Released",
+      "aiClass": "Authored tactical AI",
+      "categories": ["Utility AI", "Tactical AI", "Navigation"],
+      "namedSystem": "Kythera AI integration",
+      "summary": "Kythera provides navigation, cover queries, spatial reasoning, avoidance, and behavior trees, while utility scoring selects fallback actions such as fleeing, crouching, or going prone.",
+      "details": "Bots also use sight and sound perception, suppression, squad behavior, and reactions to bodies. This is a modern tactical implementation of authored AI rather than a large learned model.",
+      "documentReference": "Page 1 - GROUND BRANCH",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["pressure-cooker", "dynamic-pacing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "GROUND BRANCH - v1034 AI release notes", "url": "https://www.groundbranch.com/2024/03/21"},
+        {"label": "GROUND BRANCH - AI overhaul technical preview", "url": "https://www.groundbranch.com/2023/08/16/"}
+      ]
+    },
+    {
+      "id": "last-of-us-part-i",
+      "game": "The Last of Us Part I",
+      "developer": "Naughty Dog",
+      "publisher": "Sony Interactive Entertainment",
+      "releaseStatus": "Released",
+      "aiClass": "Authored game AI",
+      "categories": ["Search AI", "Companion AI", "Pathfinding"],
+      "namedSystem": "Remake AI engine and paired search behaviors",
+      "summary": "The remake applies newer AI systems to formerly scripted encounters, including paired searches, investigation, topographical pathfinding, visibility probes, and improved flanking.",
+      "details": "Companions evaluate cover and enemy sightlines more convincingly, reducing implausible movement while keeping encounters faithful to the original structure.",
+      "documentReference": "Page 1 - The Last of Us Part I",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["dynamic-info-networks"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "PlayStation Blog - Rebuilt gameplay and AI in The Last of Us Part I", "url": "https://blog.playstation.com/?p=367254"}
+      ]
+    },
+    {
+      "id": "last-of-us-part-ii",
+      "game": "The Last of Us Part II",
+      "developer": "Naughty Dog",
+      "publisher": "Sony Interactive Entertainment",
+      "releaseStatus": "Released",
+      "aiClass": "Authored game AI",
+      "categories": ["Perception", "Search AI", "Companion AI", "Melee AI"],
+      "namedSystem": "Vague knowledge awareness state",
+      "summary": "Enemies can hold partial knowledge of the player's location, enabling directional searches without omniscience, while companions assist with stealth kills, rescues, melee, and damage.",
+      "details": "Naughty Dog also built modular melee AI for responsive close combat. The system focuses on believable awareness and coordination rather than machine learning.",
+      "documentReference": "Page 1 - The Last of Us Part II",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["dynamic-info-networks", "pressure-cooker"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "GameSpot - The Last of Us Part II enemy AI upgrade", "url": "https://www.gamespot.com/articles/the-last-of-us-2s-enemy-ai-is-getting-a-big-upgrad/1100-6470119/"},
+        {"label": "GDC Vault - Melee AI in The Last of Us Part II", "url": "https://www.gdcvault.com/play/1027346/Melee-AI-in-The-Last"}
+      ]
+    },
+    {
+      "id": "left-4-dead",
+      "game": "Left 4 Dead",
+      "developer": "Valve / Turtle Rock Studios",
+      "publisher": "Valve",
+      "releaseStatus": "Released",
+      "aiClass": "Adaptive authored AI",
+      "categories": ["AI Director", "Dynamic Pacing", "Procedural Encounters"],
+      "namedSystem": "AI Director",
+      "summary": "The Director estimates survivor intensity and controls population, mob timing, special infected, bosses, and item placement to create structured but unpredictable pacing.",
+      "details": "Navigation meshes and flow distance support spawning and movement, while NextBot controls survivor bots and infected. The Director is rule-based and testable rather than a machine-learning model.",
+      "documentReference": "Page 1 - Left 4 Dead",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["pressure-cooker", "dynamic-pacing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Valve - The AI Systems of Left 4 Dead", "url": "https://steamcdn-a.akamaihd.net/apps/valve/2009/ai_systems_of_l4d_mike_booth.pdf"}
+      ]
+    },
+    {
+      "id": "alien-isolation",
+      "game": "Alien: Isolation",
+      "developer": "Creative Assembly",
+      "publisher": "Sega",
+      "releaseStatus": "Released",
+      "aiClass": "Adaptive authored AI",
+      "categories": ["Director AI", "Enemy AI", "Perception", "Pacing"],
+      "namedSystem": "Director AI and Alien behavior tree",
+      "summary": "A macro director regulates proximity and tension without directly revealing the player, while the Xenomorph's behavior tree uses perception, search, and pathfinding to hunt locally.",
+      "details": "A menace gauge and progressively unlocked behaviors simulate adaptation while preserving uncertainty. It is a layered authored system, not a neural network learning the player at runtime.",
+      "documentReference": "Page 1 - The Perfect Monster in Alien: Isolation",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["pressure-cooker", "dynamic-pacing"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Game Developer - The AI of Alien: Isolation", "url": "https://www.gamedeveloper.com/design/the-perfect-organism-the-ai-of-alien-isolation"},
+        {"label": "nucl.ai - It's in the Vents: The AI of Alien: Isolation", "url": "https://archives.nucl.ai/recording/its-in-the-vents-the-ai-of-alien-isolation/"}
+      ]
+    },
+    {
+      "id": "watch-dogs-2",
+      "game": "Watch Dogs 2",
+      "developer": "Ubisoft Montreal",
+      "publisher": "Ubisoft",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["Crowd AI", "Multi-Agent Coordination", "Emergent Gameplay"],
+      "namedSystem": "Systemic event and coordination AI",
+      "summary": "Civilians, gangs, and police perceive incidents and react according to personality, faction, danger, and role, producing unscripted escalation chains.",
+      "details": "Coordinator systems organise conversations, fights, arrests, and other multi-character activities, while pose matching helps characters enter contextual animation smoothly.",
+      "documentReference": "Page 1 - civilian AI",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["dynamic-info-networks", "world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Game AI Pro - Cinematic Gameplay in Watch Dogs 2", "url": "http://www.gameaipro.com/GameAIProOnlineEdition2021/GameAIProOnlineEdition2021_Chapter08_Cinematic_Gameplay_in_Watchdogs_2_Pose_Matching_and_AI_Coordination.pdf"}
+      ]
+    },
+    {
+      "id": "watch-dogs-legion",
+      "game": "Watch Dogs: Legion",
+      "developer": "Ubisoft Toronto",
+      "publisher": "Ubisoft",
+      "releaseStatus": "Released",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["Procedural Characters", "Schedules", "Social Simulation"],
+      "namedSystem": "Play as Anyone / Census",
+      "summary": "The game generates recruitable Londoners with occupations, traits, homes, relationships, memories, and schedules, making relevant citizens persistent when players engage with them.",
+      "details": "The Census, uprezzing, Deep Profiler, runtime mission casting, recasting, and player-attention systems turn ambient citizens into playable protagonists or recurring adversaries.",
+      "documentReference": "Page 1 - NPC schedules and associates",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["long-term-memory", "world-state-propagation", "personal-curator"],
+      "riskRefs": ["hr-3"],
+      "sources": [
+        {"label": "Game Developer - How Watch Dogs: Legion's Play as Anyone simulation works", "url": "https://www.gamedeveloper.com/design/how-watch-dogs-legion-s-play-as-anyone-simulation-works"}
+      ]
+    },
+    {
+      "id": "dwarf-fortress",
+      "game": "Dwarf Fortress",
+      "developer": "Bay 12 Games",
+      "publisher": "Bay 12 Games / Kitfox Games",
+      "releaseStatus": "Released / ongoing development",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["World Generation", "Agent Simulation", "Emergent Narrative"],
+      "namedSystem": "Procedural history and agent simulation",
+      "summary": "The game generates geography, civilizations, centuries of history, creatures, culture, and art, then simulates agents pursuing work, needs, relationships, combat, and social activities.",
+      "details": "Stories emerge from interacting simulation layers rather than authored plot branches or generative language models. Persistent histories give events and objects long-term context.",
+      "documentReference": "Page 1 - emergent story",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["world-state-propagation", "political-weather"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Bay 12 Games - Dwarf Fortress features", "url": "https://www.bay12games.com/dwarves/features.html"},
+        {"label": "GDC Vault - Dwarf Fortress: A 10-Year Retrospective", "url": "https://www.gdcvault.com/play/1023463/Dwarf-Fortress-A-10-Year"}
+      ]
+    },
+    {
+      "id": "rimworld",
+      "game": "RimWorld",
+      "developer": "Ludeon Studios",
+      "publisher": "Ludeon Studios",
+      "releaseStatus": "Released / ongoing expansion",
+      "aiClass": "Adaptive authored AI",
+      "categories": ["AI Storyteller", "Agent Simulation", "Dynamic Pacing"],
+      "namedSystem": "Cassandra, Phoebe, and Randy AI Storytellers",
+      "summary": "AI Storytellers monitor colony conditions and select raids, weather, traders, and incidents to shape pacing, while colonists react to needs, moods, relationships, injuries, and surroundings.",
+      "details": "Different storytellers apply different pacing philosophies. Event probability and adaptive scaling produce replayable narratives without generating free-form story text.",
+      "documentReference": "Pages 1-2 - AI Storyteller, difficulty, behavior, event probability",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["pressure-cooker", "dynamic-pacing", "in-fiction-narrator"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Official RimWorld systems overview", "url": "https://rimworldgame.com/"}
+      ]
+    },
+    {
+      "id": "kenshi",
+      "game": "Kenshi",
+      "developer": "Lo-Fi Games",
+      "publisher": "Lo-Fi Games",
+      "releaseStatus": "Released",
+      "aiClass": "Procedural simulation AI",
+      "categories": ["Faction Simulation", "Squad AI", "World State"],
+      "namedSystem": "Goal and job packages",
+      "summary": "Autonomous squads and factions patrol, work, trade, fight, capture characters, and maintain settlements while the player is not treated as the world's central actor.",
+      "details": "Faction and settlement states can change after key events, creating a persistent sandbox in which goals, jobs, relations, and world-state flags drive activity.",
+      "documentReference": "Page 1 - Kenshi",
+      "evidenceOrigin": "Web-expanded",
+      "trendRefs": ["world-state-propagation", "political-weather"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Lo-Fi Games - About Kenshi", "url": "https://lofigames.com/about/about-kenshi/"}
+      ]
+    },
+    {
+      "id": "high-on-life",
+      "game": "High on Life",
+      "developer": "Squanch Games",
+      "publisher": "Squanch Games",
+      "releaseStatus": "Released",
+      "aiClass": "Generative AI in production",
+      "categories": ["AI Art", "Asset Ideation", "Production Workflow"],
+      "namedSystem": "Midjourney",
+      "summary": "Developers used Midjourney during production for ideation and some limited in-game or finishing artwork, contributing to the game's deliberately strange visual texture.",
+      "details": "This is a production-pipeline use rather than a runtime gameplay mechanic. It illustrates the disclosure, provenance, copyright, and consumer-trust questions raised when generated imagery ships in a commercial game.",
+      "documentReference": "Page 2 - Midjourney used to create art",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["personal-curator"],
+      "riskRefs": ["cl-1", "cl-2", "cp-1"],
+      "sources": [
+        {"label": "PC Gamer - High on Life creator discusses AI art", "url": "https://www.pcgamer.com/high-on-lifes-creator-says-ai-art-makes-the-game-feel-like-a-strange-alternate-universe/"}
+      ]
+    },
+    {
+      "id": "no-mans-sky",
+      "game": "No Man's Sky",
+      "developer": "Hello Games",
+      "publisher": "Hello Games",
+      "releaseStatus": "Released / ongoing updates",
+      "aiClass": "Procedural content generation",
+      "categories": ["World Generation", "Terrain", "Ecosystem Simulation"],
+      "namedSystem": "Seeded continuous world generation",
+      "summary": "Procedural systems construct planets, terrain, textures, vegetation, fauna, and populations so players can travel seamlessly from space to planetary surfaces.",
+      "details": "The pipeline uses deterministic seeds, voxel-based terrain generation, polygonisation, texturing, population, and simulation. It is algorithmic procedural generation, not a modern generative foundation model.",
+      "documentReference": "Pages 2-3 - procedural universe, ecosystems, terrain, refinement",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["world-state-propagation", "personal-curator"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "GDC Vault - Building Worlds in No Man's Sky", "url": "https://www.gdcvault.com/play/1024265/Building-Worlds-in-No-Man-s"}
+      ]
+    },
+    {
+      "id": "ai-dungeon",
+      "game": "AI Dungeon",
+      "developer": "Latitude / Nick Walton",
+      "publisher": "Latitude",
+      "releaseStatus": "Live service",
+      "aiClass": "Generative AI",
+      "categories": ["LLM Narrative", "Context Retention", "Cloud AI"],
+      "namedSystem": "Language-model-driven interactive fiction",
+      "summary": "Players enter free-form actions and a language model generates the next story passage, enabling narrative paths beyond authored dialogue trees.",
+      "details": "AI Dungeon 2 initially used a fine-tuned GPT-2 model trained on choose-your-own-adventure transcripts. The live service later adopted changing commercial and in-house models, memory systems, moderation, and scalable cloud deployment.",
+      "documentReference": "Pages 2-3 - LLM integration, context, player narrative, cloud",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["long-term-memory", "in-fiction-narrator", "personal-curator"],
+      "riskRefs": ["npc-1", "npc-3", "cl-1"],
+      "sources": [
+        {"label": "Latitude - original AI Dungeon repository", "url": "https://github.com/latitudegames/AIDungeon"},
+        {"label": "BYU PCC - Creating AI Dungeon 2", "url": "https://pcc.cs.byu.edu/2019/11/21/ai-dungeon-2-creating-infinitely-generated-text-adventures-with-deep-learning-language-models/"}
+      ]
+    },
+    {
+      "id": "prison-architect",
+      "game": "Prison Architect",
+      "developer": "Introversion Software / Double Eleven",
+      "publisher": "Paradox Interactive",
+      "releaseStatus": "Released",
+      "aiClass": "Authored simulation AI",
+      "categories": ["Needs Simulation", "Scheduling", "Behavioral Risk"],
+      "namedSystem": "Needs, regime, danger, and contraband simulation",
+      "summary": "Each prisoner has needs, traits, reputations, mood, permissions, and regime-driven activities; unmet needs can lead to contraband seeking, vandalism, escape, violence, or riots.",
+      "details": "Scheduling, pathfinding, danger, suppression, behavioural risk, and event escalation interact to produce crowd behavior and institutional pressure from many individually simulated agents.",
+      "documentReference": "Page 3 - needs, risk assessment, pathfinding, escalation",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["pressure-cooker", "world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Official Prison Architect Wiki - Prisoner", "url": "https://prisonarchitect.paradoxwikis.com/Prisoner"},
+        {"label": "Official Prison Architect Wiki - Needs", "url": "https://prisonarchitect.paradoxwikis.com/Needs"}
+      ]
+    },
+    {
+      "id": "the-long-dark",
+      "game": "The Long Dark",
+      "developer": "Hinterland Studio",
+      "publisher": "Hinterland Studio",
+      "releaseStatus": "Released / ongoing updates",
+      "aiClass": "Authored simulation AI",
+      "categories": ["Wildlife AI", "Scent Tracking", "Environmental Awareness"],
+      "namedSystem": "Wildlife behavior states and pathfinding",
+      "summary": "Wildlife detects, pursues, avoids, feeds, and navigates around terrain and other animals, with distinct predator behaviors and difficulty-dependent hostility.",
+      "details": "Predator modeling, scent, environmental awareness, pathfinding, and adaptive spawn settings create survival pressure. Hinterland has documented specific changes such as a wolf hold-ground state and wildlife navigation fixes.",
+      "documentReference": "Page 3 - predator behavior, scent, environment, spawns",
+      "evidenceOrigin": "Document plus web validation",
+      "trendRefs": ["pressure-cooker", "world-state-propagation"],
+      "riskRefs": [],
+      "sources": [
+        {"label": "Hinterland - Errant Pilgrim update AI and pathfinding notes", "url": "https://www.thelongdark.com/news/errant-pilgrim-update-now-live/"}
+      ]
+    }
+  ]
+}

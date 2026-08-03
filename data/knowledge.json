@@ -1,0 +1,498 @@
+{
+  "sourceDocuments": [
+    { "title": "AI Regulations and Insights — UK/European Creative Media & Interactive Entertainment AI Ecosystem", "file": "AI+Regulations+and+Insights.docx" },
+    { "title": "AI Regulation in the EU and UK — Similarities, Divergences, Business Impact, and Future Developments", "file": "AI+Regulation+in+the+EU+and+UK.docx" },
+    { "title": "AI Existing Uses — Current and Historical Game AI Implementations", "file": "AI Existing Uses.pdf" }
+  ],
+  "categories": {
+    "regulations": {
+      "label": "Regulatory Frameworks",
+      "icon": "⚖️",
+      "subsections": [
+        {
+          "title": "EU AI Act — Transparency & Watermarking (Article 50)",
+          "content": "Under Article 50 of the EU AI Act and the strict protocols defined by the EU AI Act Code of Practice on Transparency, commercial providers and deployers of generative media must make synthetic content explicitly identifiable. Failure to adhere triggers penalties up to €15 million or 3% of global annual turnover, whichever is higher. The compliance framework relies on a three-tier protection architecture: Visible Labeling (on-screen disclosure indicators), Invisible Watermarking (mathematically resilient signals embedded in pixel values/video frames/audio), and Cryptographic Metadata (signed ledgers mapping training data lineage to production asset).",
+          "sources": [
+            { "label": "EU AI Act — Article 50 Transparency Obligations", "url": "https://artificialintelligenceact.eu/article/50/" },
+            { "label": "EU Code of Practice on AI-Generated Content Transparency", "url": "https://digital-strategy.ec.europa.eu/en/policies/code-practice-ai-generated-content" },
+            { "label": "EU AI Act Full Text (Regulation 2024/1689)", "url": "https://artificialintelligenceact.eu/the-act/" }
+          ]
+        },
+        {
+          "title": "EU vs UK — Regulatory Philosophy Divergence",
+          "content": "The EU adopted the AI Act (Regulation 2024/1689), the world's first comprehensive AI-specific legal framework with binding obligations across Member States. It is explicitly risk-based, with obligations increasing according to risk level. The UK deliberately chose NOT to introduce a single horizontal AI law, instead relying on five principles (safety, transparency, fairness, accountability, contestability) implemented through existing regulators like the ICO, Ofcom, CMA, and FCA. This creates a dual compliance burden for multinationals operating in both jurisdictions.",
+          "sources": [
+            { "label": "EU AI Act — Regulation 2024/1689 Official Text", "url": "https://artificialintelligenceact.eu/the-act/" },
+            { "label": "UK AI Regulation — Commons Library Research Briefing", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" },
+            { "label": "UK AI Regulation: A Pro-Innovation Approach (Gov.uk)", "url": "https://www.gov.uk/government/publications/ai-regulation-a-pro-innovation-approach" }
+          ]
+        },
+        {
+          "title": "EU AI System Definition",
+          "content": "EU AI Act, Article 3, point 1: 'A machine-based system designed to operate with varying levels of autonomy and that may exhibit adaptiveness after deployment and that, for explicit or implicit objectives, infers, from the input it receives, how to generate outputs such as predictions, content, recommendations, or decisions that can influence physical or virtual environments.'",
+          "sources": [
+            { "label": "EU AI Act — Article 3 Definitions", "url": "https://artificialintelligenceact.eu/article/3/" }
+          ]
+        },
+        {
+          "title": "DMA Enforcement — Google €890M Fine (July 2026)",
+          "content": "On 23 July 2026, the European Commission fined Google (Alphabet) €890 million under the Digital Markets Act: €460M for alleged self-preferencing in Google Search, €430M for anti-steering restrictions on Google Play. This signals the enforcement posture organisations should anticipate as AI obligations become operational. The Commission increasingly emphasises demonstrable compliance, transparency, auditability, and fair market access.",
+          "sources": [
+            { "label": "European Commission — Google DMA Fine Press Release", "url": "https://digital-markets-act.ec.europa.eu/commission-fines-google-eur890-million-breaches-digital-markets-act-2026-07-23_en" }
+          ]
+        },
+        {
+          "title": "UK AI Policy Direction — Licensing, Transparency & Phased Reform",
+          "content": "The UK government's approach focuses on robust evaluation of digital security flaws in AI models, with the AI Safety Institute testing systems before public release. Unlike the EU's focus on protecting fundamental rights and values, the UK emphasises safety and security testing. Key immediate actions for UK-facing organisations: prepare for mandatory AI transparency reporting, implement AI governance frameworks, and monitor the evolving licensing framework for frontier AI models.",
+          "sources": [
+            { "label": "UK AI Safety Institute — Research & Publications", "url": "https://www.aisi.gov.uk/research" },
+            { "label": "UK AI Regulation — Commons Library Research Briefing", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" }
+          ]
+        },
+        {
+          "title": "EU AI Act Compliance Timetable",
+          "content": "Key deadlines: 2 August 2026 — High-risk AI obligations become enforceable; 2 December 2027 — GPAI (general-purpose AI) model obligations take effect; 2 August 2028 — Full compliance for all AI systems. Companies must prepare enterprise AI inventories, establish governance frameworks, implement AI literacy programmes, and conduct copyright and licensing reviews.",
+          "sources": [
+            { "label": "EU AI Act — Implementation Timeline", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "title": "AI Liability — UK and EU Comparison",
+          "content": "UK: Liability for AI harm based on breach of duty in common law negligence. Standard of care evolving — companies deploying high-risk AI will be expected to demonstrate rigorous testing, human oversight, and impact assessments. EU: New Product Liability Directive adapts liability rules for the digital age, making it easier for consumers to claim compensation for harm caused by AI systems. Software and AI are explicitly classified as 'products' for liability purposes.",
+          "sources": [
+            { "label": "UK GDPR — Data Protection Framework (legislation.gov.uk)", "url": "https://www.legislation.gov.uk/eur/2016/679/contents" },
+            { "label": "EU Product Liability Directive — Overview", "url": "https://artificialintelligenceact.eu/ai-liability-directive/" }
+          ]
+        },
+        {
+          "title": "Transparency as Regulatory & Commercial Requirement",
+          "content": "Both EU and UK jurisdictions increasingly require explainability and disclosure. This is particularly relevant for chatbots, AI-generated media, recommendation engines, and customer service systems. For gaming: synthetic content disclosure, watermarking of AI-generated assets, and transparent labeling of AI-driven NPC interactions are becoming compliance requirements with direct consumer trust implications.",
+          "sources": [
+            { "label": "EU AI Act Transparency Requirements Overview", "url": "https://artificialintelligenceact.eu/transparency/" },
+            { "label": "British Gamers' Attitudes to AI in Video Games (YouGov)", "url": "https://yougov.com/en-gb/articles/47743-british-gamers-take-on-ai-in-video-games" }
+          ]
+        }
+      ]
+    },
+    "competitors": {
+      "label": "Competitor AI Ecosystem",
+      "icon": "🏢",
+      "subsections": [
+        {
+          "title": "Black Forest Labs (Freiburg, Germany)",
+          "content": "Core Technology: FLUX family of open-weights text-to-image models — global benchmarks for anatomical precision, hyper-realistic text rendering, and prompt adherence. EU AI Act Alignment: Injects immutable mathematical watermarks directly into the latent space of pixel generation that survive downscaling, compression, and screenshots. Gaming Relevance: Game studios use FLUX to bypass pre-production concept art loops, generating 2D concept art, PBR material textures, and skyboxes from text prompts. Relevance to Tencent: Direct competitor in generative AI for game asset production.",
+          "sources": [
+            { "label": "Black Forest Labs — FLUX Models", "url": "https://blackforestlabs.ai/" },
+            { "label": "Black Forest Labs Joins NVIDIA Nemotron Coalition (2026)", "url": "https://frenchtechjournal.com/mistral-ais-big-spring-how-europes-decacorn-started-acting-like-one/" }
+          ]
+        },
+        {
+          "title": "Stability AI (London, UK)",
+          "content": "Core Technology: Stable Diffusion open-access models spanning image, audio, and open-source video architectures. EU AI Act Alignment: Integrates dual-layer metadata tracking with extensive adversarial testing to prevent tag erasure. Gaming Relevance: Primary engine for open-source modification pipelines. Indie and AAA studios run fine-tuned image generation clusters locally on-premise to eliminate copyright/IP leakage risks. Relevance to Tencent: Competes with Hunyuan in open-weights model space; significant gaming adoption.",
+          "sources": [
+            { "label": "Stability AI — Safety & Watermarking Commitments", "url": "https://stability.ai/safety" },
+            { "label": "Getty Images v Stability AI — High Court Ruling (2025)", "url": "https://www.mayerbrown.com/en/insights/publications/2025/11/getty-images-v-stability-ai-what-the-high-courts-decision-means-for-rights-holders-and-ai-developers" },
+            { "label": "Stability AI Official Site", "url": "https://stability.ai/" }
+          ]
+        },
+        {
+          "title": "Synthesia (London, UK)",
+          "content": "Core Technology: Enterprise text-to-video generative avatar platforms (Synthesia 3.0) supporting real-time interactive digital agents. EU AI Act Alignment: Server-side cryptographic signatures with hardcoded EU AI disclosure icons on video output for any simulated real-world dialogue. Gaming Relevance: Automates cinematic post-production cutscenes — localized script translations instantly match avatar lip-sync across dozens of languages. Relevance to Tencent: Competes with Tencent Cloud AI Digital Human for virtual avatar and video generation markets.",
+          "sources": [
+            { "label": "Synthesia — AI Video Generation Platform", "url": "https://www.synthesia.io/" },
+            { "label": "Colossyan vs Synthesia — AI Video Platform Comparison (2026)", "url": "https://colossyan.com/ai-video-generation-tools" }
+          ]
+        },
+        {
+          "title": "ElevenLabs (London, UK)",
+          "content": "Core Technology: Market leader in generative AI voice cloning, vocal synthesis, and multi-lingual acoustic localization. EU AI Act Alignment: Inaudible acoustic watermark in high-frequency audio spectrum with free public AI Speech Classifier tool. Gaming Relevance: Real-time LLM text scripts connected to ElevenLabs API allow NPCs to vocalize unpredictable, dynamic dialogue strings adapting instantly to player actions. Relevance to Tencent: Key competitor in voice AI for gaming; integrates with runtime generative gameplay.",
+          "sources": [
+            { "label": "ElevenLabs — AI Voice Generation & Voice Agents Platform", "url": "https://elevenlabs.io/" },
+            { "label": "ElevenLabs x NVIDIA ACE — Multilingual AI Voice for Gaming NPCs", "url": "https://elevenlabs.io/blog/nvidia-ace-at-computex" },
+            { "label": "ElevenLabs for NPC Voice — Gaming Integration Guide", "url": "https://theneuralbase.com/ai-for-gaming/learn/intermediate/elevenlabs-for-npc-voice" }
+          ]
+        },
+        {
+          "title": "VEED.io (London, UK)",
+          "content": "Core Technology: Browser-native automated video suite — smart auto-subtitling, transcription, social media template scaling. EU AI Act Compliance: Automatically attaches standardized metadata headers when AI script or synthetic audio features are applied. Gaming Relevance: Community managers extract game telemetry highlights from raw streaming footage and reformat for vertical short-form platforms. Relevance to Tencent: Competes in creator tools and video editing space.",
+          "sources": [
+            { "label": "VEED.io — AI Video Editor Platform", "url": "https://veed.io/" },
+            { "label": "VEED.IO Review 2026 — $45M ARR, 10M Monthly Users", "url": "https://aitoolscoop.com/tool/veed-io/" }
+          ]
+        },
+        {
+          "title": "Colossyan (Budapest/London)",
+          "content": "Core Technology: Corporate compliance and workplace video production using virtual actors. EU AI Act Alignment: Permanent un-strippable server-side tracking tokens linking every generated asset to validated corporate account, prompt history, and user ID. Gaming Relevance: Scales player-facing tutorials, in-game help guides, and virtual onboarding assistants for live-service strategy systems.",
+          "sources": [
+            { "label": "Colossyan — AI Video Platform for Workplace Learning", "url": "https://colossyan.com/" },
+            { "label": "Colossyan Press — Founded 2020, $27M Raised, 26,000+ Customers", "url": "https://www.colossyan.com/press/" }
+          ]
+        },
+        {
+          "title": "Palantir Technologies UK (London)",
+          "content": "Core Technology: Enterprise data integration via Palantir Foundry and Artificial Intelligence Platform (AIP). EU AI Act Alignment: Acts as governance gatekeeper — logs entire lifecycle of AI assets (data lineage, fine-tuning, prompts, outputs) enabling centralized regulatory auditing. Gaming Relevance: Aggregates petabytes of player telemetry, optimizes multiplayer matchmakers, detects cheat software, manages in-game economies, predicts player churn. Relevance to Tencent: Potential competitor in gaming analytics and enterprise AI governance platforms.",
+          "sources": [
+            { "label": "Palantir AIP Platform — Official Site", "url": "https://www.palantir.com/" },
+            { "label": "Palantir Hits $300B Valuation — Q1 2026 Revenue $1.63B", "url": "https://coindesk.cc/palantir-hits-300b-valuation-amid-strong-ai-adoption-80052.html" },
+            { "label": "Palantir AIP: Why Wall Street Is Betting Big (Feb 2026)", "url": "https://www.ainvest.com/news/palantir-wall-street-betting-big-ai-engine-2602/" }
+          ]
+        },
+        {
+          "title": "Smartly.io (Helsinki, Finland)",
+          "content": "Core Technology: Automated ad-tech and digital asset scaling platforms for retail and media. EU AI Act Alignment: Automated content screening filters preventing export of promotional assets lacking required machine-readable AI tags. Gaming Relevance: Analyzes live player metrics and automatically generates thousands of localized, compliant video/graphic ads for precise player cohorts. Relevance to Tencent: Competes in gaming marketing automation and user acquisition.",
+          "sources": [
+            { "label": "Smartly.io — AI-Powered Advertising Platform", "url": "https://www.smartly.io/" },
+            { "label": "Smartly.io Growth Summit 2025 — AI Advertising & Creative Automation", "url": "https://www.smartly.io/resources/growth-summit-25-ai-powered-advertising-creative-automation-real-results" }
+          ]
+        },
+        {
+          "title": "Meta (Dublin, Ireland) — AI Gaming Push",
+          "content": "Core Creative Tech: Meta AI, Emu video architectures, generative ad builders. EU Compliance: Signatory to EU AI Transparency Code; applies 'AI Info' labels; ingests third-party C2PA metadata. Gaming Application: Researching generative video models as real-time physics engines — streaming environments that visually respond to game controller inputs. Relevance to Tencent: Major tech competitor investing heavily in AI-for-gaming; potential platform rival.",
+          "sources": [
+            { "label": "Meta Emu Video 2 — Real-Time Generative AI Video on Mobile", "url": "https://aidailyshot.com/blog/meta-emu-video-2-real-time-generative-ai-mobile" },
+            { "label": "Meta Emu Video — Text-to-Video Generation Research", "url": "https://emu-video.metademolab.com/" },
+            { "label": "Top 10 Video Generation Models of 2026 (includes Emu-Video 2)", "url": "https://vegavid.com/blog/video-generation-models" }
+          ]
+        },
+        {
+          "title": "Google (London/EU Hubs) — Veo & SynthID",
+          "content": "Core Creative Tech: Veo (video), Imagen 3 (image), YouTube AI creator suites. EU Compliance: Proprietary SynthID injects imperceptible pixel and waveform watermarks resilient to post-compression. Gaming Application: Pioneering adaptive spatial soundscapes reacting dynamically to player biometric tension and in-game scenarios. Also: Project Genie (Google DeepMind) — Genie 3, D4RT for real-time game engine diffusion models.",
+          "sources": [
+            { "label": "Google DeepMind — Genie 3 World Model", "url": "https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models" },
+            { "label": "Google DeepMind Genie 3 Explained — Real-Time World Generation", "url": "https://fenxi.fr/en/blog/genie-3-google-deepmind-world-model-2" },
+            { "label": "Google SynthID Watermarking Technology", "url": "https://deepmind.google/technologies/synthid/" }
+          ]
+        },
+        {
+          "title": "NetEase — Eggy Party & Model AIGC",
+          "content": "Core Technology: Custom Model AIGC framework for runtime generative UGC. Case Study: Eggy Party implements zero-barrier sandbox creation — players describe map layouts, themes, or skins in natural language in-game, and the runtime model instantly synthesizes fully functional 3D geometry with gameplay scripting. Production: Player-created map items surged past 1 million cumulative items, transforming the core retention loop into a self-sustaining UGC platform. Relevance to Tencent: Direct gaming competitor leveraging generative AI for user retention and content creation.",
+          "sources": [
+            { "label": "Eggy Party — AI-Native UGC Platform (36kr, July 2026)", "url": "https://eu.36kr.com/en/p/3896755010963333" },
+            { "label": "Eggy Party: 700M+ Registered Users, 50M+ UGC Creators (2026)", "url": "https://www.toutiao.com/a7665473130315399716" }
+          ]
+        },
+        {
+          "title": "Additional European AI Companies",
+          "content": "Mistral AI (Paris) — advanced ML for language translation/writing tools. Helsing (Munich) — defense AI processing real-time battlefield sensor data. Aleph Alpha (Heidelberg) — explainable, secure LLMs for European enterprise/government. Axelera AI (Eindhoven) — specialized high-speed microchips for edge AI and computer vision. Google DeepMind (London) — AlphaGo, AlphaFold, Gemini. Isomorphic Labs (London) — Alphabet-backed digital biology using AI for drug discovery.",
+          "sources": [
+            { "label": "Mistral AI — Europe's Leading Frontier AI Lab ($14B Valuation)", "url": "https://mistral.ai/" },
+            { "label": "Mistral AI Big Spring 2026 — $830M Debt Raise, Nvidia Partnership", "url": "https://frenchtechjournal.com/mistral-ais-big-spring-how-europes-decacorn-started-acting-like-one/" },
+            { "label": "Mistral AI Company Profile & Milestones (July 2026)", "url": "https://www.ventureatlas.org/company/mistral-ai" }
+          ]
+        },
+        {
+          "title": "Tripo AI / VAST (San Francisco, USA) — 3D Foundation Models & Project Eden World Model",
+          "content": "Core Technology: 3D foundation models for text-to-3D, image-to-3D, multi-view to 3D generation, plus AI texturing, auto-segmentation, retopology, and auto-rig with 100+ preset animations. Tripo H3.1 and P1.0 models target visual accuracy and clean topology respectively. World Model: Project Eden — a persistent multiplayer world model that decouples evolving world state from visual rendering via a three-layer architecture (structured state, state-to-observation interface, generative neural rendering). GameHub: AI-3D powered global game creation platform with $150K prize pool, monthly challenges, and engine plugins for Unity, Unreal, Cocos and Godot. Formats: GLB, FBX, OBJ, USDZ. Pricing: $0.05/image, $0.10/3D model, $0.05/task processing, $0.10/animation. Relevance to Tencent: Competes in 3D asset generation (Hunyuan 3D), world models (Hunyuan-Gamecraft), and UGC platforms; its developer API and engine plugins represent competition for Tencent's game-tooling ecosystem.",
+          "sources": [
+            { "label": "Tripo Project Eden — world model research preview", "url": "https://www.tripo3d.ai/research/project-eden" },
+            { "label": "Tripo GameHub — AI-3D game creation platform", "url": "https://gamehub.tripo3d.ai/home" },
+            { "label": "Tripo Developer API — 3D generation, rigging, animation", "url": "https://developers.tripo3d.ai/en" }
+          ]
+        }
+      ]
+    },
+    "technology": {
+      "label": "AI & Gaming Technology",
+      "icon": "🔬",
+      "subsections": [
+        {
+          "title": "Runtime Generative AI — The Next Frontier",
+          "content": "The ecosystem is rapidly shifting from offline asset-assisted production to real-time, runtime generative engines. A selective vanguard of studios has deployed generative AI directly into game executable code to drive runtime gameplay. Key enabling technologies: on-device small language models (SLMs), real-time diffusion-based rendering, and LLM-integrated NPC behavior systems.",
+          "sources": [
+            { "label": "LLMs in Games — 9 Emerging Use Cases (arXiv)", "url": "https://arxiv.org/pdf/2402.18659" },
+            { "label": "Gen AI in Gaming — GDC 2026 State of the Industry", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" }
+          ]
+        },
+        {
+          "title": "Google GameNGen — Diffusion Models as Real-Time Game Engines",
+          "content": "GameNGen runs at 20 FPS on a single TPU with next-frame prediction achieving PSNR of 29.4 (comparable to lossy JPEG). Human raters are only slightly better than random at distinguishing clips from simulation even after 5 minutes of autoregressive generation. Key limitation: model only has ~3 seconds of memory — games need cohesion on the order of 10s to 100s of hours. The tradeoff: speed vs quality gap is rapidly closing.",
+          "sources": [
+            { "label": "Google DeepMind — Genie 3 World Model Official", "url": "https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models" },
+            { "label": "DeepMind Genie 3 Explained — Technical Architecture", "url": "https://fenxi.fr/en/blog/genie-3-google-deepmind-world-model-2" }
+          ]
+        },
+        {
+          "title": "World Models & Generative Game Engines",
+          "content": "Key projects: Odyssey (Odyssey-2, Starchild-1, Agora-1 with RL Prowl-1), Fei-fei Li's World Labs, OpenArt Worlds (via Stable Diffusion collaboration), Decart x Etched's Oasis (real-time playable Minecraft simulation), Ubisoft Ghostwriter AI (first drafts of NPC barks). Hunyuan-Gamecraft is Tencent's entry in the world model space. The core vision: 'games become a mix of shipping an AI model + saturation logic.'",
+          "sources": [
+            { "label": "Google Genie 3 Sparks Market Concern — Impact on Game Engines (Feb 2026)", "url": "https://finance.sina.com.cn/stock/relnews/2026-02-05/doc-inhktnfp9068202.shtml" },
+            { "label": "Genie 3 World Model Market Analysis (Jan 2026)", "url": "https://www.hstong.com/news/detail/26020309192644733" }
+          ]
+        },
+        {
+          "title": "LLMs in Games — 9 Emerging Use Cases",
+          "content": "(1) Political Weather — dynamic narrative responding to player decisions. (2) Characters with Long-Term Memory — NPCs that remember past interactions. (3) Dynamic Information Networks — evolving world knowledge systems. (4) Pressure-Cooker Systems — time-sensitive AI-driven scenarios. (5) Contextual Framing — AI that reinterprets narrative based on player context. (6) World-State Propagation — ripple effects across game world. (7) Dynamic Pacing Management — AI-adjusted difficulty and narrative pacing. (8) Personal Curator Systems — personalized content delivery. (9) In-Fiction Narrators — AI-generated narrative commentary.",
+          "sources": [
+            { "label": "LLMs in Games — 9 Emerging Use Cases (arXiv 2402.18659)", "url": "https://arxiv.org/pdf/2402.18659" }
+          ]
+        },
+        {
+          "title": "LLM Game Genres Most Suitable for Integration",
+          "content": "(1) Token-Based Strategy Games — LLMs as opponents/referees. (2) Natural Language Games — text-heavy adventures, dialogue systems. (3) API-Accessible Games — games where LLMs can interact programmatically. Development roles: LLM as Player, LLM as NPC, LLM as Assistant, LLM as Game Master, LLM as Hidden Infrastructure. Cost-control mechanisms needed for production deployment.",
+          "sources": [
+            { "label": "LLMs in Games — Classification & Use Cases (arXiv 2402.18659)", "url": "https://arxiv.org/pdf/2402.18659" }
+          ]
+        },
+        {
+          "title": "Three-Tier AI Watermarking Architecture",
+          "content": "The compliance standard for generative gaming content: (1) Visible Labeling — on-screen disclosure indicators for synthetic interaction. (2) Invisible Watermarking — mathematically resilient signals in pixel values, video frames, or audio waveforms (e.g., Google SynthID, Black Forest Labs latent space watermarks). (3) Cryptographic Metadata — C2PA-signed ledgers mapping lineage from training data to production asset (e.g., Exactly.ai's implementation).",
+          "sources": [
+            { "label": "EU Code of Practice on AI-Generated Content Transparency", "url": "https://digital-strategy.ec.europa.eu/en/policies/code-practice-ai-generated-content" },
+            { "label": "Stability AI — C2PA Content Authenticity Standards", "url": "https://stability.ai/safety" },
+            { "label": "Google SynthID — Invisible Watermarking for AI Content", "url": "https://deepmind.google/technologies/synthid/" }
+          ]
+        },
+        {
+          "title": "Game Design Mimetics — The Future of Game Creation",
+          "content": "Key predictions: High-quality assets are 'solved' — scaling bespoke creative pipelines becomes trivial. Content can be personalized on demand — adaptive content customization between modding and telemetry-targeting. Lower fidelity content created on demand — games become generative-kernels, not fixed products. 'Seed trees' replace save files. Games become infinitely malleable per player. Differentiation shifts from exact content to how well games adapt to user wants while remaining cohesive.",
+          "sources": [
+            { "label": "Gen AI in Gaming — Quantic Foundry Analysis (Dec 2025)", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "GDC 2026 State of the Industry — AI in Games", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" }
+          ]
+        }
+      ]
+    },
+    "case-studies": {
+      "label": "Case Studies",
+      "icon": "📋",
+      "subsections": [
+        {
+          "title": "Dead Meat — Runtime AI Interrogation (Meaning Machine, London)",
+          "content": "Game: Psychological murder mystery interrogation game. AI System: Meaning Machine's Game Conscious™ AI with NVIDIA collaboration. Mechanics: Players type/speak open-ended questions to suspects. On-device NVIDIA Minitron Small Language Model (SLM) fine-tuned on game lore generates contextually accurate, psychologically deep responses locally on user's GPU — no cloud dependencies. Results: 95% of players found interaction enjoyable; 75% said it allowed higher creative self-expression than traditional branching dialogue trees (University of Bristol study). Key insight: Local SLM inference enables runtime generative AI without cloud cost/latency.",
+          "sources": [
+            { "label": "AI in Game Development UK — Use Cases & Tools (Uverse Digital)", "url": "https://uversedigital.com/blog/ai-in-game-development-uk/" },
+            { "label": "modl.ai — AI Testing Tools for Game Development", "url": "http://modl.ai" }
+          ]
+        },
+        {
+          "title": "Eggy Party — Zero-Barrier UGC (NetEase)",
+          "content": "Game: Massive multiplayer party game. AI System: NetEase's custom Model AIGC framework. Mechanics: True zero-barrier sandbox — players describe desired map layouts, environmental themes, or character skins in natural language in-game, and the runtime model instantly synthesizes fully functional 3D geometry and scripts gameplay obstacles. Results: Player-created map items surged past 1 million cumulative items. The integration transformed the core retention loop into a self-sustaining UGC platform. Key insight: Natural language UGC dramatically lowers creation barriers and increases engagement.",
+          "sources": [
+            { "label": "Eggy Party — AI-Native UGC Platform (36kr, July 2026)", "url": "https://eu.36kr.com/en/p/3896755010963333" },
+            { "label": "Eggy Party: 700M+ Users, 200M+ Maps, DeepSeek/GLM/Kimi Integration", "url": "https://www.163.com/dy/article/L1TAAFLR05118DFD.html" }
+          ]
+        },
+        {
+          "title": "Consumer Attitudes — GDC 2026 Findings",
+          "content": "Key findings: Environmental concerns rising — gamers question energy costs of generative AI. 'Gameslop' phenomenon — consumer trust eroding as AI-generated content floods platforms. Steam now requires transparency labeling for AI-generated game content. UK consumer attitudes show concern about AI-powered NPCs (quality/authenticity), personalized storytelling (privacy), employment impact (job displacement in creative roles), and game quality (fear of 'soulless' AI content). Strategic implication: transparency is both a regulatory AND commercial requirement — consumers increasingly demand disclosure.",
+          "sources": [
+            { "label": "GDC 2026 State of the Industry — AI in Games Survey", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "British Gamers on AI in Video Games (YouGov)", "url": "https://yougov.com/en-gb/articles/47743-british-gamers-take-on-ai-in-video-games" }
+          ]
+        },
+        {
+          "title": "Commonly Used AI Tools in Game Development",
+          "content": "Creative Production: Stable Diffusion, FLUX, Midjourney for concept art and textures. Software Development: GitHub Copilot, CodeBuddy for engine code/prototyping. NPC Behaviour: ElevenLabs (voice), LLM APIs (dialogue), NVIDIA ACE (animation). World Generation: Hunyuan-Gamecraft, Odyssey, Tripo Project Eden, proprietary world models. 3D Asset Generation: Tripo API (text/image-to-3D, rigging, animation), Hunyuan 3D, HY 3D. Development Frameworks: Unity ML-Agents, Unreal Engine ML tools. Automated Testing: AI-driven QA bots, performance prediction models. Dialogue Assistance: Ubisoft Ghostwriter, custom LLM pipelines.",
+          "sources": [
+            { "label": "AI in Game Development UK — Tools & Use Cases (Uverse Digital)", "url": "https://uversedigital.com/blog/ai-in-game-development-uk/" },
+            { "label": "modl.ai — AI-Powered Game Testing", "url": "http://modl.ai" },
+            { "label": "ElevenLabs — AI Voices for Gaming NPCs", "url": "https://elevenlabs.io/blog/ai-generated-character-voices-for-games" }
+          ]
+        }
+      ]
+    },
+    "tencent-products": {
+      "label": "Tencent Products & Strategy",
+      "icon": "🎮",
+      "subsections": [
+        {
+          "title": "Tencent AI Foundation Models — Hunyuan & TokenHub",
+          "content": "Hunyuan: LLM + multi-modal foundation model suite including open-source Mixture-of-Experts variants, supporting text, 3D, and video generation. TokenHub: MaaS gateway on Tencent Cloud providing enterprise and developer API access to Hunyuan and select third-party models. Key product: Hunyuan-Gamecraft — world model for gaming applications.",
+          "sources": [
+            { "label": "GiiNEX — Tencent Full-Stack Gaming AI Solution", "url": "https://giinex.tencent.com/#/solution" },
+            { "label": "Tencent Hunyuan-Video — 4K/180s Video Generation (Top 10 Models 2026)", "url": "https://vegavid.com/blog/video-generation-models" }
+          ]
+        },
+        {
+          "title": "Tencent Creative & Gaming AI Tools",
+          "content": "VISVISE GoSkinning & MotionBlink — animation/graphics tools. LightSpeed Audio — audio processing. GVoice — voice technology. Miora Agentic Creative Studio — AI-native creative studio for design teams (brand-consistent graphics, video, 3D from natural language). MagicDawn — collaboration with Arm using Cloud Offline Rendering infrastructure. Mynah (in development) — audio and video focus. GiiNEX — full-stack gaming AI solution. NPC LLM — research focused on running LLMs on mobile devices via Cloud. WorkBuddy — agentic AI workspace. CodeBuddy IDE — AI-powered code assistant. Tencent Cloud AI Digital Human — virtual broadcasting and customer service.",
+          "sources": [
+            { "label": "GiiNEX — Tencent Full-Stack Gaming AI Solution", "url": "https://giinex.tencent.com/#/solution" }
+          ]
+        },
+        {
+          "title": "Tencent Cloud European/UK Expansion",
+          "content": "Tencent Cloud's European international expansion strategy spans AI infrastructure, 3D content, and compliance. Key product areas: AI product/platform portfolio for European markets, 3D and creative AI tools, agentic AI and developer tools, SaaS/edge/super-app infrastructure (WeChat Mini Programs model), biometric/identity technologies, fintech infrastructure (Weixin Pay, TenPay Global). Regulatory exposure varies by use case — gaming AI faces different requirements than biometric or fintech applications under EU/UK frameworks.",
+          "sources": [
+            { "label": "GiiNEX — Tencent Full-Stack Gaming AI Solution", "url": "https://giinex.tencent.com/#/solution" },
+            { "label": "EU AI Act — Compliance Timeline & Obligations", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "title": "Tencent Cloud Products — Logistics & E-Commerce",
+          "content": "Portainer.io — enterprise Kubernetes/Docker container management. Matrix AI — multi-account matrix management for cross-border e-commerce. BaseKit — e-commerce for small businesses. Toloka — adaptive AutoML and custom data labelling for content moderation. LORA — Live and Video Commerce SaaS. SCash Super APP — payment and financial transactions. TiDB — open-source distributed NewSQL database. Chinafy — China Web Performance Suite and compliance assessment.",
+          "sources": [
+            { "label": "GiiNEX — Tencent Full-Stack Gaming AI Solution", "url": "https://giinex.tencent.com/#/solution" }
+          ]
+        },
+        {
+          "title": "Tencent Cloud Products — Games, Media & Web3",
+          "content": "Voicemod Voice Changer — real-time AI voice changer for gamers. HIVE — automated audio/face/text/content moderation. Solana Archive RPC Service — blockchain app infrastructure. TiTi — short video social platform. IOST — NFT Service and Blockchain Traceability. Chainbase — all-in-one web3 data infrastructure. Unity workflow tools via Odin Enterprise and Genymotion SaaS.",
+          "sources": [
+            { "label": "GiiNEX — Tencent Full-Stack Gaming AI Solution", "url": "https://giinex.tencent.com/#/solution" }
+          ]
+        },
+        {
+          "title": "Tencent Strategic Platform Assets",
+          "content": "Connectivity: Weixin/WeChat + Mini Programs (no UK market equivalent with integrated capabilities). Entertainment: Tencent Games, Video, News, Sports, Esports, Animation, Music (TME), Yuewen. Fintech: Weixin Pay, Tenpay Global, Tencent Blockchain. Security: QQ Browser, Tencent Map, Mobile/PC Manager. B2B AI: Tencent TI-AOI industrial quality inspection, Cloud Digital Human, Multimedia AI Solutions (facial verification, ASR, OCR, TTS), RT-ONE global network (TRTC + IM + EdgeOne).",
+          "sources": [
+            { "label": "GiiNEX — Tencent Full-Stack Gaming AI Solution", "url": "https://giinex.tencent.com/#/solution" }
+          ]
+        }
+      ]
+    },
+    "strategic-insights": {
+      "label": "Strategic Insights",
+      "icon": "💡",
+      "subsections": [
+        {
+          "title": "AAA Industry Disruption — The End of Fixed Games",
+          "content": "Key thesis: consumers are rejecting the premise AAA is founded on. High-fidelity asset production isn't the premium anymore. 'Eastern AAA has a better handle — games like Dave the Diver (a Tencent game) prove what's possible with AA/AAA resources at lower aesthetic rungs.' The next wave of consoles will have tensor processing units (TPUs) for local model inference. 'The whole AAA industry, effectively compressed into a prompt.' GTA 6 will be a critical case study for the old model.",
+          "sources": [
+            { "label": "Gen AI in Gaming — Quantic Foundry Analysis (Dec 2025)", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "GDC 2026 — Over 50% of Devs Say Gen AI Has Negative Impact on Games", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" }
+          ]
+        },
+        {
+          "title": "From Fixed Games to Generative Kernels",
+          "content": "The future: games become generative-kernels — shipping less about a complete game and more about a system that produces new content on demand. 'Seed trees' replace save files — your permutation of a game is a seed tree you share so others can play the game you 'found.' Games become infinitely malleable per player. Tens of millions of 'different' games from one kernel. Game differentiation shifts to how well games adapt to user wants while remaining cohesive.",
+          "sources": [
+            { "label": "Gen AI in Gaming — Quantic Foundry Analysis (Dec 2025)", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "Google Genie 3 — The Next Frontier for World Models (DeepMind)", "url": "https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models" }
+          ]
+        },
+        {
+          "title": "Competitive Intelligence: Watch These AI Gaming Companies",
+          "content": "NetEase (Model AIGC, Eggy Party UGC engine) — runtime generative UGC pioneer. Google DeepMind (Genie 3, GameNGen, Veo) — world models and real-time diffusion engines. Odyssey (World Models: Odyssey-2, Starchild-1, RL: Prowl-1) — dedicated gaming world model startup. Decart x Etched (Oasis — real-time playable Minecraft via AI) — real-time simulation. Ubisoft (Ghostwriter AI) — AAA studio AI integration. ElevenLabs + Stability AI — gaming AI infrastructure stack.",
+          "sources": [
+            { "label": "Eggy Party — AI-Native UGC at Scale (36kr)", "url": "https://eu.36kr.com/en/p/3896755010963333" },
+            { "label": "Google DeepMind Genie 3 — World Model Official", "url": "https://deepmind.google/blog/genie-3-a-new-frontier-for-world-models" },
+            { "label": "ElevenLabs x NVIDIA ACE — AI Voice for Gaming NPCs", "url": "https://elevenlabs.io/blog/nvidia-ace-at-computex" }
+          ]
+        },
+        {
+          "title": "EU/UK Regulatory Impact on Tencent Gaming Strategy",
+          "content": "Key exposure areas: Synthetic content disclosure for AI-generated game assets and NPC dialogue, watermarking requirements for generative media in games, copyright and training data transparency, AI liability for in-game AI decisions affecting players, biometric data regulations for voice/face AI in games, DMA scrutiny of cloud gaming markets. Practical implications: dual compliance models needed for EU and UK, transparency-by-design in game development pipelines, audit trail requirements for AI training data and model outputs.",
+          "sources": [
+            { "label": "EU AI Act Compliance Timeline — Key Deadlines", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" },
+            { "label": "UK AI Regulation — Commons Library Briefing", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" },
+            { "label": "EU AI Act Transparency & Code of Practice", "url": "https://digital-strategy.ec.europa.eu/en/policies/code-practice-ai-generated-content" }
+          ]
+        },
+        {
+          "title": "Actions for CTOs, CIOs, and Media Executives",
+          "content": "For CIOs: (1) Create enterprise AI inventory — catalog all AI systems in use or development. (2) Establish AI governance framework — cross-functional board with legal, compliance, engineering, product. (3) Implement AI literacy programmes — mandatory training for all staff. For CTOs: (1) Technical compliance-by-design — watermarking, metadata, audit logging built into pipelines. (2) Assess high-risk AI exposure. (3) Strengthen supplier governance. For Media Executives: (1) AI content governance — labeling, provenance tracking. (2) Transparency and disclosure standards. (3) Copyright and licensing reviews.",
+          "sources": [
+            { "label": "EU AI Act — Compliance Guide & Timeline", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" },
+            { "label": "UK AI Safety Institute — Research Publications", "url": "https://www.aisi.gov.uk/research" }
+          ]
+        },
+        {
+          "title": "Key Trends to Monitor",
+          "content": "(1) Console TPU integration — local model inference becoming hardware standard. (2) Runtime generative AI moving from experimental to production. (3) 'Gameslop' consumer backlash — transparency as competitive advantage. (4) Web3/blockchain gaming + AI convergence (NEXUS Korea model — all-online AI games). (5) Dual EU/UK regulatory compliance becoming operational reality by 2027-2028. (6) Open-weights vs proprietary model competition in gaming. (7) UGC powered by natural language AI transforming player retention economics.",
+          "sources": [
+            { "label": "GDC 2026 State of the Industry — AI in Games", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "Eggy Party UGC Ecosystem — 500M+ Maps, AI-Native Platform", "url": "https://eu.36kr.com/en/p/3896755010963333" },
+            { "label": "EU AI Act Full Compliance Deadline — 2 August 2028", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        }
+      ]
+    },
+    "current-game-ai": {
+      "label": "Current Game AI Uses",
+      "icon": "🎮",
+      "subsections": [
+        {
+          "title": "Decision Systems — GOAP, Behavior Trees, Utility AI and Perception",
+          "content": "Most proven game AI is bounded and designer-controlled. F.E.A.R. uses Goal-Oriented Action Planning to assemble tactical action sequences; Halo 2 uses hierarchical behavior selection and imperfect world knowledge; Dishonored 2 coordinates squads and floods influence maps during searches; GROUND BRANCH combines Kythera navigation, behavior trees, spatial queries, and utility scoring. These systems create readable autonomy without requiring large learned models.",
+          "sources": [
+            { "label": "F.E.A.R. AI — GDC 2006 paper", "url": "https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf" },
+            { "label": "Halo 2 AI — GDC 2005 proceeding", "url": "https://www.gamedeveloper.com/programming/gdc-2005-proceeding-handling-complexity-in-the-i-halo-2-i-ai" },
+            { "label": "Dishonored 2 AI — GDC Vault", "url": "https://www.gdcvault.com/play/1024660/Taking-Back-What-s-Ours" }
+          ]
+        },
+        {
+          "title": "Persistent Worlds — A-Life, Radiant AI, Nemesis and Census",
+          "content": "S.T.A.L.K.E.R.'s A-Life simulates distant actors at reduced detail; Bethesda's Radiant AI gives NPCs schedules and goal packages; Shadow of Mordor's Nemesis System persists rivalries, rank, scars, and memory; Watch Dogs: Legion generates citizens with occupations, relationships, schedules, and persistent consequences. The common design principle is stateful simulation across encounters, not free-form generative dialogue.",
+          "sources": [
+            { "label": "S.T.A.L.K.E.R. A-Life developer interview", "url": "https://www.gamedeveloper.com/pc/interview-inside-the-ai-of-i-s-t-a-l-k-e-r-i-" },
+            { "label": "Nemesis System design analysis", "url": "https://www.gamedeveloper.com/design/designing-i-shadow-of-mordor-i-s-nemesis-system" },
+            { "label": "Watch Dogs: Legion simulation", "url": "https://www.gamedeveloper.com/design/how-watch-dogs-legion-s-play-as-anyone-simulation-works" }
+          ]
+        },
+        {
+          "title": "Adaptive Pacing — Directors, Preparedness and Predictive Challenge",
+          "content": "Left 4 Dead's AI Director controls encounter intensity, enemy populations, and item placement; Alien: Isolation separates macro tension direction from the Alien's local hunting AI; Metal Gear Solid V tracks recurring tactics and equips enemies with authored counters; Will You Snail? predicts player movement and places traps. Adaptation is usually implemented as transparent statistics, rules, and scoring rather than online machine learning.",
+          "sources": [
+            { "label": "Valve — AI Systems of Left 4 Dead", "url": "https://steamcdn-a.akamaihd.net/apps/valve/2009/ai_systems_of_l4d_mike_booth.pdf" },
+            { "label": "Alien: Isolation AI technical analysis", "url": "https://www.gamedeveloper.com/design/the-perfect-organism-the-ai-of-alien-isolation" },
+            { "label": "Will You Snail? official listing", "url": "https://store.steampowered.com/app/1115050/Will_You_Snail" }
+          ]
+        },
+        {
+          "title": "Procedural Generation, Ecology and Story Simulation",
+          "content": "No Man's Sky constructs planets and ecosystems from deterministic seeds; Rain World simulates predator-prey relationships and creature goals; Dwarf Fortress generates history and detailed agents; RimWorld's storytellers select incidents according to colony state; Prison Architect and The Long Dark combine needs, schedules, wildlife, pathfinding, and environmental pressure. These systems show that procedural and simulation AI remain commercially significant even when they are not machine learning.",
+          "sources": [
+            { "label": "No Man's Sky world-generation GDC talk", "url": "https://www.gdcvault.com/play/1024265/Building-Worlds-in-No-Man-s" },
+            { "label": "Rain World procedural design", "url": "https://unity3d.com/blog/exploring-procedural-design-rain-world" },
+            { "label": "Dwarf Fortress official feature specification", "url": "https://www.bay12games.com/dwarves/features.html" }
+          ]
+        },
+        {
+          "title": "Machine Learning and Generative AI in Shipped Experiences",
+          "content": "Confirmed modern deployments tend to be narrow or clearly productised. ARC Raiders applies reinforcement learning to selected machine locomotion, not whole combat strategy. AI Dungeon generates interactive narrative with language models. The Mantella Skyrim mod combines speech recognition, LLM dialogue, memory summaries, and voice synthesis. High on Life used Midjourney during art production. These examples must be distinguished from unsupported claims that games such as GTA VI have learning NPC populations.",
+          "sources": [
+            { "label": "ARC Raiders AI usage interview", "url": "https://www.pcgamesn.com/arc-raiders/generative-ai-use" },
+            { "label": "AI Dungeon original repository", "url": "https://github.com/latitudegames/AIDungeon" },
+            { "label": "Mantella official repository", "url": "https://github.com/art-from-the-machine/Mantella" },
+            { "label": "High on Life developer comments on AI art", "url": "https://www.pcgamer.com/high-on-lifes-creator-says-ai-art-makes-the-game-feel-like-a-strange-alternate-universe/" }
+          ]
+        }
+      ]
+    },
+    "regulatory-timeline": {
+      "label": "Regulatory Timeline",
+      "icon": "📅",
+      "subsections": [
+        {
+          "title": "EU AI Act — 2 August 2026",
+          "content": "High-risk AI obligations become enforceable. Prohibitions on unacceptable AI practices take effect. Companies must have AI literacy programmes in place. Key requirements: risk management systems, technical documentation, record keeping, human oversight, conformity assessments for high-risk AI systems.",
+          "sources": [
+            { "label": "EU AI Act Implementation Timeline — Official", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "title": "EU AI Act — 2 December 2027",
+          "content": "GPAI (General-Purpose AI) model obligations take effect. Foundation model providers must comply with transparency requirements, including technical documentation, training data summaries, and copyright policy compliance. Synthetic content watermarking and disclosure obligations become fully enforceable.",
+          "sources": [
+            { "label": "EU AI Act Implementation Timeline — Official", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "title": "EU AI Act — 2 August 2028",
+          "content": "Full compliance deadline for all AI systems. All existing products must meet full regulatory requirements. Transitional treatment ends. Companies must demonstrate ongoing conformity through regular audits and impact assessments.",
+          "sources": [
+            { "label": "EU AI Act Implementation Timeline — Official", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "title": "UK — ICO AI Roadmap (2026-2027)",
+          "content": "ICO enforcing AI and automated decision-making guidance through existing data protection framework. Key milestones: mandatory AI transparency reporting consultation, sector-specific AI guidance from Ofcom/CMA/FCA, AI Safety Institute expanding testing capabilities. Companies should prepare for mandatory transparency requirements and evolving licensing framework for frontier AI models.",
+          "sources": [
+            { "label": "UK AI Safety Institute — Research & Testing", "url": "https://www.aisi.gov.uk/research" },
+            { "label": "UK AI Regulation — Commons Library Research Briefing", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" }
+          ]
+        },
+        {
+          "title": "Strategic Deadline: 2027",
+          "content": "By 2027, dual EU/UK compliance will be operational reality for gaming and media companies. AI governance frameworks must be in place. Technical compliance infrastructure (watermarking, metadata, audit trails) must be built into development pipelines. Companies operating in both jurisdictions will need dual compliance models — rules-based (EU) and principles-based (UK).",
+          "sources": [
+            { "label": "EU AI Act Implementation Timeline — Official", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" },
+            { "label": "UK AI Regulation — Commons Library Research Briefing", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" },
+            { "label": "AI Omnibus Enters Force (EU Digital Strategy)", "url": "https://digital-strategy.ec.europa.eu/en/news/ai-omnibus-enters-force" }
+          ]
+        }
+      ]
+    }
+  }
+}

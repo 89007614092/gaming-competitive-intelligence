@@ -1,0 +1,800 @@
+{
+  "categories": {
+    "content-labelling": {
+      "id": "content-labelling",
+      "title": "Content Labelling & Transparency",
+      "icon": "🏷️",
+      "description": "Under Article 50 of the EU AI Act, commercial providers and deployers of generative media must make synthetic content explicitly identifiable. Failure risks fines of up to €15 million or 3% of global annual turnover. The compliance framework requires visible labelling, invisible watermarking, and cryptographic metadata.",
+      "severity": "critical",
+      "regulations": ["EU AI Act Art. 50", "EU AI Transparency Code of Practice", "DMA", "UK ICO Transparency Principle"],
+      "risks": [
+        {
+          "id": "cl-1",
+          "title": "AI-Generated Content Without Labelling",
+          "description": "Any company deploying generative AI (text, image, video, audio, 3D) must ensure synthetic outputs carry machine-readable markers, visible disclosure, or cryptographic provenance metadata. Media companies face unique exposure because generative AI directly interacts with content creation and IP.",
+          "affectedCompanies": ["Tencent", "Meta", "Google", "Amazon", "Synthesia", "VEED.io", "Colossyan", "Black Forest Labs", "Stability AI", "Exactly.ai", "Photoroom", "ElevenLabs"],
+          "products": ["Hunyuan 3D", "HY 3D", "GiiNEX", "Tencent Cloud AI Digital Human", "Meta AI / Emu", "Google Veo / Imagen 3", "AWS Bedrock / Titan", "Synthesia 3.0", "Stable Diffusion", "FLUX"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["blackforest", "stability", "synthesia", "google", "meta"],
+          "sources": [
+            { "label": "EU AI Act Article 50 — Transparency Obligations", "url": "https://artificialintelligenceact.eu/article/50/" },
+            { "label": "EU AI Act Code of Practice on Transparency", "url": "https://digital-strategy.ec.europa.eu/en/policies/code-practice-ai-generated-content" }
+          ]
+        },
+        {
+          "id": "cl-2",
+          "title": "Steam Platform AI Disclosure Requirements",
+          "description": "Steam requires developers to disclose AI usage in game development. Industry commentary suggests AI disclosures correlate with lower engagement and fewer reviews. Consumers may associate AI use with reduced development effort, creating a tension between regulatory transparency and commercial outcomes.",
+          "affectedCompanies": ["Valve", "Tencent", "All game developers distributing on Steam"],
+          "products": ["Steam", "WeGame", "All Steam-distributed AI games"],
+          "severity": "high",
+          "kbCrossReference": "strategic-insights",
+          "competitorReference": ["valve"],
+          "sources": [
+            { "label": "Steam AI Content Disclosure Policy", "url": "https://store.steampowered.com" }
+          ]
+        },
+        {
+          "id": "cl-3",
+          "title": "Watermarking Removal & Adversarial Attacks",
+          "description": "Open-weights models like FLUX and Stable Diffusion can be altered post-release by end-users. Bad actors may attempt to strip baked-in synthetic tags. Providers must implement deep, immutable mathematical watermarks directly into the latent space that survive downscaling, compression, and screenshotting. Audio providers (ElevenLabs) deploy inaudible acoustic watermarks in high-frequency spectra.",
+          "affectedCompanies": ["Black Forest Labs", "Stability AI", "ElevenLabs", "Google"],
+          "products": ["FLUX", "Stable Diffusion", "ElevenLabs Voice Cloning", "SynthID"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["blackforest", "stability", "elevenlabs", "google"],
+          "sources": [
+            { "label": "Black Forest Labs — FLUX watermarking", "url": "https://blackforestlabs.ai" },
+            { "label": "Stability AI — dual-layer metadata tracking", "url": "https://stability.ai" },
+            { "label": "ElevenLabs — AI Speech Classifier", "url": "https://elevenlabs.io" },
+            { "label": "Google DeepMind SynthID", "url": "https://deepmind.google/technologies/synthid/" }
+          ]
+        },
+        {
+          "id": "cl-4",
+          "title": "AI-Generated 3D Assets Without Labelling or Provenance",
+          "description": "API-driven 3D asset pipelines (Tripo, HY 3D, Hunyuan 3D) can generate production-ready meshes, textures, rigging and animations from text or image prompts. Each generated asset must carry visible disclosure, machine-readable markers, or cryptographic metadata under EU AI Act Article 50. Engine plugins (Unity, Unreal, Cocos, Godot) embed these assets into shipped games where the end player receives no transparency signal, creating downstream deployer liability.",
+          "affectedCompanies": ["Tripo AI / VAST", "Tencent (HY 3D / Hunyuan 3D)", "Maxon (Cinema 4D)", "Unity", "Epic Games", "All studios integrating API-generated 3D into shipped games"],
+          "products": ["Tripo API (text/image-to-3D, rigging, animation)", "HY 3D Model API", "Hunyuan 3D", "Cinema 4D HY 3D integration", "Unity Asset Store", "Unreal Engine Marketplace"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["tripo", "unity", "epic"],
+          "sources": [
+            { "label": "Tripo Developer API — 3D generation pipeline", "url": "https://developers.tripo3d.ai/en" },
+            { "label": "EU AI Act Article 50 — Transparency Obligations", "url": "https://artificialintelligenceact.eu/article/50/" }
+          ]
+        }
+      ]
+    },
+    "ai-npcs": {
+      "id": "ai-npcs",
+      "title": "AI NPCs & Synthetic Characters",
+      "icon": "🤖",
+      "description": "AI-powered NPCs using LLMs for dynamic dialogue, long-term memory, and emergent behaviour create risks around content moderation, narrative consistency, consumer backlash, and legal liability. The UKJT identifies that AI chatbot statements may be treated as statements of the deploying business under English law.",
+      "severity": "high",
+      "regulations": ["EU AI Act", "UKJT AI Liability Statement", "UK Consumer Protection Act 1987", "EU Product Liability Directive 2024/2853"],
+      "risks": [
+        {
+          "id": "npc-1",
+          "title": "Liability for AI-Generated NPC Dialogue",
+          "description": "Under the UKJT Legal Statement (July 2026), a court is likely to treat chatbot/AI-NPC statements as made by the business where the chatbot is presented as communicating with the business's authority. A failure to exercise oversight over AI system outputs (to put a 'human in the loop') is likely to be negligent. Developers could face liability for negligent or fraudulent misstatement by AI NPCs.",
+          "affectedCompanies": ["Microsoft (Inworld AI)", "Krafton (NVIDIA ACE CPC)", "Ubisoft (Ghostwriter)", "NetEase (Eggy Party AIGC)", "miHoYo (Nalo NPC)", "Meaning Machine (Dead Meat)"],
+          "products": ["Inworld AI NPC Toolkit", "PUBG Ally CPC", "Ghostwriter AI", "Eggy Party UGC", "Whispers from the Star", "Dead Meat Game Conscious AI"],
+          "severity": "critical",
+          "kbCrossReference": "case-studies",
+          "competitorReference": ["microsoft", "krafton", "ubisoft", "netease", "mihoyo"],
+          "sources": [
+            { "label": "UKJT Legal Statement on AI Liability (July 2026)", "url": "https://www.legislation.gov.uk" },
+            { "label": "UK Parliament — AI Regulation Briefing (CBP-10467)", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" }
+          ]
+        },
+        {
+          "id": "npc-2",
+          "title": "Consumer Backlash Against AI NPCs",
+          "description": "Quantic Foundry research (1,799 respondents) found 45.3% negative attitudes toward AI-generated NPC dialogue. 62.7% reported 'very negative' attitudes towards generative AI in games overall. However, UK YouGov data showed 60% interested in AI-powered NPCs — suggesting consumers distinguish between AI replacing creativity vs. enhancing gameplay.",
+          "affectedCompanies": ["All game studios using AI NPCs", "Particularly AAA studios (EA, Ubisoft, Activision)", "NetEase", "miHoYo"],
+          "products": ["Any game with AI-generated NPC dialogue"],
+          "severity": "high",
+          "kbCrossReference": "strategic-insights",
+          "competitorReference": ["ea", "ubisoft", "netease", "mihoyo"],
+          "sources": [
+            { "label": "Quantic Foundry — Gen AI in Games (Dec 2025)", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "YouGov — British Gamers on AI in Video Games", "url": "https://yougov.com/en-gb/articles/47743-british-gamers-take-on-ai-in-video-games" }
+          ]
+        },
+        {
+          "id": "npc-3",
+          "title": "LLM Hallucination & Content Moderation in Live Games",
+          "description": "LLM-enabled NPCs may generate inappropriate, harmful, or legally risky content in real time. Without robust moderation, content filtering, and output guardrails, studios risk regulatory penalties and reputational damage. Cost-control mechanisms (state summarisation, cached responses, rule-based pre-processing) become essential for commercially viable deployment.",
+          "affectedCompanies": ["NetEase", "miHoYo", "Krafton", "Microsoft", "Tencent", "Meaning Machine"],
+          "products": ["Eggy Party AIGC", "Nalo AI NPC", "PUBG Ally CPC", "Inworld AI", "GiiNEX NPC-LLM", "Dead Meat"],
+          "severity": "high",
+          "kbCrossReference": "technology",
+          "competitorReference": ["netease", "mihoyo", "krafton", "microsoft"],
+          "sources": [
+            { "label": "arXiv — LLMs in Games: 9 Use Cases", "url": "https://arxiv.org/pdf/2402.18659" }
+          ]
+        }
+      ]
+    },
+    "copyright-ip": {
+      "id": "copyright-ip",
+      "title": "Copyright & Training Data",
+      "icon": "©️",
+      "description": "The EU AI Act requires GPAI providers to comply with copyright-related obligations and publish training data summaries. Many publishers are increasingly focused on whether their content is used to train AI systems. Studios training on unlicensed content face IP leakage, infringement claims, and marketplace governance issues.",
+      "severity": "critical",
+      "regulations": ["EU AI Act GPAI Obligations", "EU Copyright Directive", "UK Copyright Law", "C2PA Standard"],
+      "risks": [
+        {
+          "id": "cp-1",
+          "title": "Training Data Copyright Infringement",
+          "description": "Foundation model providers must publish training data summaries and comply with EU copyright obligations. Studios that train proprietary micro-models on unlicensed artwork, game assets, or voice data face significant litigation risk. Exactly.ai's approach — training micro-models entirely on an artist's pre-approved style with C2PA metadata — represents a best practice for copyright-safe AI generation.",
+          "affectedCompanies": ["Stability AI", "Black Forest Labs", "Meta", "Google", "OpenAI", "All game studios training custom models"],
+          "products": ["Stable Diffusion", "FLUX", "Llama", "Gemini", "Any fine-tuned game AI model"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["stability", "blackforest", "meta", "google"],
+          "sources": [
+            { "label": "EU AI Act — GPAI training data obligations", "url": "https://artificialintelligenceact.eu" },
+            { "label": "Exactly.ai — C2PA metadata for artist consent", "url": "https://exactly.ai" }
+          ]
+        },
+        {
+          "id": "cp-2",
+          "title": "3D Asset Marketplace Copyright Exposure",
+          "description": "CGTrader and similar 3D marketplaces must distinguish between human-created, AI-assisted, and fully AI-generated assets, clarifying whether licences cover commercial reuse. Maxon's planned HY 3D integration into Cinema 4D (late 2026) embeds generative AI inside professional creative toolchains, raising supply-chain compliance and downstream deployer liability.",
+          "affectedCompanies": ["Tencent (HY 3D / CGTrader)", "Maxon", "Unity Asset Store", "Epic Games Marketplace"],
+          "products": ["HY 3D Model API", "Cinema 4D", "CGTrader", "Unity Asset Store", "Unreal Engine Marketplace"],
+          "severity": "high",
+          "kbCrossReference": "tencent-products",
+          "competitorReference": ["unity", "epic"],
+          "sources": [
+            { "label": "Tencent HY 3D — 3D AI creation engine", "url": "https://giinex.tencent.com" }
+          ]
+        },
+        {
+          "id": "cp-3",
+          "title": "Voice Cloning & Personality Rights",
+          "description": "ElevenLabs' voice cloning technology, when used for NPC dialogue, raises personality rights, performers' rights, and consent issues. Game studios must ensure voice actors have consented to AI cloning and that outputs are properly labelled. The UK and EU both have performers' rights frameworks that may apply.",
+          "affectedCompanies": ["ElevenLabs", "Tencent (GVoice)", "Game studios using cloned voices"],
+          "products": ["ElevenLabs Voice Synthesis", "Tencent GVoice"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["elevenlabs"],
+          "sources": [
+            { "label": "ElevenLabs — Voice Cloning Platform", "url": "https://elevenlabs.io" }
+          ]
+        }
+      ]
+    },
+    "high-risk-classification": {
+      "id": "high-risk-classification",
+      "title": "High-Risk AI Classification",
+      "icon": "⚠️",
+      "description": "The EU AI Act creates a formal category of High-Risk AI Systems covering employment, recruitment, education, creditworthiness, critical infrastructure, law enforcement, and biometrics. These systems require risk-management, data governance, human oversight, accuracy testing, and record retention.",
+      "severity": "critical",
+      "regulations": ["EU AI Act (Regulation 2024/1689)", "UK Sector-Led Regulation", "EU Product Liability Directive 2024/2853"],
+      "risks": [
+        {
+          "id": "hr-1",
+          "title": "Biometric Verification & Identification",
+          "description": "Tencent's PalmAI contactless biometric technology may trigger GDPR special-category data considerations and EU AI Act restrictions or high-risk classification. The distinction between authentication, verification, identification, and biometric categorisation is legally significant. The EU AI Act prohibits certain biometric categorisation practices outright.",
+          "affectedCompanies": ["Tencent (PalmAI)"],
+          "products": ["PalmAI"],
+          "severity": "critical",
+          "kbCrossReference": "tencent-products",
+          "competitorReference": [],
+          "sources": [
+            { "label": "EU AI Act — Prohibited AI Practices and High-Risk Classification", "url": "https://artificialintelligenceact.eu" },
+            { "label": "UK ICO — Biometric Data Guidance", "url": "https://ico.org.uk" }
+          ]
+        },
+        {
+          "id": "hr-2",
+          "title": "AI-Powered Employment & Recruitment Tools",
+          "description": "An HR software provider using AI to screen CVs could be classified as high-risk under the EU framework, triggering extensive compliance responsibilities. The UK has no equivalent statutory high-risk classification, but sector regulators may still impose requirements.",
+          "affectedCompanies": ["Palantir", "Smartly.io", "Meta", "Any company with AI hiring/HR tools"],
+          "products": ["Palantir Foundry / AIP", "Smartly.io automated screening", "Meta ad targeting"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["palantir", "smartly", "meta"],
+          "sources": [
+            { "label": "EU AI Act — High-Risk AI Systems", "url": "https://artificialintelligenceact.eu" }
+          ]
+        },
+        {
+          "id": "hr-3",
+          "title": "AI-Powered Player Analytics & Cheat Detection",
+          "description": "Palantir aggregates petabytes of player telemetry and orchestrates ML loops for matchmaking, cheat detection, and churn prediction. These systems may affect player access, reputation, and economic participation — potentially triggering high-risk obligations if they affect individuals' rights or opportunities.",
+          "affectedCompanies": ["Palantir", "Riot Games (Tencent)", "EA", "Activision"],
+          "products": ["Palantir AIP", "Riot anti-cheat systems", "EA player analytics", "Tencent HIVE moderation"],
+          "severity": "medium",
+          "kbCrossReference": "competitors",
+          "competitorReference": ["palantir", "ea"],
+          "sources": [
+            { "label": "Palantir — Foundry and AIP Platform", "url": "https://www.palantir.com" }
+          ]
+        }
+      ]
+    },
+    "liability-defects": {
+      "id": "liability-defects",
+      "title": "AI Liability & Product Defects",
+      "icon": "⚖️",
+      "description": "Under the new EU Product Liability Directive (2024/2853), software including AI explicitly qualifies as a product, irrespective of supply mode. Manufacturers that design a product developing unexpected behaviours remain liable. AI systems' ability to self-learn is relevant to defect assessment. UK common law negligence is being adapted to AI through UKJT guidance.",
+      "severity": "critical",
+      "regulations": ["EU Product Liability Directive 2024/2853", "UKJT AI Liability Statement (July 2026)", "UK Consumer Protection Act 1987"],
+      "risks": [
+        {
+          "id": "ld-1",
+          "title": "Strict Liability for AI Software Products",
+          "description": "Under the new EU PLD, AI software is now explicitly a 'product'. Manufacturers face strict liability regardless of fault. The definition of 'defect' now encompasses the product's 'ability to continue to learn or acquire new features' after market placement. Claims can include data corruption. The limitation period extends to 25 years for latent damage.",
+          "affectedCompanies": ["All AI developers selling into EU", "Tencent (Hunyuan, HY 3D)", "Synthesia", "Stability AI", "ElevenLabs", "Unity", "Epic Games"],
+          "products": ["Any AI software sold in EU"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["stability", "synthesia", "elevenlabs", "unity", "epic"],
+          "sources": [
+            { "label": "EU Product Liability Directive 2024/2853", "url": "https://digital-strategy.ec.europa.eu" },
+            { "label": "New PLD — AI as a Product", "url": "https://artificialintelligenceact.eu" }
+          ]
+        },
+        {
+          "id": "ld-2",
+          "title": "Software Update Liability & Cybersecurity",
+          "description": "Under the new PLD, manufacturers can be liable for damage resulting from missing or insufficient software updates or weak cybersecurity. Application developers who push updates to address risks may assume a duty of care under English law (UKJT). This creates a paradox: updating creates potential liability exposure, but failing to update may breach the standard of care.",
+          "affectedCompanies": ["All game studios", "Unity", "Epic Games", "Tencent (GiiNEX, game engines)"],
+          "products": ["Unity Engine", "Unreal Engine", "GiiNEX", "All live-service games with AI features"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["unity", "epic"],
+          "sources": [
+            { "label": "UKJT — AI Liability Under English Law (July 2026)", "url": "https://www.legislation.gov.uk" }
+          ]
+        },
+        {
+          "id": "ld-3",
+          "title": "Supply Chain Liability Cascades",
+          "description": "The AI supply chain involves data providers, foundation model developers, application developers, and deployers. The UKJT notes complexity of supply chains as a key difficulty in determining liability. The new PLD introduces liability for authorised representatives, software developers, fulfilment service providers, and even distributors and online marketplace operators under certain conditions.",
+          "affectedCompanies": ["All companies in AI supply chains", "Cloud providers (AWS, Azure, Tencent Cloud)", "Asset marketplaces (CGTrader, Unity Asset Store)"],
+          "products": ["Cloud AI workloads", "Marketplace-distributed AI assets", "Third-party AI integrations"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["google", "microsoft", "unity", "epic"],
+          "sources": [
+            { "label": "EU Product Liability Directive — Extended Defendents", "url": "https://digital-strategy.ec.europa.eu" }
+          ]
+        }
+      ]
+    },
+    "consumer-backlash": {
+      "id": "consumer-backlash",
+      "title": "Consumer Backlash & Reputation",
+      "icon": "📢",
+      "description": "Consumer acceptance is becoming as important as legal compliance. GDC 2026 survey found 52% of 2,300 industry professionals view generative AI negatively. Large studios face materially greater reputational risk than independent developers. 'Gameslop' — perceived AI-assembled content with limited creative oversight — risks reducing consumer trust, damaging discoverability, and lowering industry quality standards.",
+      "severity": "high",
+      "regulations": ["No specific regulation — reputational and commercial risk"],
+      "risks": [
+        {
+          "id": "cb-1",
+          "title": "AAA Studio AI Reputation Risk",
+          "description": "Large publishers face significantly greater reputational risk from AI adoption than indie developers. The strongest negative reactions occur where AI is perceived as 'cutting corners' despite substantial budgets. Consumers support AI for gameplay enhancement but oppose AI replacing artists, voice actors, writers, and designers.",
+          "affectedCompanies": ["EA", "Ubisoft", "Activision", "Take-Two", "Tencent", "Sony", "Microsoft"],
+          "products": ["Any AAA game with visible AI-generated content"],
+          "severity": "high",
+          "kbCrossReference": "strategic-insights",
+          "competitorReference": ["ea", "ubisoft", "sony", "microsoft"],
+          "sources": [
+            { "label": "GDC 2026 — 2,300 Developer Survey Results", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" },
+            { "label": "YouGov — British Gamers on AI in Video Games", "url": "https://yougov.com/en-gb/articles/47743-british-gamers-take-on-ai-in-video-games" }
+          ]
+        },
+        {
+          "id": "cb-2",
+          "title": "AI Disclosure as a Commercial Barrier",
+          "description": "Steam's AI disclosure policy creates an unusual situation where transparency, while beneficial for governance, may create short-term commercial challenges. AI-labelled products may receive fewer reviews and lower engagement. This creates a dual challenge: legal compliance through required disclosures, and audience acceptance once those disclosures become visible.",
+          "affectedCompanies": ["All developers on Steam", "Tencent (WeGame)"],
+          "products": ["Steam games with AI content", "WeGame AI games"],
+          "severity": "medium",
+          "kbCrossReference": "strategic-insights",
+          "competitorReference": ["valve"],
+          "sources": [
+            { "label": "Steam AI Disclosure Policy", "url": "https://store.steampowered.com" }
+          ]
+        },
+        {
+          "id": "cb-3",
+          "title": "Demographic Divide in AI Acceptance",
+          "description": "Quantic Foundry research found 75% of women, 51% of men, and 83% of non-binary respondents had 'very negative' attitudes toward generative AI in games. The 18-34 age cohort showed strongest resistance. This has implications for games targeting younger or female-skewing audiences, who may actively avoid AI-labelled products.",
+          "affectedCompanies": ["All game publishers", "Particularly mobile/casual game studios", "NetEase (Eggy Party)", "Roblox"],
+          "products": ["Casual and mobile games with AI features", "UGC platforms"],
+          "severity": "high",
+          "kbCrossReference": "strategic-insights",
+          "competitorReference": ["roblox", "netease"],
+          "sources": [
+            { "label": "Quantic Foundry — Demographic Breakdown", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" }
+          ]
+        }
+      ]
+    },
+    "environmental": {
+      "id": "environmental",
+      "title": "Environmental & Sustainability",
+      "icon": "🌍",
+      "description": "Consumer concerns increasingly extend to data-centre energy consumption, water usage, GPU demand, and carbon emissions from AI model training and deployment. Consumers expect AI efficiency gains to be reinvested into quality rather than volume.",
+      "severity": "medium",
+      "regulations": ["EU CSRD (Corporate Sustainability Reporting)", "UK ESG requirements", "Emerging AI-specific environmental standards"],
+      "risks": [
+        {
+          "id": "env-1",
+          "title": "Cloud AI Compute Environmental Impact",
+          "description": "AI game development pipelines (procedural generation, automated QA, rendering, analytics) increasingly depend on cloud infrastructure. Consumers expect transparency about environmental impact. The EU Commission is investigating cloud computing services under DMA Article 19, with findings expected May 2027.",
+          "affectedCompanies": ["Google (DeepMind)", "Meta", "Microsoft (Azure)", "Amazon (AWS)", "Tencent Cloud"],
+          "products": ["Cloud AI compute", "GPU infrastructure", "Model training environments"],
+          "severity": "medium",
+          "kbCrossReference": "competitors",
+          "competitorReference": ["google", "meta", "microsoft"],
+          "sources": [
+            { "label": "DMA Article 19 — Cloud Market Investigation", "url": "https://digital-markets-act.ec.europa.eu" },
+            { "label": "Quantic Foundry — Environmental Concerns in AI Gaming", "url": "https://quanticfoundry.com/2025/12/18/gen-ai/" }
+          ]
+        },
+        {
+          "id": "env-2",
+          "title": "LLM Compute Cost Spiral in AAA Games",
+          "description": "AAA games may involve millions of players with continuous LLM-NPC interactions. Every generated response carries compute cost, creating risk of uncontrolled operational expenditure. Cost-control mechanisms (state summarisation, caching, rule-based pre-processing, local inference) become essential for commercial viability.",
+          "affectedCompanies": ["NetEase", "miHoYo", "Krafton", "Microsoft", "Ubisoft", "Tencent"],
+          "products": ["LLM-powered NPCs", "Dynamic narrative systems", "Runtime generative UGC"],
+          "severity": "high",
+          "kbCrossReference": "technology",
+          "competitorReference": ["netease", "mihoyo", "krafton", "microsoft", "ubisoft"],
+          "sources": [
+            { "label": "arXiv — LLMs in Games: Technical Constraints", "url": "https://arxiv.org/pdf/2402.18659" }
+          ]
+        }
+      ]
+    },
+    "cross-border": {
+      "id": "cross-border",
+      "title": "Cross-Border Compliance",
+      "icon": "🌐",
+      "description": "The EU and UK are increasingly two distinct AI regulatory jurisdictions. Companies face dual-track compliance: EU's rules-based AI Act with binding obligations vs. UK's principles-based, sector-led approach. For Chinese technology companies, European market access depends on product-level compliance design.",
+      "severity": "critical",
+      "regulations": ["EU AI Act", "UK ICO Framework", "UK GDPR", "China AI Governance", "DMA cross-border provisions"],
+      "risks": [
+        {
+          "id": "cb-1",
+          "title": "EU vs UK Regulatory Divergence",
+          "description": "The EU imposes legally binding obligations with prescribed documentation, conformity assessments, and mandatory post-market monitoring. The UK is intentionally flexible with broad principles applied by sector regulators. Technology companies may ultimately design around EU requirements as the more prescriptive standard — similar to GDPR becoming a de facto global privacy standard.",
+          "affectedCompanies": ["All multinational companies operating in both jurisdictions", "Tencent", "Sony", "Microsoft", "Google", "Meta"],
+          "products": ["All AI products sold in Europe"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["sony", "microsoft", "google", "meta"],
+          "sources": [
+            { "label": "UK Parliament — AI Regulation Briefing (CBP-10467)", "url": "https://commonslibrary.parliament.uk/research-briefings/cbp-10467/" },
+            { "label": "EU AI Act — Official Text (Regulation 2024/1689)", "url": "https://artificialintelligenceact.eu" }
+          ]
+        },
+        {
+          "id": "cb-2",
+          "title": "Tencent Cloud European Compliance Exposure",
+          "description": "Tencent Cloud's Frankfurt infrastructure (3 AZs), HY 3D / Hunyuan 3D tools, AI Agent Platform 3.0, and PalmAI biometric systems create multi-dimensional EU/UK exposure. A China-based provider may face EU obligations through European customers, users, hosted workloads, or partners even without European legal presence. Compliance must be built into product design from the outset.",
+          "affectedCompanies": ["Tencent Cloud", "Tencent (Hunyuan, GiiNEX, HY 3D)"],
+          "products": ["Frankfurt Cloud Region", "HY 3D / Hunyuan 3D", "AI Agent Platform 3.0", "PalmAI", "GiiNEX", "Tencent Cloud AI Digital Human"],
+          "severity": "critical",
+          "kbCrossReference": "tencent-products",
+          "competitorReference": [],
+          "sources": [
+            { "label": "Tencent Cloud — International Expansion", "url": "https://giinex.tencent.com" },
+            { "label": "EU AI Act — Extraterritorial Reach", "url": "https://artificialintelligenceact.eu" }
+          ]
+        },
+        {
+          "id": "cb-3",
+          "title": "DMA Enforcement Risk for Platform Companies",
+          "description": "The European Commission fined Google €890 million under DMA (July 2026). Gatekeeper designations (Apple, Alphabet, Meta, Amazon, Microsoft, ByteDance) create enhanced obligations for interoperability, self-preferencing, and platform competition. AI-enabled products on gatekeeper platforms face overlapping DMA and AI Act compliance requirements.",
+          "affectedCompanies": ["Google", "Apple", "Meta", "Amazon", "Microsoft", "ByteDance"],
+          "products": ["Google Play / Search", "App Store", "Meta platforms", "AWS / Azure", "TikTok"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["google", "meta", "microsoft", "bytedance"],
+          "sources": [
+            { "label": "DMA — Google €890M Fine (July 2026)", "url": "https://digital-markets-act.ec.europa.eu/commission-fines-google-eur890-million-breaches-digital-markets-act-2026-07-23_en" }
+          ]
+        },
+        {
+          "id": "cb-4",
+          "title": "Prohibited AI Practices — Social Scoring & Manipulation",
+          "description": "The EU AI Act prohibits certain AI practices outright: social scoring, manipulative AI, exploitation of vulnerable individuals, and certain biometric categorisation. The UK has no equivalent statutory list, but harmful uses may still be addressed through existing laws. Game companies using AI for player profiling, dynamic pricing, or behavioural manipulation must assess EU prohibition risk.",
+          "affectedCompanies": ["All companies using AI for player analytics", "Palantir", "NetEase", "Tencent"],
+          "products": ["Player behaviour analysis", "Dynamic pricing systems", "Behavioural targeting", "Addiction-risk profiling"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["palantir", "netease"],
+          "sources": [
+            { "label": "EU AI Act — Prohibited Practices", "url": "https://artificialintelligenceact.eu" }
+          ]
+        }
+      ]
+    },
+    "timeline-deadlines": {
+      "id": "timeline-deadlines",
+      "title": "Key Deadlines & Upcoming Regulation",
+      "icon": "📅",
+      "description": "Critical compliance deadlines through 2030 that affect AI products, services, and go-to-market strategies. Non-compliance with EU AI Act provisions triggers fines up to €35 million or 7% of global annual turnover (prohibited practices), or €15 million / 3% (transparency obligations).",
+      "severity": "critical",
+      "regulations": ["EU AI Act (2024/1689)", "EU PLD 2024/2853", "UK ICO Roadmap", "DMA"],
+      "risks": [
+        {
+          "id": "td-1",
+          "title": "2 August 2026 — EU AI Act General Provisions & Prohibited Practices",
+          "description": "Prohibited AI practices provisions and general provisions of the EU AI Act entered into force. Companies must immediately cease any prohibited AI uses (social scoring, manipulative AI, certain biometric categorisation). Transitional treatment of existing products begins.",
+          "affectedCompanies": ["All companies with AI systems in EU market"],
+          "products": ["All AI systems affecting EU persons"],
+          "severity": "critical",
+          "kbCrossReference": "regulatory-timeline",
+          "competitorReference": [],
+          "sources": [
+            { "label": "EU AI Act Implementation Timeline", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "id": "td-2",
+          "title": "9 December 2026 — EU Product Liability Directive Implementation",
+          "description": "Member States must implement the new PLD by this date. Software including AI explicitly becomes a 'product' under strict liability. The old Directive continues to apply to products already on the market. Companies should review product liability risk profiles, insurance coverage, supply chain agreements, and recall systems.",
+          "affectedCompanies": ["All companies selling software/AI into EU"],
+          "products": ["All EU-market software products"],
+          "severity": "critical",
+          "kbCrossReference": "regulatory-timeline",
+          "competitorReference": [],
+          "sources": [
+            { "label": "EU Product Liability Directive 2024/2853", "url": "https://digital-strategy.ec.europa.eu" }
+          ]
+        },
+        {
+          "id": "td-3",
+          "title": "2 December 2027 — GPAI Rules & High-Risk AI Systems (Annex III)",
+          "description": "GPAI model rules and high-risk AI system obligations under Annex III come into force. Foundation model developers face documentation, evaluation, and incident reporting requirements. Systems with 'systemic risk' face additional adversarial testing and cybersecurity obligations.",
+          "affectedCompanies": ["Stability AI", "Black Forest Labs", "Meta", "Google", "Mistral AI", "Tencent (Hunyuan)"],
+          "products": ["Stable Diffusion", "FLUX", "Llama", "Gemini", "Mistral models", "Hunyuan LLM"],
+          "severity": "critical",
+          "kbCrossReference": "regulatory-timeline",
+          "competitorReference": ["stability", "blackforest", "meta", "google", "mistral"],
+          "sources": [
+            { "label": "EU AI Act — GPAI Obligations", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        },
+        {
+          "id": "td-4",
+          "title": "2 August 2028 — Full EU AI Act Application",
+          "description": "All remaining EU AI Act obligations apply. Full scope includes all high-risk systems, all transparency requirements under Article 50, and full enforcement capability. Companies must have complete AI inventories, risk classifications, documentation libraries, and compliance governance in place.",
+          "affectedCompanies": ["All companies with AI systems in EU market"],
+          "products": ["All EU-market AI systems"],
+          "severity": "critical",
+          "kbCrossReference": "regulatory-timeline",
+          "competitorReference": [],
+          "sources": [
+            { "label": "EU AI Act — Full Implementation", "url": "https://ai-act-service-desk.ec.europa.eu/en/ai-act/timeline/timeline-implementation-eu-ai-act" }
+          ]
+        }
+      ]
+    },
+    "prohibited-practices": {
+      "id": "prohibited-practices",
+      "title": "Prohibited AI Practices & Penalties",
+      "icon": "🚫",
+      "description": "The EU AI Act prohibits certain AI practices with penalties up to €35 million or 7% of global annual turnover. Other violations (transparency, GPAI obligations) carry fines up to €15 million or 3%. The UK currently has no equivalent statutory prohibition list, but harmful uses may be addressed through existing law.",
+      "severity": "critical",
+      "regulations": ["EU AI Act Prohibited Practices", "UK Consumer Law", "UK Equality Law", "UK GDPR"],
+      "risks": [
+        {
+          "id": "pp-1",
+          "title": "Manipulative & Exploitative AI in Games",
+          "description": "The EU AI Act prohibits AI systems that deploy subliminal techniques or exploit vulnerabilities to materially distort behaviour causing harm. Game companies using AI for addictive mechanics, loot-box optimisation targeting vulnerable players, or manipulative monetisation may fall within scope, especially where targeting children or vulnerable adults.",
+          "affectedCompanies": ["All mobile/F2P game studios", "NetEase", "Tencent", "Roblox", "Activision"],
+          "products": ["Gacha/loot-box systems", "AI-optimised monetisation", "Behavioural targeting", "Engagement-maximising algorithms"],
+          "severity": "critical",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["netease", "roblox"],
+          "sources": [
+            { "label": "EU AI Act — Prohibited Practices (Title II)", "url": "https://artificialintelligenceact.eu" }
+          ]
+        },
+        {
+          "id": "pp-2",
+          "title": "Emotion Recognition & Biometric Categorisation",
+          "description": "The EU AI Act restricts AI systems that infer emotions in workplace and education settings, and prohibits certain biometric categorisation systems that deduce race, political opinions, trade union membership, religious beliefs, sex life, or sexual orientation. Game companies using emotion recognition for gameplay or analytics must assess whether use cases fall within prohibited categories.",
+          "affectedCompanies": ["Sony (PSVR2)", "Meta (Quest)", "Tencent", "Google"],
+          "products": ["VR/MR emotion detection", "Player biometric feedback", "Affective gaming systems"],
+          "severity": "high",
+          "kbCrossReference": "regulations",
+          "competitorReference": ["sony", "meta", "google"],
+          "sources": [
+            { "label": "EU AI Act — Emotion Recognition and Biometric Restrictions", "url": "https://artificialintelligenceact.eu" }
+          ]
+        }
+      ]
+    },
+    "current-game-ai-risks": {
+      "id": "current-game-ai-risks",
+      "title": "Current Game AI Deployment Risks",
+      "icon": "🎮",
+      "description": "Evidence from shipped and community-built game AI shows that risk differs substantially by implementation. Conventional authored AI mainly raises quality, fairness, accessibility, and product-liability questions; generative dialogue, voice, player profiling, and generated assets add content, privacy, copyright, transparency, and moderation exposure.",
+      "severity": "high",
+      "regulations": ["EU AI Act Article 50", "UK GDPR", "EU GDPR", "EU Product Liability Directive 2024/2853", "Copyright and Performers' Rights"],
+      "risks": [
+        {
+          "id": "cu-1",
+          "title": "Generative Dialogue and Memory Can Produce Uncontrolled Content",
+          "description": "AI Dungeon and the Mantella Skyrim mod demonstrate real-time LLM narrative, contextual memory, speech recognition, and voice synthesis. The same capabilities can expose a commercial game to hallucination, harmful output, privacy leakage, age-rating problems, impersonation, and unbounded moderation cost. Production deployments need retrieval boundaries, output filters, logging, escalation, consent, and clear disclosure.",
+          "affectedCompanies": ["Latitude", "Microsoft / Bethesda ecosystem", "Inworld AI", "NVIDIA ACE partners", "All studios deploying LLM NPCs"],
+          "products": ["AI Dungeon", "Mantella", "LLM NPC systems", "Conversational companions"],
+          "severity": "critical",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["microsoft", "latitude", "inworld", "nvidia", "meaning-machine"],
+          "sources": [
+            { "label": "AI Dungeon original repository", "url": "https://github.com/latitudegames/AIDungeon" },
+            { "label": "Mantella official repository", "url": "https://github.com/art-from-the-machine/Mantella" }
+          ]
+        },
+        {
+          "id": "cu-2",
+          "title": "Generated Art and Voice Require Provenance and Consent",
+          "description": "High on Life's acknowledged Midjourney-assisted art and ARC Raiders' authorised text-to-speech illustrate two production uses with different controls. Generated visual assets require training-data, licence, disclosure, and provenance review. Synthetic speech requires explicit performer consent, contract scope, security against voice misuse, and records showing which outputs are generated.",
+          "affectedCompanies": ["Squanch Games", "Embark Studios", "ElevenLabs", "Voice AI vendors", "Studios using image generators"],
+          "products": ["High on Life", "ARC Raiders", "AI-assisted art pipelines", "Text-to-speech game systems"],
+          "severity": "high",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["embark", "elevenlabs"],
+          "sources": [
+            { "label": "High on Life developer comments on AI art", "url": "https://www.pcgamer.com/high-on-lifes-creator-says-ai-art-makes-the-game-feel-like-a-strange-alternate-universe/" },
+            { "label": "ARC Raiders developer comments on AI use", "url": "https://www.pcgamesn.com/arc-raiders/generative-ai-use" }
+          ]
+        },
+        {
+          "id": "cu-3",
+          "title": "Adaptive Systems Need Fairness, Explainability and Boundaries",
+          "description": "Metal Gear Solid V's preparedness rules, Left 4 Dead's Director, Alien: Isolation's tension director, RimWorld's storytellers, and Will You Snail?'s predictive traps show how player-responsive AI shapes difficulty and engagement. These systems are usually low regulatory risk when local and non-personal, but telemetry-driven personalisation can become opaque, manipulative, inaccessible, or discriminatory if it profiles players without meaningful controls.",
+          "affectedCompanies": ["Konami", "Valve", "Sega / Creative Assembly", "Ludeon Studios", "All studios using adaptive difficulty or engagement optimisation"],
+          "products": ["Metal Gear Solid V", "Left 4 Dead", "Alien: Isolation", "RimWorld", "Will You Snail?"],
+          "severity": "medium",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["valve", "creative-assembly", "ludeon", "ea"],
+          "sources": [
+            { "label": "Valve — AI Systems of Left 4 Dead", "url": "https://steamcdn-a.akamaihd.net/apps/valve/2009/ai_systems_of_l4d_mike_booth.pdf" },
+            { "label": "Alien: Isolation AI analysis", "url": "https://www.gamedeveloper.com/design/the-perfect-organism-the-ai-of-alien-isolation" }
+          ]
+        },
+        {
+          "id": "cu-4",
+          "title": "Marketing Claims Must Distinguish ML from Authored AI",
+          "description": "The document's GTA VI and Will You Snail? examples highlight a recurring intelligence risk: sophisticated game logic is often described as machine learning without technical evidence. Misclassification can distort competitor analysis, investment decisions, disclosures, and risk assessments. Evidence should distinguish authored rules, procedural generation, offline-trained models, reinforcement learning, generative models, and unconfirmed speculation.",
+          "affectedCompanies": ["Publishers", "Analysts", "Technology vendors", "Media outlets"],
+          "products": ["Grand Theft Auto VI", "Will You Snail?", "Any game marketed with ambiguous AI claims"],
+          "severity": "medium",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["take-two"],
+          "sources": [
+            { "label": "Official Grand Theft Auto VI page", "url": "https://www.rockstargames.com/VI" },
+            { "label": "Will You Snail? official listing", "url": "https://store.steampowered.com/app/1115050/Will_You_Snail" }
+          ]
+        },
+        {
+          "id": "cu-5",
+          "title": "Persistent Simulation Can Create Product and Safety Failures",
+          "description": "Radiant AI, A-Life, the Nemesis System, Watch Dogs' citizen simulation, and Rockstar's open-world agents rely on many interacting rules, memories, schedules, relationships, and navigation systems. Emergent outcomes can break quests, expose offensive combinations, create inaccessible states, or produce behavior that is difficult to reproduce during testing. Studios need deterministic replay, state inspection, fail-safe quest recovery, content constraints, and audit logs for complex agent systems.",
+          "affectedCompanies": ["Bethesda Game Studios", "GSC Game World", "Monolith Productions / WB Games", "Ubisoft", "Rockstar Games", "Hello Games"],
+          "products": ["Radiant AI / Radiant Story", "S.T.A.L.K.E.R. A-Life", "Nemesis System", "Watch Dogs Census", "Rockstar open-world AI", "No Man's Sky procedural worlds"],
+          "severity": "high",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["bethesda", "gsc", "monolith", "ubisoft", "take-two", "hello-games"],
+          "sources": [
+            { "label": "S.T.A.L.K.E.R. A-Life developer interview", "url": "https://www.gamedeveloper.com/pc/interview-inside-the-ai-of-i-s-t-a-l-k-e-r-i-" },
+            { "label": "Nemesis System patent", "url": "https://patents.google.com/patent/US10926179B2/en" },
+            { "label": "Watch Dogs: Legion simulation design", "url": "https://www.gamedeveloper.com/design/how-watch-dogs-legion-s-play-as-anyone-simulation-works" }
+          ]
+        },
+        {
+          "id": "cu-6",
+          "title": "Learned Locomotion and AI Infrastructure Require Validation Boundaries",
+          "description": "ARC Raiders demonstrates a bounded use of reinforcement learning for robot locomotion, while NVIDIA ACE and Inworld provide reusable character infrastructure across studios. Learned controllers and third-party AI middleware create supplier, testing, cybersecurity, model-update, and incident-allocation risks. Contracts and assurance plans should define which subsystem learns, approved update paths, fallback behavior, telemetry retention, and responsibility when an upstream model or service changes.",
+          "affectedCompanies": ["Embark Studios", "NVIDIA", "Inworld AI", "Krafton", "Microsoft", "Studios integrating third-party game AI middleware"],
+          "products": ["ARC Raiders learned locomotion", "NVIDIA ACE", "Inworld Character Engine", "PUBG Ally CPC"],
+          "severity": "high",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["embark", "nvidia", "inworld", "krafton", "microsoft"],
+          "sources": [
+            { "label": "ARC Raiders developer explanation", "url": "https://www.pcgamesn.com/arc-raiders/generative-ai-use" },
+            { "label": "NVIDIA ACE autonomous game characters", "url": "https://www.nvidia.com/en-us/geforce/news/nvidia-ace-autonomous-ai-companions-pubg-naraka-bladepoint/" },
+            { "label": "Inworld AI character infrastructure", "url": "https://inworld.ai/blog/new-ai-infrastructure-scaling-games-media-characters" }
+          ]
+        },
+        {
+          "id": "cu-7",
+          "title": "World Models Create Persistent Content and Liability Trails",
+          "description": "Project Eden, GameNGen, Genie 3, Odyssey and Hunyuan-Gamecraft represent a shift from disposable generated clips to persistent, editable, multi-agent worlds. A world model that maintains object identity, remembers user-caused changes, and serves consistent multi-view observations creates a durable state that carries legal and operational weight. Persistent simulation risks include: accumulated offensive content, unrecoverable world states, persistent harassment between agents, audit burden across long-lived sessions, and liability for worlds that outlast the deploying game service.",
+          "affectedCompanies": ["Tripo AI / VAST (Project Eden)", "Google DeepMind (GameNGen, Genie 3)", "Odyssey", "Decart x Etched (Oasis)", "Tencent (Hunyuan-Gamecraft)", "World Labs"],
+          "products": ["Project Eden", "GameNGen", "Genie 3", "Odyssey-2", "Oasis", "Hunyuan-Gamecraft"],
+          "severity": "high",
+          "kbCrossReference": "current-game-ai",
+          "competitorReference": ["tripo", "google", "odyssey", "decart", "worldlabs"],
+          "sources": [
+            { "label": "Tripo Project Eden — persistent multiplayer world model", "url": "https://www.tripo3d.ai/research/project-eden" },
+            { "label": "Google GameNGen — diffusion real-time game engine", "url": "https://gamengen.github.io/" },
+            { "label": "Genie 3 — world model research", "url": "https://deepmind.google/discover/blog/genie-3-a-new-frontier-for-world-models/" }
+          ]
+        }
+      ]
+    }
+  },
+  "companyRiskSummaries": {
+    "tencent": {
+      "name": "Tencent",
+      "topRisks": ["content-labelling", "cross-border", "copyright-ip", "high-risk-classification", "prohibited-practices"],
+      "summary": "As the world's largest gaming company with expanding European cloud infrastructure (Frankfurt AZs), Tencent faces the broadest risk exposure. HY 3D/Hunyuan 3D tools must implement AI Act Art. 50 transparency and watermarking. PalmAI biometric tech may trigger high-risk classification. WeChat mini-program ecosystem faces platform governance exposure. European market access increasingly depends on compliance-by-design across the full product portfolio.",
+      "sources": [
+        { "label": "GiiNEX — Tencent Game AI Platform", "url": "https://giinex.tencent.com" },
+        { "label": "Tencent Cloud — European Infrastructure", "url": "https://www.tencent.com" }
+      ]
+    },
+    "netease": {
+      "name": "NetEase",
+      "topRisks": ["ai-npcs", "consumer-backlash", "prohibited-practices", "environmental"],
+      "summary": "Eggy Party's runtime generative UGC (Model AIGC) exposes NetEase to AI NPC content moderation, liability, and consumer trust risks. Over 1 million AI-generated map items raise questions about content governance at scale. The zero-barrier creation model — where natural language prompts generate playable 3D worlds — operates in a regulatory grey area for content provenance and child safety.",
+      "sources": [
+        { "label": "NetEase Games", "url": "https://www.neteasegames.com" }
+      ]
+    },
+    "bytedance": {
+      "name": "ByteDance",
+      "topRisks": ["content-labelling", "cross-border", "prohibited-practices"],
+      "summary": "Designated as a DMA gatekeeper (TikTok), ByteDance faces enhanced platform obligations. Douyin mini-games (~30% China market) and Jimeng AI video generation expose the company to content labelling and transparency requirements. EU market access for AI video tools requires Article 50 compliance.",
+      "sources": [
+        { "label": "DMA Gatekeeper Designations", "url": "https://digital-markets-act.ec.europa.eu" }
+      ]
+    },
+    "google": {
+      "name": "Google",
+      "topRisks": ["content-labelling", "copyright-ip", "cross-border", "prohibited-practices"],
+      "summary": "DMA gatekeeper recently fined €890M. DeepMind GameNGen, Genie 3/D4RT world models, Veo video, and Imagen 3 require SynthID watermarking compliance. EU AI Act GPAI obligations apply to Gemini. Cloud infrastructure faces DMA Article 19 investigation through May 2027.",
+      "sources": [
+        { "label": "DeepMind Genie", "url": "https://deepmind.google/technologies/genie/" },
+        { "label": "DMA — Google €890M Fine", "url": "https://digital-markets-act.ec.europa.eu/commission-fines-google-eur890-million-breaches-digital-markets-act-2026-07-23_en" }
+      ]
+    },
+    "meta": {
+      "name": "Meta",
+      "topRisks": ["content-labelling", "copyright-ip", "cross-border", "liability-defects"],
+      "summary": "DMA gatekeeper. Meta AI/Llama models, Emu video, and Quest VR/MR platform require AI Act transparency compliance. Signatory to EU AI Transparency Code; applies 'AI Info' labels. Researching generative video models as real-time physics engines creates emerging liability exposure. DSA/DMA obligations overlap with AI governance.",
+      "sources": [
+        { "label": "Meta AI", "url": "https://ai.meta.com" }
+      ]
+    },
+    "microsoft": {
+      "name": "Microsoft",
+      "topRisks": ["ai-npcs", "content-labelling", "cross-border", "liability-defects"],
+      "summary": "DMA gatekeeper. Inworld AI NPC toolkit integrated with Xbox/Azure exposes Microsoft to AI NPC liability and content moderation risks. Azure cloud AI workloads may require enhanced audit support and governance evidence for EU-regulated customers. OpenAI partnership creates supply-chain complexity.",
+      "sources": [
+        { "label": "Inworld AI — Xbox NPC Toolkit", "url": "https://www.inworld.ai" }
+      ]
+    },
+    "synthesia": {
+      "name": "Synthesia",
+      "topRisks": ["content-labelling", "liability-defects", "prohibited-practices"],
+      "summary": "Enterprise text-to-video avatar platform at high exposure to deepfake regulation. Synthesia 3.0 supports real-time interactive digital agents. Server-side cryptographic signatures and hardcoded EU AI disclosure icons are implemented. Used for automated game cutscene localisation — requires robust content provenance across dozens of languages.",
+      "sources": [
+        { "label": "Synthesia", "url": "https://www.synthesia.io" }
+      ]
+    },
+    "elevenlabs": {
+      "name": "ElevenLabs",
+      "topRisks": ["content-labelling", "copyright-ip", "liability-defects"],
+      "summary": "Market-leading voice cloning and synthesis at high exposure to audio deepfake regulation. Inaudible acoustic watermarking in high-frequency spectra. Free public AI Speech Classifier. Voice cloning for NPC dialogue raises personality rights, performers' rights, and consent issues.",
+      "sources": [
+        { "label": "ElevenLabs", "url": "https://elevenlabs.io" }
+      ]
+    },
+    "stability": {
+      "name": "Stability AI",
+      "topRisks": ["content-labelling", "copyright-ip", "liability-defects"],
+      "summary": "Open-access Stable Diffusion models face copyright training data, watermarking removal, and open-source liability risks. Dual-layer metadata tracking and adversarial testing to resist watermark stripping. EU AI Act GPAI obligations apply from Dec 2027. On-premise deployment by studios creates downstream deployer liability questions.",
+      "sources": [
+        { "label": "Stability AI", "url": "https://stability.ai" }
+      ]
+    },
+    "blackforest": {
+      "name": "Black Forest Labs",
+      "topRisks": ["content-labelling", "copyright-ip"],
+      "summary": "FLUX open-weights models require immutable latent-space watermarks. Because open-weights models can be altered post-release, watermark resilience to downscaling, compression, and screenshotting is critical. EU AI Act GPAI obligations apply from Dec 2027.",
+      "sources": [
+        { "label": "Black Forest Labs", "url": "https://blackforestlabs.ai" }
+      ]
+    },
+    "palantir": {
+      "name": "Palantir",
+      "topRisks": ["high-risk-classification", "prohibited-practices", "liability-defects"],
+      "summary": "Foundry/AIP platform for AI lifecycle governance faces dual exposure: as a compliance tool for EU-regulated customers and as a deployer of AI analytics. Player telemetry, cheat detection, and churn prediction may trigger high-risk classification. UK government contracts create additional public-sector scrutiny.",
+      "sources": [
+        { "label": "Palantir", "url": "https://www.palantir.com" }
+      ]
+    },
+    "nvidia": {
+      "name": "NVIDIA",
+      "topRisks": ["ai-npcs", "current-game-ai-risks", "copyright-ip", "liability-defects"],
+      "summary": "ACE, Minitron, speech and animation components make NVIDIA an upstream infrastructure provider for runtime game characters. Exposure includes unsafe generated dialogue, model and middleware updates, voice rights, cybersecurity, inference reliability, and the allocation of responsibility between NVIDIA and deploying studios.",
+      "sources": [
+        { "label": "NVIDIA ACE", "url": "https://www.nvidia.com/en-us/geforce/technologies/ace/" },
+        { "label": "NVIDIA autonomous game characters", "url": "https://www.nvidia.com/en-us/geforce/news/nvidia-ace-autonomous-ai-companions-pubg-naraka-bladepoint/" }
+      ]
+    },
+    "inworld": {
+      "name": "Inworld AI",
+      "topRisks": ["ai-npcs", "current-game-ai-risks", "liability-defects", "cross-border"],
+      "summary": "Inworld's Character Engine supplies memory, personality, dialogue, perception and orchestration to third-party games. As middleware, its core risks are moderation, privacy, cross-border processing, service changes, dependency concentration, incident responsibility, and proving which party controlled a harmful output.",
+      "sources": [
+        { "label": "Inworld AI character infrastructure", "url": "https://inworld.ai/blog/new-ai-infrastructure-scaling-games-media-characters" }
+      ]
+    },
+    "latitude": {
+      "name": "Latitude",
+      "topRisks": ["ai-npcs", "current-game-ai-risks", "content-labelling", "liability-defects"],
+      "summary": "AI Dungeon's unrestricted player input and generated narrative place Latitude at high exposure to moderation, age suitability, hallucination, privacy, transparency, model-provider dependency and cloud inference costs. Long-term context systems also require careful retention and deletion controls.",
+      "sources": [
+        { "label": "AI Dungeon original repository", "url": "https://github.com/latitudegames/AIDungeon" }
+      ]
+    },
+    "monolith": {
+      "name": "Monolith Productions / WB Games",
+      "topRisks": ["current-game-ai-risks", "liability-defects", "copyright-ip"],
+      "summary": "F.E.A.R.'s GOAP and the Nemesis System show the value and complexity of persistent authored AI. Key exposure includes reproducibility of emergent failures, save-state integrity, offensive procedural combinations, quest recovery, and strategic dependence on patented architectures.",
+      "sources": [
+        { "label": "F.E.A.R. AI — GDC paper", "url": "https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf" },
+        { "label": "Nemesis System patent", "url": "https://patents.google.com/patent/US10926179B2/en" }
+      ]
+    },
+    "bethesda": {
+      "name": "Bethesda Game Studios",
+      "topRisks": ["current-game-ai-risks", "liability-defects"],
+      "summary": "Radiant AI and Radiant Story connect schedules, relationships, world state and quest templates. Their principal exposure is not generative-content regulation but product reliability: broken dependencies, unreachable quest states, inconsistent NPC behavior, accessibility, and the need for deterministic debugging across interacting packages.",
+      "sources": [
+        { "label": "Technology behind Skyrim", "url": "https://www.gameinformer.com/games/the_elder_scrolls_v_skyrim/b/xbox360/archive/2011/01/17/the-technology-behind-elder-scrolls-v-skyrim.aspx" }
+      ]
+    },
+    "embark": {
+      "name": "Embark Studios",
+      "topRisks": ["current-game-ai-risks", "copyright-ip", "liability-defects"],
+      "summary": "ARC Raiders uses reinforcement learning for bounded robot locomotion and authorised synthetic speech for variable vocabulary. Risk centres on controller validation, reproducibility, fallback movement, update governance, performer consent, disclosure, and separating ML locomotion from broader authored combat logic.",
+      "sources": [
+        { "label": "Embark explains ARC Raiders AI use", "url": "https://www.pcgamesn.com/arc-raiders/generative-ai-use" }
+      ]
+    },
+    "take-two": {
+      "name": "Take-Two / Rockstar Games",
+      "topRisks": ["current-game-ai-risks", "liability-defects", "consumer-backlash"],
+      "summary": "Rockstar's open-world simulations, animal behavior, procedural animation, navigation and patent portfolio create significant verification and product-liability demands. Public claims about machine-learning NPCs in GTA VI remain unconfirmed, creating an additional intelligence and communications risk if speculation is presented as shipped fact.",
+      "sources": [
+        { "label": "Rockstar Games — GTA VI", "url": "https://www.rockstargames.com/VI" },
+        { "label": "RDR2 horse AI — GDC", "url": "https://gdcvault.com/play/1027113/AI-Summit-Making-the-Believable" }
+      ]
+    },
+    "mistral": {
+      "name": "Mistral AI",
+      "topRisks": ["copyright-ip", "cross-border"],
+      "summary": "European open-weight LLM leader. EU AI Act GPAI obligations apply directly as an EU-based foundation model developer. Enterprise-grade sovereign AI models for EU markets must demonstrate full compliance. Positioned as compliant alternative to non-EU models.",
+      "sources": [
+        { "label": "Mistral AI", "url": "https://mistral.ai" }
+      ]
+    },
+    "tripo": {
+      "name": "Tripo AI / VAST",
+      "topRisks": ["content-labelling", "copyright-ip", "current-game-ai-risks", "liability-defects"],
+      "summary": "3D foundation model company spanning API-driven asset generation and world-model research. Tripo API's text/image-to-3D output requires Article 50 transparency labelling for each generated asset shipped in games. Project Eden's persistent world-model architecture raises novel content, safety, and audit questions. Engine plugins (Unity, Unreal, Cocos, Godot) create downstream deployer liability for studios integrating unlabelled 3D assets. Intellectual-property exposure from training-data provenance and API-generated assets sold through marketplaces.",
+      "sources": [
+        { "label": "Tripo Project Eden research", "url": "https://www.tripo3d.ai/research/project-eden" },
+        { "label": "Tripo Developer API", "url": "https://developers.tripo3d.ai/en" }
+      ]
+    }
+  }
+}
