@@ -3,7 +3,19 @@
 
 import sys
 import json
-from ddgs import DDGS
+
+try:
+    # Current package name used on Render and in local development.
+    from ddgs import DDGS
+except ImportError:
+    try:
+        # Backward compatibility for environments still using the former package.
+        from duckduckgo_search import DDGS
+    except ImportError:
+        print(json.dumps({
+            "error": "Search dependency is missing. Install dependencies with: pip install -r requirements.txt"
+        }))
+        sys.exit(1)
 
 
 def search(query, max_results=10):
