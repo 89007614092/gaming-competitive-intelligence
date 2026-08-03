@@ -9,3 +9,9 @@ __pycache__/
 .workbuddy/
 data/*_raw.txt
 data/doc*.txt
+# Generated at runtime by the curated source crawler (Scope B)
+data/*-live.json
+data/source-state.json
+# Local model cache (Transformers.js)
+.model_cache/
+model-cache/

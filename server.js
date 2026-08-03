@@ -967,6 +967,238 @@ app.get("/api/news", async (req, res) => {
   }
 });
 
+// ============================================================================
+// Curated Source Crawler (Scope B) — keep the site live from an official allowlist
+// Each source is monitored via domain-scoped Google News RSS (site:<domain>) so
+// results stay official/accurate. New items are written to per-tab "live" overlay
+// files and merged into the tab endpoints, so content adapts as sources update.
+// ============================================================================
+const SOURCES_FILE = path.join(__dirname, "data", "sources.json");
+const SOURCE_STATE_FILE = path.join(__dirname, "data", "source-state.json");
+const REG_LIVE_FILE = path.join(__dirname, "data", "regulatory-timeline-live.json");
+const KB_LIVE_FILE = path.join(__dirname, "data", "knowledge-live.json");
+const UC_LIVE_FILE = path.join(__dirname, "data", "current-use-cases-live.json");
+
+let sourcesCache = null;
+let sourceState = loadSourceState();
+let sourceScanInFlight = false;
+
+function loadSourceRegistry() {
+  if (!sourcesCache) {
+    try {
+      sourcesCache = JSON.parse(fs.readFileSync(SOURCES_FILE, "utf8")).sources || [];
+    } catch (_) {
+      sourcesCache = [];
+    }
+  }
+  return sourcesCache;
+}
+
+function loadSourceState() {
+  try {
+    return JSON.parse(fs.readFileSync(SOURCE_STATE_FILE, "utf8"));
+  } catch (_) {
+    return { sources: {}, lastFullScan: null };
+  }
+}
+
+function saveSourceState() {
+  try {
+    fs.writeFileSync(SOURCE_STATE_FILE, JSON.stringify(sourceState, null, 2));
+  } catch (_) { /* non-fatal */ }
+}
+
+function loadLive(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (_) {
+    return { events: [], subsections: [], patterns: [] };
+  }
+}
+
+function appendLive(file, key, items, cap) {
+  const data = loadLive(file);
+  const existing = data[key] || [];
+  const seen = new Set(existing.map(e => e.url || e.title));
+  const merged = existing.slice();
+  for (const item of items) {
+    const k = item.url || item.title;
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    merged.push(item);
+  }
+  data[key] = merged.slice(-cap);
+  try {
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (_) { /* non-fatal */ }
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function formatLabel(dateStr) {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "Recent";
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+async function fetchSourceItems(source) {
+  const freshness = source.freshness || "7d";
+  const query = `site:${source.domain} ${source.terms} when:${freshness}`;
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-GB&gl=GB&ceid=GB:en`;
+  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
+  return parseNewsRss(resource.text, source.name, query, source.limit || 5, []);
+}
+
+function shapeRecords(source, item) {
+  const publisher = item.sourceName || source.name;
+  const foundAt = new Date().toISOString();
+  const out = {};
+
+  if (source.category === "regulation") {
+    out.timeline = {
+      date: item.publishedAt ? item.publishedAt.slice(0, 10) : foundAt.slice(0, 10),
+      label: item.publishedAt ? formatLabel(item.publishedAt) : "Recent",
+      title: item.title,
+      jurisdiction: source.jurisdiction || "EU/UK",
+      category: "Live Update",
+      description: item.description || "Auto-sourced regulatory update.",
+      impact: `Auto-sourced from ${publisher}. Verify via the official link before relying on it.`,
+      link: item.url,
+      linkLabel: publisher,
+      live: true,
+      publisher,
+      foundAt,
+    };
+    out.kb = {
+      categoryKey: source.kbCategory || "regulations",
+      categoryLabel: source.kbCategoryLabel || "Regulatory Frameworks",
+      title: item.title,
+      content: item.description || item.title,
+      sources: [{ label: publisher, url: item.url }],
+      live: true,
+    };
+  } else if (source.category === "use-case") {
+    out.uc = {
+      title: item.title,
+      content: item.description || item.title,
+      games: [],
+      live: true,
+      publisher,
+      foundAt,
+    };
+  } else if (source.category === "academic") {
+    out.kb = {
+      categoryKey: source.kbCategory || "research",
+      categoryLabel: source.kbCategoryLabel || "Research & Standards",
+      title: item.title,
+      content: item.description || item.title,
+      sources: [{ label: publisher, url: item.url }],
+      live: true,
+    };
+  }
+  return out;
+}
+
+async function runSourceScan({ force = false } = {}) {
+  if (sourceScanInFlight) return { skipped: true, reason: "scan already in flight" };
+  sourceScanInFlight = true;
+  const startedAt = Date.now();
+
+  try {
+    const sources = loadSourceRegistry();
+    const now = Date.now();
+    const due = sources.filter(s =>
+      force ||
+      !sourceState.sources[s.id] ||
+      !sourceState.sources[s.id].lastScanAt ||
+      (now - sourceState.sources[s.id].lastScanAt) >= (s.ttlMinutes || 15) * 60000
+    );
+
+    const regEvents = [];
+    const kbSubs = [];
+    const ucPatterns = [];
+    let scanned = 0;
+    let found = 0;
+
+    for (const source of due) {
+      try {
+        const items = await fetchSourceItems(source);
+        const state = sourceState.sources[source.id] || { seen: [] };
+        const seen = new Set(state.seen || []);
+        for (const item of items) {
+          if (!item.url || seen.has(item.url)) continue;
+          seen.add(item.url);
+          const records = shapeRecords(source, item);
+          if (records.timeline) regEvents.push(records.timeline);
+          if (records.kb) kbSubs.push(records.kb);
+          if (records.uc) ucPatterns.push(records.uc);
+          found++;
+        }
+        sourceState.sources[source.id] = {
+          lastScanAt: now,
+          name: source.name,
+          seen: [...seen].slice(-200),
+        };
+        scanned++;
+      } catch (_) {
+        // Skip a failing source; continue with the rest.
+      }
+    }
+
+    if (regEvents.length) appendLive(REG_LIVE_FILE, "events", regEvents, 60);
+    if (kbSubs.length) appendLive(KB_LIVE_FILE, "subsections", kbSubs, 80);
+    if (ucPatterns.length) appendLive(UC_LIVE_FILE, "patterns", ucPatterns, 50);
+
+    sourceState.lastFullScan = new Date().toISOString();
+    saveSourceState();
+
+    // Invalidate base caches so the tab endpoints re-merge live overlays.
+    regulatoryTimelineCache = null;
+    knowledgeCache = null;
+    currentUseCasesCache = null;
+
+    return {
+      scanned,
+      due: due.length,
+      found,
+      regulatory: regEvents.length,
+      knowledge: kbSubs.length,
+      useCases: ucPatterns.length,
+      durationMs: Date.now() - startedAt,
+    };
+  } finally {
+    sourceScanInFlight = false;
+  }
+}
+
+app.get("/api/regulatory-status", (req, res) => {
+  const reg = (loadLive(REG_LIVE_FILE).events || []).length;
+  const kb = (loadLive(KB_LIVE_FILE).subsections || []).length;
+  const uc = (loadLive(UC_LIVE_FILE).patterns || []).length;
+  res.json({
+    success: true,
+    lastScanAt: sourceState.lastFullScan,
+    counts: { regulatory: reg, knowledge: kb, useCases: uc },
+    total: reg + kb + uc,
+  });
+});
+
+app.post("/api/source-scan", async (req, res) => {
+  try {
+    const force = !!(req.body && req.body.force);
+    const result = await runSourceScan({ force });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Server-side scheduler: scan sources whose TTL has elapsed. The single-flight
+// lock prevents overlapping scans. Render's free tier sleeps when idle, so pair
+// this with the keep-alive cron in .github/workflows to stay live 24/7.
+const SOURCE_SCAN_TICK_MS = 5 * 60 * 1000;
+setInterval(() => { runSourceScan({ force: false }).catch(() => {}); }, SOURCE_SCAN_TICK_MS);
+setTimeout(() => { runSourceScan({ force: false }).catch(() => {}); }, 30000);
+
 // POST /api/scrape — extract readable website text or a public video transcript
 app.post("/api/scrape", async (req, res) => {
   try {
@@ -1088,21 +1320,39 @@ app.get("/api/knowledge", (req, res) => {
       );
     }
 
-    let result = { ...knowledgeCache };
+    // Merge live (auto-sourced) subsections on top of the curated base.
+    const live = loadLive(KB_LIVE_FILE).subsections || [];
+    const categories = {};
+    for (const [key, cat] of Object.entries(knowledgeCache.categories)) {
+      categories[key] = { ...cat, subsections: [...(cat.subsections || [])] };
+    }
+    for (const sub of live) {
+      const key = sub.categoryKey || "regulations";
+      if (!categories[key]) {
+        categories[key] = { label: sub.categoryLabel || key, icon: "🟢", subsections: [] };
+      }
+      categories[key].subsections.push({
+        title: sub.title,
+        content: sub.content,
+        sources: sub.sources,
+        live: true,
+      });
+    }
 
-    if (category && knowledgeCache.categories[category]) {
+    let result;
+    if (category && categories[category]) {
       result = {
         sourceDocuments: knowledgeCache.sourceDocuments,
-        categories: {
-          [category]: knowledgeCache.categories[category],
-        },
+        categories: { [category]: categories[category] },
       };
+    } else {
+      result = { sourceDocuments: knowledgeCache.sourceDocuments, categories };
     }
 
     if (search) {
       const query = search.toLowerCase();
       const filtered = {};
-      for (const [key, cat] of Object.entries(knowledgeCache.categories)) {
+      for (const [key, cat] of Object.entries(result.categories)) {
         const matchingSubsections = cat.subsections.filter(
           (s) =>
             s.title.toLowerCase().includes(query) ||
@@ -1163,7 +1413,13 @@ app.get("/api/current-use-cases", (req, res) => {
         fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8")
       );
     }
-    res.json({ success: true, data: currentUseCasesCache });
+    // Merge live (auto-sourced) patterns on top of the curated base.
+    const livePatterns = loadLive(UC_LIVE_FILE).patterns || [];
+    const data = {
+      ...currentUseCasesCache,
+      patterns: [...livePatterns, ...(currentUseCasesCache.patterns || [])],
+    };
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1206,7 +1462,13 @@ app.get("/api/regulatory-timeline", (req, res) => {
         fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8")
       );
     }
-    res.json({ success: true, data: regulatoryTimelineCache });
+    // Merge live (auto-sourced) events on top of the curated base timeline.
+    const liveEvents = loadLive(REG_LIVE_FILE).events || [];
+    const data = {
+      ...regulatoryTimelineCache,
+      events: [...liveEvents, ...(regulatoryTimelineCache.events || [])],
+    };
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

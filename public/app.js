@@ -1236,8 +1236,8 @@ function renderKBContent(searchQuery = null) {
       }
 
       html += `
-        <div class="kb-card">
-          <div class="kb-card-title">${sub.title}</div>
+        <div class="kb-card${sub.live ? " live" : ""}">
+          <div class="kb-card-title">${sub.title}${sub.live ? ' <span class="live-tag">LIVE</span>' : ""}</div>
           <div class="kb-card-content">${displayContent}</div>
           ${sourceLinks}
         </div>`;
@@ -2309,8 +2309,8 @@ function renderCurrentUseCases() {
     </div>
     <div class="use-case-pattern-grid">
       ${currentUseCasesData.patterns.map(pattern => `
-        <article class="use-case-pattern-card">
-          <h3>${pattern.title}</h3>
+        <article class="use-case-pattern-card${pattern.live ? " live" : ""}">
+          <h3>${pattern.title}${pattern.live ? ' <span class="live-tag">LIVE</span>' : ""}</h3>
           <p>${pattern.content}</p>
           <div class="use-case-pattern-games">
             ${pattern.games.map(game => `<span>${game}</span>`).join("")}
@@ -2702,11 +2702,12 @@ function renderRegulatoryTimeline(filter) {
     const linkHtml = e.link ? `<a href="${e.link}" target="_blank" rel="noopener" class="timeline-link">${e.linkLabel || "Official source →"}</a>` : "";
 
     html += `
-      <div class="timeline-event">
+      <div class="timeline-event${e.live ? " live" : ""}">
         <div class="timeline-dot ${dotClass}"></div>
         <div class="timeline-date">${e.label}</div>
         <h3>
           ${e.title}
+          ${e.live ? '<span class="timeline-badge live">LIVE</span>' : ""}
           <span class="timeline-badge ${badgeClass}">${e.category === "Critical Deadline" ? "⚠ Critical" : e.jurisdiction}</span>
           <span class="event-cat">${e.category}</span>
         </h3>
@@ -2878,105 +2879,81 @@ function renderRisks(filter = "all") {
   categoriesEl.innerHTML = catHtml || '<div class="empty-state"><p>No risks match the selected filter</p></div>';
 }
 
-// ===== Auto-Update: Regulatory Timeline & Knowledge Base =====
-const SCAN_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+// ===== Auto-Update: live monitoring of an official source allowlist (Scope B) =====
+// Client polls status every 5 minutes; the server does the actual crawl on a
+// per-source TTL (fast official feeds ~15 min, slower legislation every few hours)
+// with a single-flight lock. New items are merged into the timeline, knowledge
+// base and use-case tabs automatically by the server.
+const SCAN_INTERVAL_MS = 5 * 60 * 1000;       // client check every 5 minutes
+const SCAN_COOLDOWN_MS = 15 * 60 * 1000;      // server re-crawl cooldown
 const LAST_SCAN_KEY = "lastAutoScan";
-const REGULATORY_UPDATES_KEY = "regulatoryUpdates";
-const KNOWLEDGE_UPDATES_KEY = "knowledgeUpdates";
 
 function setupAutoUpdate() {
   // Check on app open
   checkAndScan();
 
-  // Set up periodic scan every 12 hours
+  // Poll status every 5 minutes
   setInterval(checkAndScan, SCAN_INTERVAL_MS);
 
-  // Also re-check when tab becomes visible (user returns to app)
+  // Also re-check when the tab becomes visible (user returns to the app)
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) checkAndScan();
   });
 }
 
 async function checkAndScan() {
-  const lastScan = localStorage.getItem(LAST_SCAN_KEY);
-  const now = Date.now();
-
-  if (lastScan && (now - parseInt(lastScan)) < SCAN_INTERVAL_MS) {
-    // Less than 12 hours since last scan — still show stored updates
-    showStoredUpdates();
-    return;
-  }
-
-  // Time to scan
-  localStorage.setItem(LAST_SCAN_KEY, now.toString());
-
   try {
-    const [regRes, kbRes] = await Promise.allSettled([
-      fetch(`${API_BASE}/regulatory-scan`, { method: "POST" }),
-      fetch(`${API_BASE}/knowledge-scan`, { method: "POST" }),
-    ]);
+    const statusRes = await fetch(`${API_BASE}/regulatory-status`);
+    const status = statusRes.ok ? await statusRes.json() : null;
+    const prevCounts = status?.counts || { regulatory: 0, knowledge: 0, useCases: 0 };
+    updateAutoUpdateBadges(prevCounts);
 
-    let regulatoryNew = [];
-    let knowledgeNew = [];
+    const now = Date.now();
+    const lastScan = parseInt(localStorage.getItem(LAST_SCAN_KEY) || "0", 10);
+    const serverStale = !status?.lastScanAt || (now - Date.parse(status.lastScanAt)) > SCAN_COOLDOWN_MS;
+    const localStale = (now - lastScan) > SCAN_COOLDOWN_MS;
 
-    if (regRes.status === "fulfilled" && regRes.value.ok) {
-      const data = await regRes.value.json();
-      if (data.success && data.developments?.length) {
-        // Compare with previously stored updates to find truly new items
-        const prevUpdates = JSON.parse(localStorage.getItem(REGULATORY_UPDATES_KEY) || "[]");
-        const prevUrls = new Set(prevUpdates.map(u => u.url));
-        regulatoryNew = data.developments.filter(d => !prevUrls.has(d.url));
-        if (regulatoryNew.length) {
-          localStorage.setItem(REGULATORY_UPDATES_KEY,
-            JSON.stringify([...regulatoryNew, ...prevUpdates].slice(0, 30)));
+    if (serverStale || localStale) {
+      localStorage.setItem(LAST_SCAN_KEY, now.toString());
+      const scanRes = await fetch(`${API_BASE}/source-scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (scanRes.ok) {
+        const fresh = await (await fetch(`${API_BASE}/regulatory-status`)).json();
+        const counts = fresh.counts || prevCounts;
+        updateAutoUpdateBadges(counts);
+        const before = prevCounts.regulatory + prevCounts.knowledge + prevCounts.useCases;
+        const after = counts.regulatory + counts.knowledge + counts.useCases;
+        if (after > before) {
+          showUpdateNotification(
+            counts.regulatory - prevCounts.regulatory,
+            counts.knowledge - prevCounts.knowledge,
+            counts.useCases - prevCounts.useCases
+          );
         }
       }
     }
-
-    if (kbRes.status === "fulfilled" && kbRes.value.ok) {
-      const data = await kbRes.value.json();
-      if (data.success && data.items?.length) {
-        const prevUpdates = JSON.parse(localStorage.getItem(KNOWLEDGE_UPDATES_KEY) || "[]");
-        const prevUrls = new Set(prevUpdates.map(u => u.url));
-        knowledgeNew = data.items.filter(d => !prevUrls.has(d.url));
-        if (knowledgeNew.length) {
-          localStorage.setItem(KNOWLEDGE_UPDATES_KEY,
-            JSON.stringify([...knowledgeNew, ...prevUpdates].slice(0, 30)));
-        }
-      }
-    }
-
-    if (regulatoryNew.length || knowledgeNew.length) {
-      showUpdateNotification(regulatoryNew.length, knowledgeNew.length);
-    }
-
-    // Update UI badges
-    updateAutoUpdateBadges();
   } catch (_) {
-    // Silent failure — will retry next interval
+    // Silent failure — will retry on the next interval.
   }
 }
 
-function showUpdateNotification(regCount, kbCount) {
+function showUpdateNotification(regCount, kbCount, ucCount) {
   const parts = [];
   if (regCount) parts.push(`${regCount} regulatory update${regCount > 1 ? "s" : ""}`);
   if (kbCount) parts.push(`${kbCount} knowledge item${kbCount > 1 ? "s" : ""}`);
+  if (ucCount) parts.push(`${ucCount} use-case update${ucCount > 1 ? "s" : ""}`);
   if (!parts.length) return;
 
-  const msg = parts.join(" and ");
-  showToast(`Auto-scan found ${msg}. Check the timeline and knowledge base.`, "info");
+  showToast(`Auto-scan found ${parts.join(" and ")}. The timeline, knowledge base and use cases are now updated.`, "info");
 }
 
-function showStoredUpdates() {
-  updateAutoUpdateBadges();
-}
-
-function updateAutoUpdateBadges() {
-  const regUpdates = JSON.parse(localStorage.getItem(REGULATORY_UPDATES_KEY) || "[]");
-  const kbUpdates = JSON.parse(localStorage.getItem(KNOWLEDGE_UPDATES_KEY) || "[]");
-
-  updateTabBadge("regulatory-timeline", regUpdates.length);
-  updateTabBadge("knowledge-base", kbUpdates.length);
+function updateAutoUpdateBadges(counts = { regulatory: 0, knowledge: 0, useCases: 0 }) {
+  updateTabBadge("regulatory-timeline", counts.regulatory || 0);
+  updateTabBadge("knowledge-base", counts.knowledge || 0);
+  updateTabBadge("current-use-cases", counts.useCases || 0);
 }
 
 function updateTabBadge(viewId, count) {

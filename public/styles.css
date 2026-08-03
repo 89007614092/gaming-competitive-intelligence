@@ -3736,3 +3736,31 @@ body {
 .map-info-source:hover {
   text-decoration: underline;
 }
+
+/* ===== Live (auto-sourced) updates ===== */
+.timeline-event.live {
+  border-left: 3px solid #16a34a;
+}
+.timeline-badge.live {
+  background: #16a34a;
+  color: #fff;
+  font-weight: 700;
+}
+.kb-card.live,
+.use-case-pattern-card.live {
+  border-left: 3px solid #16a34a;
+  background: linear-gradient(0deg, rgba(22, 163, 74, 0.04), rgba(22, 163, 74, 0.04));
+}
+.live-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  text-transform: uppercase;
+}

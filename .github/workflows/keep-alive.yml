@@ -1,0 +1,25 @@
+name: Keep Alive — Source Crawler
+
+# Keeps the deployed app awake and the curated source crawler (Scope B) running
+# on its per-source TTL even when no one has the page open. Render's free tier
+# spins down when idle, so this cron pings the scan endpoint every 30 minutes.
+#
+# REQUIRED: add a repository secret named RENDER_URL containing your deployed
+# URL, e.g. https://gaming-competitive-intelligence.onrender.com
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger source scan
+        run: |
+          curl -fsS --max-time 60 -X POST \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "${RENDER_URL}/api/source-scan" || echo "Ping failed (non-fatal)"
+        env:
+          RENDER_URL: ${{ secrets.RENDER_URL }}
