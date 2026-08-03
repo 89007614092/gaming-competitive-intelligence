@@ -31,7 +31,7 @@
           Search &amp; Reports
         </button>
         <button class="nav-btn" data-view="summarise-view" draggable="true">
-          Summarise
+          Q&amp;A
         </button>
         <button class="nav-btn" data-view="spider-web" draggable="true">
           Competitor Web
@@ -261,12 +261,12 @@
               <path d="M24 2c1.8 12.1 5.9 16.2 18 18-12.1 1.8-16.2 5.9-18 18-1.8-12.1-5.9-16.2-18-18C18.1 18.2 22.2 14.1 24 2Z" />
             </svg>
           </div>
-          <h1>Smart Summary</h1>
-          <p>Ask questions across the application data and optionally check the internet for additional evidence.</p>
+          <h1>Q&amp;A</h1>
+          <p>Ask detailed questions across the application's curated data, with evidence cited inline. Optionally search the internet for additional context.</p>
         </div>
 
         <div class="summary-composer">
-          <textarea id="summaryQuestion" maxlength="700" placeholder="Enter the topic or question you want to summarise"></textarea>
+          <textarea id="summaryQuestion" maxlength="700" placeholder="Ask a question about the application data…"></textarea>
           <div class="summary-composer-footer">
             <div class="summary-toggles">
               <label class="summary-internet-toggle">
@@ -280,7 +280,7 @@
             </div>
             <div class="summary-composer-actions">
               <span class="summary-mode-label" id="summaryModeLabel">Extractive (cited) by default</span>
-              <button class="btn btn-primary summary-submit" id="summarySubmitBtn" type="button">Summarise</button>
+              <button class="btn btn-primary summary-submit" id="summarySubmitBtn" type="button">Ask</button>
             </div>
           </div>
         </div>
@@ -294,7 +294,7 @@
         <div class="summary-result" id="summaryResult" style="display:none;">
           <div class="summary-result-header">
             <div>
-              <span class="summary-eyebrow">Generated synthesis</span>
+              <span class="summary-eyebrow">Answer</span>
               <h2 id="summaryResultQuestion"></h2>
             </div>
             <span class="summary-result-meta" id="summaryResultMeta"></span>
@@ -302,7 +302,7 @@
           <div class="summary-answer" id="summaryAnswer"></div>
           <div class="summary-warning" id="summaryWarning" style="display:none;"></div>
           <div class="summary-evidence-section">
-            <h3>Retrieved evidence</h3>
+            <h3>Sources</h3>
             <div class="summary-evidence-grid" id="summaryEvidence"></div>
           </div>
         </div>

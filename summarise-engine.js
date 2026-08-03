@@ -108,7 +108,7 @@ function buildCorpus() {
 
   // NOTE: live/auto-sourced findings are intentionally NOT injected here. They
   // reach the app only through the proposed-changes review queue (user-approved),
-  // so the Summarise corpus stays aligned with the curated, reviewed datasets.
+  // so the Q&A corpus stays aligned with the curated, reviewed datasets.
 
   corpusCache = chunks;
   return corpusCache;
@@ -159,12 +159,14 @@ function retrieveApplicationEvidence(question, limit = 7) {
     ...item,
     id: `A${index + 1}`,
     sourceType: "application",
-    excerpt: relevantExcerpt(item, question, 2),
+    excerpt: relevantExcerpt(item, question, 2, 620, item.title),
   }));
 }
 
-function relevantExcerpt(item, question, sentenceLimit = 2) {
+function relevantExcerpt(item, question, sentenceLimit = 2, maxChars = 620, title = "") {
   const queryWords = new Set(words(question));
+  const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
+  const tnorm = norm(title);
   const sentences = item.text.match(/[^.!?]+(?:[.!?]+|$)/g) || [item.text];
   const ranked = sentences
     .map((sentence, index) => ({
@@ -174,20 +176,27 @@ function relevantExcerpt(item, question, sentenceLimit = 2) {
         + Math.max(0, 1 - index / 10),
     }))
     .filter(item => item.sentence.length >= 35)
+    // Skip sentences that just restate the source title (they read as noise once
+    // the title is already shown as the claim's label).
+    .filter(item => {
+      if (!tnorm) return true;
+      const sn = norm(item.sentence);
+      return !(sn.startsWith(tnorm) || tnorm.startsWith(sn)) || Math.abs(sn.length - tnorm.length) > 14;
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, sentenceLimit)
     .map(item => item.sentence.replace(/\.\.+$/g, "."));
-  return (ranked.join(" ") || item.text).slice(0, 620);
+  return (ranked.join(" ") || item.text).slice(0, maxChars);
 }
 
 function formatContext(evidence, question) {
   return evidence.map(item =>
-    `[${item.id}] ${item.dataset} — ${item.title}${item.section ? ` (${item.section})` : ""}\n${relevantExcerpt(item, question)}`
+    `[${item.id}] ${item.dataset} — ${item.title}${item.section ? ` (${item.section})` : ""}\n${relevantExcerpt(item, question, 2, 620, item.title)}`
   ).join("\n\n");
 }
 
 function evidenceHighlights(question, evidence, limit = 4) {
-  return evidence.slice(0, limit).map(item => `- ${relevantExcerpt(item, question, 1)} [${item.id}]`).join("\n");
+  return evidence.slice(0, limit).map(item => `- ${relevantExcerpt(item, question, 1, 620, item.title)} [${item.id}]`).join("\n");
 }
 
 async function getGenerator() {
@@ -253,32 +262,30 @@ async function runOpenSourceGeneration(question, evidence) {
   const messages = [
     {
       role: "system",
-      content: "You are an evidence-focused analyst. Answer only from the supplied evidence. Be concise, note uncertainty, and cite evidence IDs in square brackets such as [A1] or [W1].",
+      content: "You are an evidence-focused research analyst. Answer ONLY from the supplied evidence. Write a detailed, comprehensive answer in well-structured paragraphs (and bullet points where useful). Cite the evidence INLINE using the exact IDs in square brackets, e.g. [A1] or [W2], placing each citation right after the claim it supports. Do NOT add a separate list of evidence at the end. If the evidence is thin or silent on part of the question, say so plainly rather than inventing facts.",
     },
     {
       role: "user",
-      content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite a direct synthesis with a short overview and 3-6 evidence-based bullets. Do not invent facts or citations.`,
+      content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.`,
     },
   ];
   const output = await generator(messages, {
-    max_new_tokens: 280,
+    max_new_tokens: 720,
     do_sample: false,
-    repetition_penalty: 1.08,
+    repetition_penalty: 1.1,
   });
   let answer = extractGeneratedAnswer(output);
   if (!answer) throw new Error("The local model returned an empty answer");
   const validCitationIds = new Set(evidence.map(item => item.id));
   answer = answer.replace(/\[([AW]\d+)\]/g, (match, id) => validCitationIds.has(id) ? match : "");
-  // Only reject clearly degenerate output (a bare list of citation tags or
-  // near-empty text). The previous strict uniqueness/citation-ratio gate was too
-  // aggressive for a small 135M model and forced the extractive fallback on every
-  // request. When citation coverage is weak we enrich with highlights below
-  // instead of discarding the answer.
-  if (answer.trim().length < 40) throw new Error("Local model returned a degenerate answer");
+  if (answer.trim().length < 80) throw new Error("Local model returned a degenerate answer");
   if (/^(?:\s*\[[AW]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Local model returned a degenerate answer");
   const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
+  // Require genuine inline citation coverage; otherwise fall back to the
+  // detailed extractive answer so the user always gets a comprehensive,
+  // inline-cited response rather than a model answer with no sources.
   if (citationCount >= 2) return answer;
-  return `${answer}\n\nEvidence highlights:\n${evidenceHighlights(question, evidence)}`;
+  return buildExtractiveAnswer(question, evidence);
 }
 
 function generateOpenSourceAnswer(question, evidence) {
@@ -289,14 +296,50 @@ function generateOpenSourceAnswer(question, evidence) {
   return task;
 }
 
-function buildExtractiveFallback(question, evidence) {
-  const selected = evidence.slice(0, 6).map(item => ({
-    sentence: relevantExcerpt(item, question, 1),
-    sourceId: item.id,
-  })).filter(item => item.sentence.length >= 45);
+function truncate(text, n) {
+  const t = String(text || "").trim();
+  return t.length > n ? `${t.slice(0, n - 1).trim()}…` : t;
+}
 
-  if (!selected.length) return "No sufficiently relevant evidence was found in the application data.";
-  return `The strongest available evidence indicates:\n\n${selected.map(item => `- ${item.sentence} [${item.sourceId}]`).join("\n")}`;
+// Build a detailed, comprehensive answer assembled directly from the retrieved
+// evidence, with each claim tagged by its source ID inline (e.g. [A3]). Evidence
+// is grouped by dataset so the response reads as a structured briefing rather
+// than a flat bullet list, and every claim carries its citation in-line.
+function buildExtractiveAnswer(question, evidence) {
+  const usable = evidence.filter(item => (item.excerpt || item.text || "").length >= 40);
+  if (!usable.length) {
+    return "No sufficiently relevant evidence was found in the application data for that question. Try rephrasing, or enable internet search for broader coverage.";
+  }
+
+  const groups = [];
+  const byDataset = new Map();
+  for (const item of usable) {
+    if (!byDataset.has(item.dataset)) {
+      const arr = [];
+      byDataset.set(item.dataset, arr);
+      groups.push({ dataset: item.dataset, items: arr });
+    }
+    byDataset.get(item.dataset).push(item);
+  }
+
+  const blocks = [
+    `Here is a detailed answer to "${truncate(question, 160)}", drawn from the application's curated evidence:`,
+  ];
+
+  for (const group of groups) {
+    blocks.push(`\n■ ${group.dataset}`);
+    for (const item of group.items) {
+      const excerpt = relevantExcerpt(item, question, 3, 900, item.title);
+      if (!excerpt) continue;
+      const label = item.section ? `${item.title} (${item.section})` : item.title;
+      blocks.push(`**${label}** — ${excerpt} [${item.id}]`);
+    }
+  }
+
+  blocks.push(
+    `\nEach claim above is tagged with its source ID (e.g. [${usable[0].id}]); the Sources list below expands every citation with a link to the original.`
+  );
+  return blocks.join("\n").trim();
 }
 
 module.exports = {
@@ -304,7 +347,7 @@ module.exports = {
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
-  buildExtractiveFallback,
+  buildExtractiveAnswer,
   warmUpModel,
   isModelReady,
 };

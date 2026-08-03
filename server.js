@@ -8,7 +8,7 @@ const {
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
-  buildExtractiveFallback,
+  buildExtractiveAnswer,
   warmUpModel,
   isModelReady,
 } = require("./summarise-engine");
@@ -102,9 +102,9 @@ function validateSourceUrl(input) {
   return parsed.toString();
 }
 
-async function fetchTextResource(url, accept = "text/html,application/xhtml+xml,text/plain") {
+async function fetchTextResource(url, accept = "text/html,application/xhtml+xml,text/plain", timeoutMs = 20000) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(validateSourceUrl(url), {
       headers: { "User-Agent": SCRAPE_USER_AGENT, Accept: accept },
@@ -641,7 +641,7 @@ app.post("/api/search", async (req, res) => {
 });
 
 // GET /api/summarise/status — describe the local evidence and model setup.
-// The AI model is OPT-IN: the default answer mode is extractive-citation.
+// The AI model is OPT-IN: the default answer mode is extractive-citation (Q&A).
 app.get("/api/summarise/status", (req, res) => {
   try {
     res.json({
@@ -672,18 +672,19 @@ app.post("/api/summarise/warm", (req, res) => {
 // POST /api/summarise — answer questions from app data with optional web evidence.
 // Default mode is extractive-citation (fast, fully cited, accurate). The local AI
 // model is used only when the caller opts in with useModel=true; if it is still
-// warming up or fails, the response gracefully falls back to extractive.
+// warming up or fails, the response gracefully falls back to the detailed
+// extractive answer.
 app.post("/api/summarise", async (req, res) => {
   try {
     const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
     const useInternet = req.body?.useInternet === true;
     const useModel = req.body?.useModel === true;
-    if (!question) return res.status(400).json({ error: "Enter a question to summarise" });
+    if (!question) return res.status(400).json({ error: "Enter a question" });
     if (question.length > 700) return res.status(400).json({ error: "Question must be 700 characters or fewer" });
 
     const appEvidence = [];
     try {
-      appEvidence.push(...retrieveApplicationEvidence(question, 7));
+      appEvidence.push(...retrieveApplicationEvidence(question, 9));
     } catch (err) {
       console.warn("[summarise] evidence retrieval failed:", err.message);
     }
@@ -735,13 +736,13 @@ app.post("/api/summarise", async (req, res) => {
       } catch (error) {
         modelError = error.message;
         mode = "extractive-fallback";
-        answer = buildExtractiveFallback(question, evidence);
+        answer = buildExtractiveAnswer(question, evidence);
       } finally {
         clearTimeout(modelTimer);
       }
     } else {
       mode = "extractive-citation";
-      answer = buildExtractiveFallback(question, evidence);
+      answer = buildExtractiveAnswer(question, evidence);
     }
 
     res.json({
@@ -1024,6 +1025,19 @@ let sourceState = loadSourceState();
 let proposedChanges = loadProposed();
 let sourceScanInFlight = false;
 
+// Cache of resolved real article URLs (Google News redirect -> publisher URL),
+// persisted via sourceState.resolvedUrls so we rarely re-query a search engine.
+const resolvedUrlMap = new Map();
+// Serialize DuckDuckGo URL resolutions so we never hit DDG in parallel (which
+// triggers rate limiting), and enforce a small minimum gap between calls.
+let ddgResolveChain = Promise.resolve();
+let lastDdgResolve = 0;
+// Secondary resolver: GDELT DOC API (returns real publisher URLs directly, no
+// HTML scraping). It is stricter on rate limits (≈1 req / 5s) so we serialize it
+// on its own slower chain, and only reach for it after DuckDuckGo fails.
+let gdeltResolveChain = Promise.resolve();
+let lastGdeltResolve = 0;
+
 function loadSourceRegistry() {
   if (!sourcesCache) {
     try {
@@ -1037,7 +1051,11 @@ function loadSourceRegistry() {
 
 function loadSourceState() {
   try {
-    return JSON.parse(fs.readFileSync(SOURCE_STATE_FILE, "utf8"));
+    const data = JSON.parse(fs.readFileSync(SOURCE_STATE_FILE, "utf8"));
+    if (data && typeof data === "object" && data.resolvedUrls) {
+      for (const [k, v] of Object.entries(data.resolvedUrls)) resolvedUrlMap.set(k, v);
+    }
+    return data && typeof data === "object" ? data : { sources: {}, lastFullScan: null };
   } catch (_) {
     return { sources: {}, lastFullScan: null };
   }
@@ -1174,20 +1192,206 @@ function bestMatch(itemTokens, itemStrong, index) {
   return best;
 }
 
-// P3 — auto-draft the suggested edit shown in the review panel (pre-filled).
-function draftEdit(source, item, action, matched, publisher, label) {
-  const cite = ` [Source: ${publisher}, ${label}]`;
-  const clean = stripHtml(item.description || "");
-  if (action === "deadline") return `New compliance deadline announced: ${item.title}.${cite}`;
-  if (action === "correction") return `This position appears to have changed — ${item.title}. ${clean}${cite}`;
-  return `Latest (${label}): ${clean}${cite}`;
+// Decide which Knowledge Base category a proposed item belongs to, based on the
+// ARTICLE CONTENT (not just the source's category). This fixes the case where a
+// regulator (e.g. AISI) publishes a model-capability assessment that should land
+// under "Case Studies", not "Regulations".
+const CATEGORY_LABELS = {
+  "regulations": "Regulatory Development",
+  "case-studies": "Case Study",
+  "technology": "Technology",
+  "use-cases": "AI Use Case",
+  "strategic-insights": "Strategic Insight",
+  "competitors": "Competitor Note",
+  "tencent-products": "Tencent Product",
+  "current-game-ai": "Current Game AI",
+};
+const NAMED_MODEL = /\b(gpt-?[345]\b|claude|gemini|llama|kimi|qwen|mistral|grok|deepseek|ernie|yi-|phi-|mixtral|o[13]\b|gpt4|gpt5)\b/;
+function detectKnowledgeCategory(text, sourceCategory) {
+  const t = String(text || "").toLowerCase();
+  const caseStudy = /\b(assessment|evaluation|preliminary assessment|benchmark|capabilit|cyber capab|red[ -]?team|model card|safety (case|test)|case study|proliferation|frontier model)\b/;
+  const regulation = /\b(ai act|eu ai|uk ai|gdpr|data protection|\bico\b|\bedpb\b|legislation|directive|compliance|deadline|enforce|ruling|fine\b|ban\b|prohibit|regulat|policy|guidance|bill\b|\blaw\b)\b/;
+  const technology = /\b(architecture|algorithm|training|inference|dataset|technique|framework|tooling|method)\b/;
+  if (caseStudy.test(t) || NAMED_MODEL.test(t)) return "case-studies";
+  if (regulation.test(t)) return "regulations";
+  if (sourceCategory === "use-case") return "use-cases";
+  if (technology.test(t)) return "technology";
+  // Default for regulator/academic "new" items that read like an assessment or
+  // research note rather than a law.
+  return "case-studies";
 }
-function draftNewRecord(source, item, publisher, label) {
+
+// Google News RSS <link> values are redirect URLs that loop back to the Google
+// News SPA server-side (they never reach the publisher). Resolve the real article
+// URL by searching DuckDuckGo for the title on the source's own domain and
+// decoding the `uddg` redirect param. Serialized + paced via ddgResolveChain so
+// we never hammer DDG in parallel (which triggers rate limiting). Cached so we
+// rarely re-query. Best-effort: returns null on any failure. Falls back to the
+// GDELT DOC API if DuckDuckGo can't resolve the URL.
+async function resolveGoogleNewsUrl(googleUrl, title, domain) {
+  if (resolvedUrlMap.has(googleUrl)) return resolvedUrlMap.get(googleUrl);
+  // 1) DuckDuckGo (primary): serialised + paced so burst scans don't trip its
+  //    anti-bot challenge page.
+  const ddgTask = ddgResolveChain.then(async () => {
+    const minGap = 700;
+    const wait = lastDdgResolve + minGap - Date.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastDdgResolve = Date.now();
+    if (!title) return null;
+    const site = domain ? ` site:${domain}` : "";
+    const q = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${title}${site}`)}`;
+    try {
+      const res = await fetchTextResource(q, "text/html,application/xhtml+xml,text/plain", 12000);
+      const uddg = (res.text.match(/uddg=([^&"'\s]+)/) || [])[1];
+      if (!uddg) return null;
+      const real = decodeURIComponent(uddg);
+      return /^https?:\/\//i.test(real) ? real : null;
+    } catch {
+      return null;
+    }
+  });
+  ddgResolveChain = ddgTask.catch(() => null);
+  const ddgUrl = await ddgTask;
+  if (ddgUrl) {
+    resolvedUrlMap.set(googleUrl, ddgUrl);
+    if (!sourceState.resolvedUrls) sourceState.resolvedUrls = {};
+    sourceState.resolvedUrls[googleUrl] = ddgUrl;
+    return ddgUrl;
+  }
+  // 2) GDELT DOC API (secondary): returns real publisher URLs directly. Only
+  //    reached when DDG fails, so it is rarely exercised — but it gives the scan
+  //    a second chance to fetch a real preview in production.
+  const gdeltUrl = await resolveViaGdelt(title, domain);
+  if (gdeltUrl) {
+    resolvedUrlMap.set(googleUrl, gdeltUrl);
+    if (!sourceState.resolvedUrls) sourceState.resolvedUrls = {};
+    sourceState.resolvedUrls[googleUrl] = gdeltUrl;
+  }
+  return gdeltUrl;
+}
+
+// Resolve an article to its real publisher URL via the GDELT DOC API. GDELT
+// needs a slower pace (≈1 req / 5s) and a well-formed query, so we serialise it
+// on its own chain. We only accept a result whose domain actually matches the
+// source, so we never inject an unrelated article. Returns null on any failure.
+async function resolveViaGdelt(title, domain) {
+  if (!title || !domain) return null;
+  const task = gdeltResolveChain.then(async () => {
+    const minGap = 5500;
+    const wait = lastGdeltResolve + minGap - Date.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    lastGdeltResolve = Date.now();
+    // Strip a trailing " - Publisher" suffix so the quoted phrase matches the
+    // article's own title rather than the news-headline packaging.
+    const clean = String(title).replace(/\s*[–—-]\s*[^–—-]+$/, "").trim() || title;
+    const q = `domain:${domain} "${clean}"`;
+    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=ArtList&maxrecords=10&format=json&sortby=datedesc`;
+    try {
+      const res = await fetchTextResource(url, "application/json,text/plain", 12000);
+      const j = JSON.parse(res.text);
+      const arts = j.articles || [];
+      const dm = domain.replace(/^www\./i, "");
+      const match = arts.find(a => a.domain && a.domain.replace(/^www\./i, "").includes(dm)) || arts[0];
+      if (!match || !/^https?:\/\//i.test(match.url)) return null;
+      // Guard against an aggregator that GDELT mislabels with our domain.
+      try {
+        const host = new URL(match.url).hostname.replace(/^www\./i, "");
+        if (!host.includes(dm)) return null;
+      } catch { return null; }
+      return match.url;
+    } catch {
+      return null;
+    }
+  });
+  gdeltResolveChain = task.catch(() => null);
+  return task;
+}
+
+// Build a short lead excerpt to PREVIEW the text a proposed change would add.
+// Strategy (reliable + low-cost first, network only when needed):
+//   1. If the RSS description already summarises the article (substantive content
+//      beyond the headline + publisher name), use it directly — no fetch, no rate
+//      limits. We explicitly reject "Title - Publisher" packaging, which Google
+//      News often returns instead of a summary.
+//   2. Otherwise (thin snippet) try to fetch the real article. Google News RSS
+//      links can't be followed to the publisher server-side, so resolve the real
+//      URL via DuckDuckGo/GDELT (serialized + cached) and extract the body.
+// Returns null if nothing usable — the caller then falls back to the headline.
+async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, domain } = {}) {
+  if (!item) return null;
+  const snippetText = stripHtml(item.snippet || item.description || "").replace(/\s+/g, " ").trim();
+  const titleText = String(item.title || "").toLowerCase();
+  // A snippet is only usable if it carries real information BEYOND the headline
+  // and publisher name. Google News frequently returns just "Title - Publisher",
+  // which is NOT a summary — in that case we must fetch the article body instead.
+  const publisher = String(item.publisher || item.sourceName || "").toLowerCase();
+  const extra = snippetText.toLowerCase()
+    .replace(titleText, "")
+    .replace(publisher, "")
+    .replace(/[–—-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const snippetIsThin = snippetText.length < 120 || extra.length < 40;
+
+  if (!snippetIsThin) {
+    const sentences = snippetText.match(/[^.!?]+[.!?]+/g) || [snippetText];
+    let lead = sentences.slice(0, 3).join(" ").trim();
+    if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
+    return lead;
+  }
+
+  if (!item.url) return null;
+  let articleUrl = item.url;
+  if (/news\.google\.com/i.test(articleUrl)) {
+    const real = await resolveGoogleNewsUrl(item.url, item.title, domain);
+    if (!real) return null;
+    articleUrl = real;
+  }
+  try {
+    const resource = await fetchTextResource(articleUrl, "text/html,application/xhtml+xml,text/plain", timeoutMs);
+    const body = extractText(resource.text).replace(/\s+/g, " ").trim();
+    if (body.length < 140) return null;
+    const sentences = body.match(/[^.!?]+[.!?]+/g) || [body];
+    let lead = sentences.slice(0, 4).join(" ").trim();
+    if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
+    return lead;
+  } catch {
+    return null;
+  }
+}
+
+// Run an async mapper over items with bounded concurrency (so a slow article
+// fetch doesn't serialize the whole scan).
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+// P3 — auto-draft the suggested edit shown in the review panel (pre-filled). The
+// draft now embeds a real preview of the source text when available, so the
+// proposed change reads like the curated entries already on the app.
+function draftEdit(item, action, publisher, label, preview) {
+  const cite = ` [Source: ${publisher}, ${label}]`;
+  const info = (preview || stripHtml(item.snippet || item.description || "")).trim();
+  const body = info ? `${info} ` : "";
+  if (action === "deadline") return `New compliance deadline announced: ${item.title}. ${body}${cite}`;
+  if (action === "correction") return `This position appears to have changed — ${item.title}. ${body}${cite}`;
+  return `Latest (${label}): ${body}${cite}`;
+}
+function draftNewRecord(item, publisher, label, categoryKey, preview) {
   const cite = `Source: ${publisher} (${label}).`;
-  const clean = stripHtml(item.description || "");
-  if (source.category === "use-case") return `Add as a new AI use-case pattern — "${item.title}". ${clean} ${cite}`;
-  if (source.category === "academic") return `Add as new research note — "${item.title}". ${clean} ${cite}`;
-  return `Add as new regulatory development — "${item.title}". ${clean} ${cite}`;
+  const body = (preview || stripHtml(item.snippet || item.description || "")).trim();
+  const catLabel = CATEGORY_LABELS[categoryKey] || "Knowledge Entry";
+  if (!body) return `Add as new ${catLabel} — "${item.title}". ${cite}`;
+  return `Add as new ${catLabel} — "${item.title}".\n\n${body}\n\n${cite} Verify details against the official source before relying on this entry.`;
 }
 
 // Classify a fetched item: English-only, compared to existing content, and either
@@ -1203,6 +1407,7 @@ function classifyItem(source, item, index) {
   const base = {
     id: hashId(item.url || item.title),
     source: source.id,
+    sourceDomain: source.domain,
     publisher,
     title: item.title,
     url: item.url,
@@ -1223,7 +1428,10 @@ function classifyItem(source, item, index) {
     base.detectedAction = action;
     base.matchConfidence = Number((matched.rank).toFixed(2));
     base.matchedRecord = { dataset: matched.dataset, recordId: matched.recordId, title: matched.title };
-    base.suggestedEdit = draftEdit(source, item, action, matched, publisher, base.publishedLabel);
+    // Target follows the matched record unless this is a deadline (timeline).
+    base.targetDataset = action === "deadline" ? "timeline" : matched.dataset;
+    base.targetCategory = matched.dataset === "knowledge" ? null : null;
+    base.suggestedEdit = draftEdit(item, action, publisher, base.publishedLabel);
     return base;
   }
 
@@ -1235,7 +1443,11 @@ function classifyItem(source, item, index) {
     base.detectedAction = "new";
     base.matchConfidence = 0;
     base.matchedRecord = null;
-    base.suggestedEdit = draftNewRecord(source, item, publisher, base.publishedLabel);
+    // Classify the target category from the article content (not the source
+    // category) so a regulator's model assessment lands under Case Studies.
+    base.targetCategory = detectKnowledgeCategory(text, source.category);
+    base.targetDataset = source.category === "use-case" ? "use-cases" : "knowledge";
+    base.suggestedEdit = draftNewRecord(item, publisher, base.publishedLabel, base.targetCategory);
     return base;
   }
 
@@ -1279,7 +1491,7 @@ function integrateProposal(prop, edit, target, targetCategoryKey) {
         linkLabel: publisher,
       });
     } else if (target === "knowledge") {
-      const key = targetCategoryKey || "regulations";
+      const key = targetCategoryKey || prop.targetCategory || "regulations";
       if (!data.categories[key]) data.categories[key] = { label: key, icon: "🟢", subsections: [] };
       data.categories[key].subsections = data.categories[key].subsections || [];
       data.categories[key].subsections.unshift({ title: prop.title, content: edit, sources: [{ label: publisher, url }] });
@@ -1337,6 +1549,7 @@ async function runSourceScan({ force = false } = {}) {
         .map(i => `${i.matchedRecord ? i.matchedRecord.title : ""}|${i.detectedAction}|${i.url}`)
     );
     const existing = proposedChanges.items || [];
+    const newProps = []; // proposals created in THIS scan that still need enrichment
     let scanned = 0, considered = 0, proposed = 0;
     const counts = { update: 0, deadline: 0, correction: 0, new: 0 };
 
@@ -1355,6 +1568,7 @@ async function runSourceScan({ force = false } = {}) {
           const dedupeKey = `${prop.matchedRecord ? prop.matchedRecord.title : ""}|${prop.detectedAction}|${prop.url}`;
           if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
           existing.push(prop);
+          newProps.push(prop);
           knownIds.add(prop.id);
           pendingKeys.add(dedupeKey);
           proposed++;
@@ -1369,6 +1583,26 @@ async function runSourceScan({ force = false } = {}) {
       } catch (_) {
         // Skip a failing source; continue with the rest.
       }
+    }
+
+    // Enrich each new proposal with a real preview of the source article so the
+    // review panel shows the actual text that would be added (and so the target
+    // category can be refined from the full article text, not just the headline).
+    // Bounded concurrency + short timeout keep the background scan responsive.
+    if (newProps.length) {
+      await mapWithConcurrency(newProps, 2, async (prop) => {
+        let preview = null;
+        try { preview = await fetchArticlePreview(prop, { domain: prop.sourceDomain }); } catch { /* best effort */ }
+        if (preview) {
+          prop.preview = preview;
+          if (prop.detectedAction === "new") {
+            prop.targetCategory = detectKnowledgeCategory(`${prop.title} ${preview}`, prop.category);
+          }
+        }
+        prop.suggestedEdit = prop.detectedAction === "new"
+          ? draftNewRecord(prop, prop.publisher, prop.publishedLabel, prop.targetCategory, preview || "")
+          : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, preview || "");
+      });
     }
 
     proposedChanges.items = existing.slice(-300);
@@ -1402,15 +1636,18 @@ app.get("/api/regulatory-status", (req, res) => {
   });
 });
 
-// Trigger a crawl of the allowlist (server does the work; single-flight locked).
-app.post("/api/source-scan", async (req, res) => {
-  try {
-    const force = !!(req.body && req.body.force);
-    const result = await runSourceScan({ force });
-    res.json({ success: true, ...result });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+// Trigger a crawl of the allowlist. The scan can now take a while (it fetches
+// each proposed article to build a real preview), so we run it in the background
+// and return immediately. The client polls /api/proposed-changes separately.
+app.post("/api/source-scan", (req, res) => {
+  const force = !!(req.body && req.body.force);
+  if (sourceScanInFlight) {
+    return res.json({ success: true, started: false, reason: "scan already in flight" });
   }
+  runSourceScan({ force })
+    .then(result => console.log("[source-scan] completed:", JSON.stringify(result)))
+    .catch(err => console.warn("[source-scan] failed:", err.message));
+  res.json({ success: true, started: true });
 });
 
 // List pending proposed changes for the review panel.

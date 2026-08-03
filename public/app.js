@@ -28,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNewsFavorites();
   setupNewsCompetitors();
   setupSearchReportsWorkspace();
-  setupSummarise();
+  setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
   setupReviewPanel();
@@ -138,7 +138,7 @@ function updateReportDraftCount() {
 }
 
 // ===== Smart Summary =====
-function setupSummarise() {
+function setupQA() {
   const input = document.getElementById("summaryQuestion");
   const submit = document.getElementById("summarySubmitBtn");
   if (!input || !submit) return;
@@ -199,7 +199,7 @@ async function runSummary() {
   const answer = document.getElementById("summaryAnswer");
   const question = input.value.trim();
   if (!question) {
-    showToast("Enter a topic or question to summarise.");
+    showToast("Enter a question.");
     input.focus();
     return;
   }
@@ -208,7 +208,7 @@ async function runSummary() {
   const useInternet = document.getElementById("summaryUseInternet")?.checked === true;
 
   button.disabled = true;
-  button.textContent = "Summarising...";
+  button.textContent = "Asking...";
   result.style.display = "block";
   document.getElementById("summaryResultQuestion").textContent = question;
   document.getElementById("summaryResultMeta").textContent = "Retrieving application evidence...";
@@ -231,9 +231,9 @@ async function runSummary() {
       }),
     });
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.error || "Summary generation failed");
+    if (!response.ok || !data.success) throw new Error(data.error || "Answer generation failed");
 
-    answer.textContent = data.answer;
+    answer.innerHTML = renderAnswerWithCitations(data.answer, data.sources);
     const sourceCount = data.sources?.length || 0;
     const internetLabel = data.internetUsed ? " · internet evidence included" : "";
     const modeText =
@@ -255,12 +255,55 @@ async function runSummary() {
 
     renderSummaryEvidence(data.sources || []);
   } catch (error) {
-    answer.textContent = `Unable to generate a summary: ${error.message}`;
-    document.getElementById("summaryResultMeta").textContent = "Summary failed";
+    answer.textContent = `Unable to generate an answer: ${error.message}`;
+    document.getElementById("summaryResultMeta").textContent = "Answer failed";
   } finally {
     button.disabled = false;
-    button.textContent = "Summarise";
+    button.textContent = "Ask";
   }
+}
+
+// Render the answer as structured, inline-cited prose. The engine emits a simple
+// format: lines starting with "■ " become section headings, **bold** spans are
+// emphasised, and [A1]/[W1] tokens become citation chips linked to their source.
+function renderAnswerWithCitations(text, sources) {
+  const sourceMap = new Map((sources || []).map(s => [s.id, s]));
+  const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const renderInline = (line) => {
+    let html = escapeHtml(line);
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/\[([AW]\d+)\]/g, (m, id) => {
+      const src = sourceMap.get(id);
+      const cls = "ans-cite" + (src?.sourceType === "internet" ? " ans-cite-web" : "");
+      const inner = escapeHtml(id);
+      if (src && /^https?:\/\//i.test(src.url || "")) {
+        return `<a class="${cls}" href="${escapeHtml(src.url)}" target="_blank" rel="noopener" title="${escapeHtml(src.title || "")}">${inner}</a>`;
+      }
+      return `<span class="${cls}" title="${escapeHtml(src?.title || "")}">${inner}</span>`;
+    });
+    return html;
+  };
+  const lines = String(text || "").split("\n");
+  const out = [];
+  let para = [];
+  const flush = () => {
+    if (para.length) {
+      out.push(`<p>${para.map(renderInline).join(" ")}</p>`);
+      para = [];
+    }
+  };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { flush(); continue; }
+    if (line.startsWith("■ ")) {
+      flush();
+      out.push(`<h4 class="ans-section">${renderInline(line.slice(2))}</h4>`);
+      continue;
+    }
+    para.push(line);
+  }
+  flush();
+  return out.join("");
 }
 
 function renderSummaryEvidence(sources) {
@@ -3042,9 +3085,13 @@ async function renderReviewPanel() {
       new: "New topic",
     };
     listEl.innerHTML = items.map(p => {
-      const targetDefault = p.matchedRecord ? p.matchedRecord.dataset
-        : (p.category === "use-case" ? "use-cases" : p.category === "academic" ? "knowledge" : "timeline");
+      const targetDefault = p.targetDataset
+        || (p.matchedRecord ? p.matchedRecord.dataset
+           : (p.category === "use-case" ? "use-cases"
+              : p.detectedAction === "deadline" ? "timeline"
+              : "knowledge"));
       const showCatKey = targetDefault === "knowledge";
+      const catKey = p.targetCategory || "regulations";
       return `
       <div class="proposal-card" data-id="${p.id}">
         <div class="proposal-head">
@@ -3056,7 +3103,11 @@ async function renderReviewPanel() {
         ${p.matchedRecord
           ? `<div class="proposal-match">Matches: <strong>${escapeHtml(p.matchedRecord.title)}</strong> <span class="proposal-confidence">(${Math.round((p.matchConfidence || 0) * 100)}% overlap)</span></div>`
           : `<div class="proposal-match proposal-match-new">Not currently in the app — a new topic.</div>`}
-        <div class="proposal-snippet">${escapeHtml(p.snippet || "")}</div>
+        ${p.preview
+          ? `<div class="proposal-preview-label">What this would add (from the source):</div>
+             <div class="proposal-preview">${escapeHtml(p.preview)}</div>
+             ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}`
+          : `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`}
         <label class="proposal-field">Suggested integration (editable before you approve):</label>
         <textarea class="proposal-edit-box text-input" rows="4">${escapeHtml(p.suggestedEdit || "")}</textarea>
         <div class="proposal-controls">
@@ -3067,7 +3118,7 @@ async function renderReviewPanel() {
               <option value="use-cases" ${targetDefault === "use-cases" ? "selected" : ""}>AI Use Cases</option>
             </select>
           </label>
-          ${showCatKey ? `<input class="proposal-catkey text-input" placeholder="Category key (e.g. regulations)" value="regulations" />` : ""}
+          ${showCatKey ? `<input class="proposal-catkey text-input" placeholder="Category key (e.g. regulations)" value="${escapeHtml(catKey)}" />` : ""}
         </div>
         <div class="proposal-actions">
           <button class="btn btn-sm btn-primary" data-integrate="${p.id}" type="button">Integrate</button>
