@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
-const DEFAULT_MODEL = process.env.SUMMARY_MODEL || "HuggingFaceTB/SmolLM2-135M-Instruct";
+const DEFAULT_MODEL = process.env.SUMMARY_MODEL || "Qwen/Qwen2.5-0.5B-Instruct";
 const DATA_DIR = path.join(__dirname, "data");
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "because", "been", "before", "being", "between",
