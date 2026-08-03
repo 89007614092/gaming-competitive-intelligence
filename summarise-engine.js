@@ -1,8 +1,16 @@
 const fs = require("fs");
 const path = require("path");
-const { pathToFileURL } = require("url");
 
-const DEFAULT_MODEL = process.env.SUMMARY_MODEL || "Qwen/Qwen2.5-0.5B-Instruct";
+// Open-source model served over an OpenAI-compatible chat-completions API
+// (Groq by default; OpenRouter or any compatible host via OPEN_MODEL_BASE_URL).
+// Running the model in-process (Transformers.js + onnxruntime) exceeded Render's
+// free-tier RAM and caused cold-start "warming up" failures, so we call a hosted
+// open-weight model instead. The Render instance stays tiny and the same
+// inline-citation prompt runs on a far larger model than could ever fit locally.
+const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "llama-3.3-70b-versatile";
+const OPEN_MODEL_API_KEY = process.env.OPEN_MODEL_API_KEY || "";
+const OPEN_MODEL_BASE_URL = (process.env.OPEN_MODEL_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
+const MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
 const DATA_DIR = path.join(__dirname, "data");
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "because", "been", "before", "being", "between",
@@ -17,7 +25,6 @@ const OMIT_KEYS = new Set([
 ]);
 
 let corpusCache = null;
-let generatorPromise = null;
 let generationQueue = Promise.resolve();
 
 function readJson(fileName) {
@@ -199,65 +206,30 @@ function evidenceHighlights(question, evidence, limit = 4) {
   return evidence.slice(0, limit).map(item => `- ${relevantExcerpt(item, question, 1, 620, item.title)} [${item.id}]`).join("\n");
 }
 
-async function getGenerator() {
-  if (process.env.SUMMARY_DISABLE_MODEL === "1") throw new Error("Local model disabled");
-  if (!generatorPromise) {
-    generatorPromise = (async () => {
-      const moduleEntry = require.resolve("@huggingface/transformers");
-      const imported = await import(pathToFileURL(moduleEntry).href);
-      const transformers = imported.default || imported;
-      transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || path.join(process.cwd(), ".cache", "transformers");
-      // In Node.js, force the NATIVE ONNX backend. The wasm backend is unreliable
-      // here: it throws cryptic errors ("The string did not match the expected
-      // pattern") and is slow on cold starts. onnxruntime-node must be installed
-      // (it is a declared dependency) for this to resolve.
-      try {
-        require.resolve("onnxruntime-node");
-        transformers.env.backends.onnx.runtime = "onnxruntime-node";
-      } catch {
-        console.warn(
-          "[summarise] onnxruntime-node not found — falling back to the wasm ONNX " +
-          "backend, which is unreliable in Node.js. Install onnxruntime-node to fix."
-        );
-      }
-      return transformers.pipeline("text-generation", DEFAULT_MODEL, { dtype: "q4" });
-    })().catch(error => {
-      generatorPromise = null;
-      throw new Error(`Local summarisation model failed to load: ${error.message}`);
-    });
+// ===== Open-source model via API (Groq / OpenRouter / any OpenAI-compatible) =====
+// The model is NOT loaded in-process (that exceeded Render's free-tier RAM and
+// caused cold-start "warming up" failures). Instead we call a hosted open-weight
+// model over its OpenAI-compatible chat-completions endpoint. This keeps the
+// Render instance tiny and lets the same inline-citation prompt run on a far
+// larger model than could ever fit locally.
+//
+// Configure via env vars:
+//   OPEN_MODEL_API_KEY   (required) API key for the model host
+//   OPEN_MODEL_BASE_URL  default https://api.groq.com/openai/v1
+//                        (OpenRouter: https://openrouter.ai/api/v1)
+//   OPEN_MODEL_NAME      default llama-3.3-70b-versatile
+//                        (OpenRouter examples: meta-llama/llama-3.3-70b-instruct,
+//                         qwen/qwen2.5-72b-instruct, mistralai/mixtral-8x7b-instruct)
+//   SUMMARY_DISABLE_MODEL=1  disables the AI model entirely (extractive-only)
+
+async function runApiModelGeneration(question, evidence) {
+  if (MODEL_DISABLED) {
+    throw new Error(
+      process.env.SUMMARY_DISABLE_MODEL === "1"
+        ? "Local model disabled"
+        : "Model API key not configured (set OPEN_MODEL_API_KEY)"
+    );
   }
-  return generatorPromise;
-}
-
-// Pre-load the model in the background (e.g. when the user opts in) so the first
-// model request does not pay the full cold-start download/initialisation cost.
-// Never throws.
-function warmUpModel() {
-  if (process.env.SUMMARY_DISABLE_MODEL === "1") return Promise.resolve(false);
-  return getGenerator()
-    .then(() => true)
-    .catch(error => {
-      console.warn("[summarise] model warm-up skipped:", error.message);
-      return false;
-    });
-}
-
-// True once the model generator promise exists (i.e. a load has been kicked off,
-// successfully or not). Used by the status endpoint to tell the UI whether the
-// opt-in AI model is already cached/warm.
-function isModelReady() {
-  return generatorPromise !== null;
-}
-
-function extractGeneratedAnswer(output) {
-  const generated = output?.[0]?.generated_text;
-  if (Array.isArray(generated)) return generated.at(-1)?.content?.trim() || "";
-  if (typeof generated === "string") return generated.trim();
-  return "";
-}
-
-async function runOpenSourceGeneration(question, evidence) {
-  const generator = await getGenerator();
   const context = formatContext(evidence, question);
   const messages = [
     {
@@ -269,31 +241,66 @@ async function runOpenSourceGeneration(question, evidence) {
       content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.`,
     },
   ];
-  const output = await generator(messages, {
-    max_new_tokens: 720,
-    do_sample: false,
-    repetition_penalty: 1.1,
-  });
-  let answer = extractGeneratedAnswer(output);
-  if (!answer) throw new Error("The local model returned an empty answer");
-  const validCitationIds = new Set(evidence.map(item => item.id));
-  answer = answer.replace(/\[([AW]\d+)\]/g, (match, id) => validCitationIds.has(id) ? match : "");
-  if (answer.trim().length < 80) throw new Error("Local model returned a degenerate answer");
-  if (/^(?:\s*\[[AW]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Local model returned a degenerate answer");
-  const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
-  // Require genuine inline citation coverage; otherwise fall back to the
-  // detailed extractive answer so the user always gets a comprehensive,
-  // inline-cited response rather than a model answer with no sources.
-  if (citationCount >= 2) return answer;
-  return buildExtractiveAnswer(question, evidence);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPEN_MODEL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: DEFAULT_MODEL,
+        messages,
+        max_tokens: 720,
+        temperature: 0,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      throw new Error(`Model API returned HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+    }
+    const json = await resp.json();
+    let answer = json?.choices?.[0]?.message?.content?.trim() || "";
+    if (!answer) throw new Error("The model returned an empty answer");
+    const validCitationIds = new Set(evidence.map(item => item.id));
+    answer = answer.replace(/\[([AW]\d+)\]/g, (match, id) => (validCitationIds.has(id) ? match : ""));
+    if (answer.trim().length < 80) throw new Error("Model returned a degenerate answer");
+    if (/^(?:\s*\[[AW]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Model returned a degenerate answer");
+    const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
+    // Require genuine inline citation coverage; otherwise fall back to the
+    // detailed extractive answer so the user always gets a comprehensive,
+    // inline-cited response rather than a model answer with no sources.
+    if (citationCount >= 2) return answer;
+    return buildExtractiveAnswer(question, evidence);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
+// Serialise model calls so we never open two concurrent API requests at once
+// (keeps the host's rate limits happy and response ordering sane).
 function generateOpenSourceAnswer(question, evidence) {
   const task = generationQueue
     .catch(() => undefined)
-    .then(() => runOpenSourceGeneration(question, evidence));
+    .then(() => runApiModelGeneration(question, evidence));
   generationQueue = task.catch(() => undefined);
   return task;
+}
+
+// Pre-load hook. For an API-backed model there is nothing to preload, so this
+// simply reports whether the model is configured. Never throws.
+function warmUpModel() {
+  if (MODEL_DISABLED) return Promise.resolve(false);
+  return Promise.resolve(true);
+}
+
+// True once the model API key is configured (the "opt-in" AI model is available).
+function isModelReady() {
+  return !MODEL_DISABLED;
 }
 
 function truncate(text, n) {

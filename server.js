@@ -37,31 +37,55 @@ const PYTHON = resolvePython();
 const SEARCH_SCRIPT = path.join(__dirname, "search.py");
 const TRANSCRIPT_SCRIPT = path.join(__dirname, "transcript.py");
 
-// ===== DuckDuckGo Search via Python duckduckgo_search library =====
-// Free, no API key, no sign-in, no token limits.
-// When Python is unavailable, falls back to cached news data.
+// ===== Tavily Web Search (API key required) =====
+// Replaces the old self-scraped DuckDuckGo search (run via a Python subprocess),
+// which got rate-limited / served bot-challenges from Render's shared IP and
+// always timed out. Tavily is a proper search API that returns structured
+// results reliably from any IP. Requires TAVILY_API_KEY in the environment.
 
-function ddgSearch(query, limit = 10) {
+function tavilySearch(query, limit = 10) {
   return new Promise((resolve, reject) => {
-    if (!PYTHON) return reject(new Error("Python not available — search disabled on this host"));
-    execFile(
-      PYTHON,
-      [SEARCH_SCRIPT, query, String(limit)],
-      { timeout: 15000 },
-      (err, stdout, stderr) => {
-        if (err) {
-          if (err.killed) return reject(new Error("Search timed out"));
-          return reject(new Error(stderr || err.message));
+    const apiKey = process.env.TAVILY_API_KEY;
+    if (!apiKey) {
+      return reject(new Error("Search API key not configured (set TAVILY_API_KEY)"));
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query,
+        max_results: Math.min(Number(limit) || 10, 20),
+        search_depth: "basic",
+        include_answer: false,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (resp) => {
+        clearTimeout(timeout);
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => "");
+          throw new Error(`Search API returned HTTP ${resp.status}: ${txt.slice(0, 160)}`);
         }
-        try {
-          const result = JSON.parse(stdout);
-          if (result.error) return reject(new Error(result.error));
-          resolve(result.data || []);
-        } catch (e) {
-          reject(new Error("Failed to parse search results"));
-        }
-      }
-    );
+        const json = await resp.json();
+        const results = Array.isArray(json.results) ? json.results : [];
+        resolve(
+          results
+            .filter(item => item.url && (item.title || item.content))
+            .map(item => ({
+              title: item.title || item.url,
+              url: item.url,
+              description: String(item.content || item.title || "").slice(0, 900),
+            }))
+        );
+      })
+      .catch((err) => {
+        clearTimeout(timeout);
+        if (err.name === "AbortError") return reject(new Error("Search timed out"));
+        reject(err);
+      });
   });
 }
 
@@ -627,13 +651,13 @@ const NEWS_EXCLUDED_DOMAINS = [
 
 // ===== API ROUTES =====
 
-// POST /api/search — free DuckDuckGo search
+// POST /api/search — Tavily web search (requires TAVILY_API_KEY)
 app.post("/api/search", async (req, res) => {
   try {
     const { query, limit = 10 } = req.body;
     if (!query) return res.status(400).json({ error: "Query is required" });
 
-    const results = await ddgSearch(query, limit);
+    const results = await tavilySearch(query, limit);
     res.json({ success: true, data: results, total: results.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -648,8 +672,8 @@ app.get("/api/summarise/status", (req, res) => {
       success: true,
       corpusItems: buildCorpus().length,
       model: DEFAULT_MODEL,
-      license: "Apache-2.0",
-      localModel: true,
+      license: "open-weight (hosted)",
+      localModel: false,
       modelOptIn: true,
       defaultMode: "extractive-citation",
       modelLoaded: isModelReady(),
@@ -670,10 +694,10 @@ app.post("/api/summarise/warm", (req, res) => {
 });
 
 // POST /api/summarise — answer questions from app data with optional web evidence.
-// Default mode is extractive-citation (fast, fully cited, accurate). The local AI
-// model is used only when the caller opts in with useModel=true; if it is still
-// warming up or fails, the response gracefully falls back to the detailed
-// extractive answer.
+// Default mode is extractive-citation (fast, fully cited, accurate). The hosted
+// open-source model is used only when the caller opts in with useModel=true;
+// if the model API is unavailable or fails, the response gracefully falls back
+// to the detailed extractive answer.
 app.post("/api/summarise", async (req, res) => {
   try {
     const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
@@ -693,7 +717,7 @@ app.post("/api/summarise", async (req, res) => {
 
     if (useInternet) {
       try {
-        const webResults = await ddgSearch(`${question} latest evidence official`, 5);
+        const webResults = await tavilySearch(`${question} latest evidence official`, 5);
         webEvidence = webResults
           .filter(item => item.url && (item.title || item.description))
           .slice(0, 5)
@@ -753,7 +777,7 @@ app.post("/api/summarise", async (req, res) => {
       webSearchError,
       model: {
         name: DEFAULT_MODEL,
-        license: "Apache-2.0",
+        license: "open-weight (hosted)",
         mode,
         error: modelError,
         optIn: true,
@@ -1853,9 +1877,9 @@ app.post("/api/report", async (req, res) => {
 // GET /api/status
 app.get("/api/status", (req, res) => {
   res.json({
-    mode: "DuckDuckGo (free, no API key needed)",
-    searchProvider: "DuckDuckGo Lite",
-    scrapeProvider: "Readable web text + public video captions", 
+    mode: "Tavily web search (API key required)",
+    searchProvider: "Tavily",
+    scrapeProvider: "Readable web text + public video captions",
   });
 });
 
@@ -1984,7 +2008,7 @@ app.post("/api/gaming-trends/search", async (req, res) => {
     const { keywords, limit = 5 } = req.body;
     if (!keywords) return res.status(400).json({ error: "Search keywords required" });
 
-    const results = await ddgSearch(keywords, limit);
+    const results = await tavilySearch(keywords, limit);
     res.json({ success: true, data: results, keywords });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2024,7 +2048,7 @@ app.post("/api/regulatory-scan", async (req, res) => {
     const results = await Promise.allSettled(
       scanQueries.map(async (q) => {
         try {
-          const items = await ddgSearch(q, 3);
+          const items = await tavilySearch(q, 3);
           return { query: q, results: items };
         } catch (_) { return { query: q, results: [] }; }
       })
@@ -2085,7 +2109,7 @@ app.post("/api/knowledge-scan", async (req, res) => {
     const results = await Promise.allSettled(
       scanQueries.map(async (q) => {
         try {
-          const items = await ddgSearch(q, 3);
+          const items = await tavilySearch(q, 3);
           return { query: q, results: items };
         } catch (_) { return { query: q, results: [] }; }
       })
@@ -2154,8 +2178,8 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n  Insights Tool`);
   console.log(`  Server running at http://localhost:${PORT}`);
-  console.log(`  Python: ${PYTHON ? `${PYTHON} — search & transcripts enabled` : "NOT FOUND — search & transcripts disabled"}`);
-  console.log(`  Search: DuckDuckGo (free, no API key)\n`);
+  console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
+  console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
   // The local AI model is opt-in (default answer mode is extractive-citation),
   // so we do NOT preload it at startup. It is warmed in the background the first
   // time the user enables the "Use AI model" toggle.
