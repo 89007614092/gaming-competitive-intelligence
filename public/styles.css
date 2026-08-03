@@ -405,6 +405,13 @@ body {
   font-size: 0.8rem;
 }
 
+.news-description {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  margin-top: 0.5rem;
+}
+
 /* === Loading & Empty States === */
 .loading-state, .empty-state {
   text-align: center;

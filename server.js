@@ -631,91 +631,171 @@ app.post("/api/search", async (req, res) => {
   }
 });
 
-// GET /api/news — free DuckDuckGo news search across competitors
-// Falls back to pre-generated cache when Python/search is unavailable
+// GET /api/news — multi-topic live news search using public RSS feeds.
+// Google News RSS works without an API key or Python, making it reliable on Render.
+// The bundled JSON cache remains the final fallback if every live feed fails.
+const NEWS_TOPICS = [
+  {
+    label: "AI Technology Trends",
+    queries: [
+      "generative AI gaming world models AI agents",
+      "AI video 3D generation game development technology",
+    ],
+  },
+  {
+    label: "AI Regulation",
+    queries: [
+      "EU AI Act UK AI regulation big tech compliance enforcement",
+      "AI copyright transparency regulation technology companies",
+    ],
+  },
+  {
+    label: "Current Use Cases",
+    queries: [
+      "AI gaming use cases NPC procedural content game development",
+      "generative AI current use cases games entertainment",
+    ],
+  },
+  {
+    label: "Competitor News",
+    queries: [
+      "Tencent NetEase HoYoverse AI gaming",
+      "Sony Microsoft Epic Unity Roblox AI gaming",
+    ],
+  },
+];
+
 let newsCache = null;
 try {
   newsCache = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "news-cache.json"), "utf8"));
 } catch (_) { /* no cache file yet */ }
 
-app.get("/api/news", async (req, res) => {
-  try {
-    // Use 8 random keywords each time for variety, always with 2026
-    const shuffled = [...COMPETITOR_KEYWORDS].sort(() => Math.random() - 0.5);
-    const queries = shuffled.slice(0, 8).map((kw) => `${kw} 2026`);
+function extractXmlTag(xml, tag) {
+  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i").exec(xml);
+  return match ? stripHtml(match[1].replace(/^<!\[CDATA\[|\]\]>$/g, "")) : "";
+}
 
-    const results = await Promise.allSettled(
-      queries.map(async (q) => {
-        const items = await ddgSearch(q, 3);
-        return { keyword: q, results: items };
-      })
-    );
+function parseNewsRss(xml, topicLabel, query, limit = 6) {
+  const articles = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+  let match;
 
-    // Collect, filter excluded domains, and deduplicate by URL
-    const seen = new Set();
-    const articles = [];
-    for (const r of results) {
-      if (r.status === "fulfilled" && r.value.results) {
-        for (const item of r.value.results) {
-          if (!item.url || seen.has(item.url)) continue;
+  while ((match = itemRegex.exec(xml)) !== null && articles.length < limit) {
+    const item = match[1];
+    const title = extractXmlTag(item, "title");
+    const url = extractXmlTag(item, "link");
+    const description = extractXmlTag(item, "description");
+    const publishedAt = extractXmlTag(item, "pubDate");
+    const sourceName = extractXmlTag(item, "source");
 
-          // Skip excluded domains (Wikipedia, etc.)
-          const urlLower = item.url.toLowerCase();
-          const isExcluded = NEWS_EXCLUDED_DOMAINS.some(domain =>
-            urlLower.includes(domain)
-          );
-          if (isExcluded) continue;
+    if (!title || !url) continue;
+    if (NEWS_EXCLUDED_DOMAINS.some(domain => url.toLowerCase().includes(domain))) continue;
 
-          // Skip articles with titles that look like encyclopedia entries
-          const title = (item.title || "").toLowerCase();
-          const isWikiStyle = /^[a-z\s]+—?\s*wikipedia/i.test(title) ||
-            /wikipedia,?\s+(the|la|die|il|el)\s+free\s+encyclopedia/i.test(item.title || "");
-          if (isWikiStyle) continue;
-
-          seen.add(item.url);
-          articles.push({
-            ...item,
-            competitorKeyword: r.value.keyword.replace(/ 2026$/, ""),
-          });
-        }
-      }
-    }
-
-    // Sort by recency/heuristic: prefer articles with longer descriptions (more substantive)
-    articles.sort((a, b) => (b.description || "").length - (a.description || "").length);
-
-    const finalArticles = articles.slice(0, 30);
-
-    // Update cache with fresh results
-    if (finalArticles.length > 0) {
-      newsCache = {
-        generatedAt: new Date().toISOString(),
-        source: "Live DuckDuckGo search",
-        count: finalArticles.length,
-        articles: finalArticles
-      };
-    }
-
-    res.json({
-      success: true,
-      count: finalArticles.length,
-      articles: finalArticles,
-      searchedAt: new Date().toISOString(),
-      live: true,
+    articles.push({
+      title,
+      url,
+      description,
+      competitorKeyword: topicLabel,
+      searchQuery: query,
+      sourceName,
+      publishedAt: publishedAt && !Number.isNaN(Date.parse(publishedAt))
+        ? new Date(publishedAt).toISOString()
+        : null,
     });
-  } catch (err) {
-    // Fall back to cache if available
-    if (newsCache && newsCache.articles?.length) {
+  }
+
+  return articles;
+}
+
+async function searchGoogleNewsRss(query, topicLabel, limit = 6) {
+  const freshnessQuery = `${query} when:60d`;
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(freshnessQuery)}&hl=en-GB&gl=GB&ceid=GB:en`;
+  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
+  return parseNewsRss(resource.text, topicLabel, query, limit);
+}
+
+async function getLiveNewsArticles() {
+  const searches = NEWS_TOPICS.flatMap(topic =>
+    topic.queries.map(query => searchGoogleNewsRss(query, topic.label, 6))
+  );
+  const settled = await Promise.allSettled(searches);
+  const seen = new Set();
+  const articles = [];
+
+  for (const result of settled) {
+    if (result.status !== "fulfilled") continue;
+    for (const article of result.value) {
+      // Google News may surface the same story in several queries.
+      const key = article.url || article.title.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      articles.push(article);
+    }
+  }
+
+  articles.sort((a, b) => {
+    const dateA = a.publishedAt ? Date.parse(a.publishedAt) : 0;
+    const dateB = b.publishedAt ? Date.parse(b.publishedAt) : 0;
+    return dateB - dateA;
+  });
+
+  return articles.slice(0, 40);
+}
+
+app.get("/api/news", async (req, res) => {
+  res.set("Cache-Control", "no-store, max-age=0");
+
+  try {
+    const liveArticles = await getLiveNewsArticles();
+
+    if (liveArticles.length > 0) {
+      const searchedAt = new Date().toISOString();
+      newsCache = {
+        generatedAt: searchedAt,
+        source: "Google News RSS",
+        count: liveArticles.length,
+        articles: liveArticles,
+      };
+
+      return res.json({
+        success: true,
+        count: liveArticles.length,
+        articles: liveArticles,
+        topics: NEWS_TOPICS.map(topic => topic.label),
+        searchedAt,
+        live: true,
+        cached: false,
+      });
+    }
+
+    // Promise.allSettled does not throw when all searches fail, so an explicit
+    // empty-result fallback is required here (the previous implementation missed it).
+    if (newsCache?.articles?.length) {
       return res.json({
         success: true,
         count: newsCache.articles.length,
         articles: newsCache.articles,
+        topics: NEWS_TOPICS.map(topic => topic.label),
         searchedAt: newsCache.generatedAt,
         live: false,
         cached: true,
       });
     }
-    res.status(500).json({ error: err.message });
+
+    return res.status(503).json({ error: "No live or cached news articles are available" });
+  } catch (err) {
+    if (newsCache?.articles?.length) {
+      return res.json({
+        success: true,
+        count: newsCache.articles.length,
+        articles: newsCache.articles,
+        topics: NEWS_TOPICS.map(topic => topic.label),
+        searchedAt: newsCache.generatedAt,
+        live: false,
+        cached: true,
+      });
+    }
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -3,6 +3,16 @@
 // ============================================================
 
 const API_BASE = "/api";
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 let reportUrls = [];
 let currentScrapedSource = null;
 let savedReports = JSON.parse(localStorage.getItem("savedReports") || "[]");
@@ -256,7 +266,8 @@ async function loadNews(forceRefresh = false) {
   feed.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Scanning competitor news...</p></div>';
 
   try {
-    const res = await fetch(`${API_BASE}/news`);
+    const refreshParam = forceRefresh ? `?refresh=${Date.now()}` : "";
+    const res = await fetch(`${API_BASE}/news${refreshParam}`, { cache: "no-store" });
     const data = await res.json();
 
     if (!data.success) {
@@ -328,21 +339,28 @@ function renderNewsCards(articles, filter) {
   }
 
   feed.innerHTML = filtered
-    .map(
-      (a, i) => `
+    .map((a, i) => {
+      const safeUrl = /^https?:\/\//i.test(a.url || "") ? a.url : "#";
+      const sourceBits = [a.sourceName];
+      if (a.publishedAt) {
+        sourceBits.push(new Date(a.publishedAt).toLocaleDateString(undefined, {
+          year: "numeric", month: "short", day: "numeric"
+        }));
+      }
+      const sourceLine = sourceBits.filter(Boolean).join(" · ") || a.url || "";
+
+      return `
     <div class="news-card" data-index="${i}">
       <div class="news-card-header">
         <div class="news-title">
-          <a href="${a.url || "#"}" target="_blank" rel="noopener">${a.title || "Untitled"}</a>
+          <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
         </div>
-        <span class="news-tag">${(a.competitorKeyword || "").replace(/ Tencent 2026/i, "")}</span>
+        <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
       </div>
-      <p class="news-source">${a.url || ""}</p>
-      <p class="news-meta">
-        ${a.description || ""}
-      </p>
-    </div>`
-    )
+      <p class="news-source">${escapeHtml(sourceLine)}</p>
+      <p class="news-description">${escapeHtml(a.description || "")}</p>
+    </div>`;
+    })
     .join("");
 }
 
