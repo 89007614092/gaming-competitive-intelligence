@@ -367,7 +367,48 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 1rem;
   margin-bottom: 0.5rem;
+}
+
+.news-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.news-favorite-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.news-favorite-btn:hover {
+  color: #b7791f;
+  border-color: #d69e2e;
+  background: #fffbeb;
+  transform: scale(1.05);
+}
+
+.news-favorite-btn.active {
+  color: #b7791f;
+  border-color: #d69e2e;
+  background: #fef3c7;
+}
+
+.news-card.is-saved {
+  border-left: 3px solid #d69e2e;
 }
 
 .news-title {
@@ -2725,6 +2766,26 @@ body {
   background: var(--surface);
   color: var(--primary);
   box-shadow: var(--shadow);
+}
+
+.saved-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 0.35rem;
+  padding: 0 0.35rem;
+  border-radius: 10px;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.sub-tab-btn.active .saved-count {
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 /* ===== Risks Tab ===== */

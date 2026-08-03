@@ -25,6 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
   checkApiStatus();
   loadKnowledgeBase();
   setupSubTabs();
+  setupNewsFavorites();
   setupTabDragDrop();
   setupAutoUpdate();
 });
@@ -222,6 +223,7 @@ function resetSubTabForView(viewId) {
   bar.querySelectorAll(".sub-tab-btn").forEach(b => b.classList.remove("active"));
   const firstBtn = bar.querySelector(".sub-tab-btn");
   if (firstBtn) firstBtn.classList.add("active");
+  if (viewId === "news-view") setNewsViewMode("recent");
 }
 
 // ===== Settings Modal =====
@@ -314,18 +316,113 @@ async function loadNews(forceRefresh = false) {
       filterDiv.appendChild(tag);
     });
 
-    renderNewsCards(data.articles, null);
+    allArticles = data.articles;
+    if (newsViewMode === "saved") {
+      renderSavedArticles();
+    } else {
+      renderNewsCards(allArticles, null);
+    }
   } catch (err) {
     feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${err.message}</p></div>`;
   }
 }
 
+const SAVED_ARTICLES_KEY = "savedNewsArticles";
 let currentFilter = null;
 let allArticles = [];
+let newsViewMode = "recent";
+let savedNewsArticles = loadSavedNewsArticles();
 
-function renderNewsCards(articles, filter) {
-  allArticles = articles;
-  currentFilter = filter;
+function loadSavedNewsArticles() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVED_ARTICLES_KEY) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveNewsArticles() {
+  localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(savedNewsArticles));
+  updateSavedArticleCount();
+}
+
+function newsArticleKey(article) {
+  return article?.url || `${article?.title || ""}|${article?.publishedAt || ""}`;
+}
+
+function isNewsArticleSaved(article) {
+  const key = newsArticleKey(article);
+  return savedNewsArticles.some(saved => newsArticleKey(saved) === key);
+}
+
+function setupNewsFavorites() {
+  updateSavedArticleCount();
+
+  document.querySelectorAll('[data-news-mode]').forEach(button => {
+    button.addEventListener("click", () => {
+      setNewsViewMode(button.dataset.newsMode);
+    });
+  });
+
+  document.getElementById("newsFeed")?.addEventListener("click", event => {
+    const button = event.target.closest(".news-favorite-btn");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const key = decodeURIComponent(button.dataset.articleKey || "");
+    const article = [...allArticles, ...savedNewsArticles]
+      .find(item => newsArticleKey(item) === key);
+    if (article) toggleNewsFavorite(article);
+  });
+}
+
+function setNewsViewMode(mode) {
+  newsViewMode = mode === "saved" ? "saved" : "recent";
+  const title = document.getElementById("newsSectionTitle");
+  const filters = document.getElementById("filterTags");
+
+  if (title) title.textContent = newsViewMode === "saved" ? "Saved Articles" : "Recent News & Updates";
+  if (filters) filters.style.display = newsViewMode === "saved" ? "none" : "flex";
+
+  if (newsViewMode === "saved") {
+    renderSavedArticles();
+  } else {
+    renderNewsCards(allArticles, currentFilter);
+  }
+}
+
+function toggleNewsFavorite(article) {
+  const key = newsArticleKey(article);
+  const existingIndex = savedNewsArticles.findIndex(saved => newsArticleKey(saved) === key);
+
+  if (existingIndex >= 0) {
+    savedNewsArticles.splice(existingIndex, 1);
+  } else {
+    savedNewsArticles.unshift({ ...article, savedAt: new Date().toISOString() });
+  }
+
+  saveNewsArticles();
+  showToast(existingIndex >= 0 ? "Article removed from saved items." : "Article saved for later.");
+  if (newsViewMode === "saved") {
+    renderSavedArticles();
+  } else {
+    renderNewsCards(allArticles, currentFilter);
+  }
+}
+
+function updateSavedArticleCount() {
+  const count = document.getElementById("savedArticleCount");
+  if (count) count.textContent = savedNewsArticles.length;
+}
+
+function renderSavedArticles() {
+  renderNewsCards(savedNewsArticles, null, true);
+}
+
+function renderNewsCards(articles, filter, savedView = false) {
+  currentFilter = savedView ? null : filter;
 
   const feed = document.getElementById("newsFeed");
 
@@ -334,7 +431,9 @@ function renderNewsCards(articles, filter) {
     : articles;
 
   if (!filtered.length) {
-    feed.innerHTML = '<div class="empty-state"><p>No articles match this filter</p></div>';
+    feed.innerHTML = savedView
+      ? '<div class="empty-state"><div class="empty-icon">&#9734;</div><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates to keep it here for later.</p></div>'
+      : '<div class="empty-state"><p>No articles match this filter</p></div>';
     return;
   }
 
@@ -348,14 +447,19 @@ function renderNewsCards(articles, filter) {
         }));
       }
       const sourceLine = sourceBits.filter(Boolean).join(" · ") || a.url || "";
+      const saved = isNewsArticleSaved(a);
+      const articleKey = encodeURIComponent(newsArticleKey(a));
 
       return `
-    <div class="news-card" data-index="${i}">
+    <div class="news-card${saved ? " is-saved" : ""}" data-index="${i}">
       <div class="news-card-header">
         <div class="news-title">
           <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
         </div>
-        <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
+        <div class="news-card-actions">
+          <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
+          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
+        </div>
       </div>
       <p class="news-source">${escapeHtml(sourceLine)}</p>
       <p class="news-description">${escapeHtml(a.description || "")}</p>

@@ -97,13 +97,14 @@
 
         <!-- Sub-tab Navigation -->
         <div class="sub-tab-bar" data-view="news-view">
-          <button class="sub-tab-btn active" data-target="newsFeedSection">Recent News &amp; Updates</button>
+          <button class="sub-tab-btn active" data-target="newsFeedSection" data-news-mode="recent">Recent News &amp; Updates</button>
+          <button class="sub-tab-btn" data-target="newsFeedSection" data-news-mode="saved">Saved Articles <span class="saved-count" id="savedArticleCount">0</span></button>
         </div>
 
         <!-- News Feed -->
         <div class="section" id="newsFeedSection">
           <div class="section-header">
-            <h2>Recent News &amp; Updates</h2>
+            <h2 id="newsSectionTitle">Recent News &amp; Updates</h2>
             <div class="filter-tags" id="filterTags"></div>
           </div>
           <div class="news-feed" id="newsFeed">
