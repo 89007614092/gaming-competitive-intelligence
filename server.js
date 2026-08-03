@@ -102,12 +102,12 @@ function validateSourceUrl(input) {
   return parsed.toString();
 }
 
-async function fetchTextResource(url, accept = "text/html,application/xhtml+xml,text/plain", timeoutMs = 20000) {
+async function fetchTextResource(url, accept = "text/html,application/xhtml+xml,text/plain", timeoutMs = 20000, userAgent = SCRAPE_USER_AGENT) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(validateSourceUrl(url), {
-      headers: { "User-Agent": SCRAPE_USER_AGENT, Accept: accept },
+      headers: { "User-Agent": userAgent, Accept: accept },
       redirect: "follow",
       signal: controller.signal,
     });
@@ -1037,6 +1037,21 @@ let lastDdgResolve = 0;
 // on its own slower chain, and only reach for it after DuckDuckGo fails.
 let gdeltResolveChain = Promise.resolve();
 let lastGdeltResolve = 0;
+// Rotate User-Agents across resolver requests. A single fixed UA is exactly what
+// search engines fingerprint and challenge, so cycling a small pool of realistic
+// desktop UAs measurably reduces the DuckDuckGo 202 bot-challenge in production.
+const RESOLVER_UAS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+];
+let resolverUaIdx = 0;
+function nextResolverUa() {
+  const ua = RESOLVER_UAS[resolverUaIdx % RESOLVER_UAS.length];
+  resolverUaIdx++;
+  return ua;
+}
 
 function loadSourceRegistry() {
   if (!sourcesCache) {
@@ -1230,44 +1245,48 @@ function detectKnowledgeCategory(text, sourceCategory) {
 // GDELT DOC API if DuckDuckGo can't resolve the URL.
 async function resolveGoogleNewsUrl(googleUrl, title, domain) {
   if (resolvedUrlMap.has(googleUrl)) return resolvedUrlMap.get(googleUrl);
-  // 1) DuckDuckGo (primary): serialised + paced so burst scans don't trip its
-  //    anti-bot challenge page.
-  const ddgTask = ddgResolveChain.then(async () => {
-    const minGap = 700;
-    const wait = lastDdgResolve + minGap - Date.now();
-    if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    lastDdgResolve = Date.now();
-    if (!title) return null;
-    const site = domain ? ` site:${domain}` : "";
-    const q = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${title}${site}`)}`;
-    try {
-      const res = await fetchTextResource(q, "text/html,application/xhtml+xml,text/plain", 12000);
-      const uddg = (res.text.match(/uddg=([^&"'\s]+)/) || [])[1];
-      if (!uddg) return null;
-      const real = decodeURIComponent(uddg);
-      return /^https?:\/\//i.test(real) ? real : null;
-    } catch {
-      return null;
-    }
-  });
-  ddgResolveChain = ddgTask.catch(() => null);
-  const ddgUrl = await ddgTask;
-  if (ddgUrl) {
-    resolvedUrlMap.set(googleUrl, ddgUrl);
+  const cacheAndReturn = (real) => {
+    if (!real) return null;
+    resolvedUrlMap.set(googleUrl, real);
     if (!sourceState.resolvedUrls) sourceState.resolvedUrls = {};
-    sourceState.resolvedUrls[googleUrl] = ddgUrl;
-    return ddgUrl;
-  }
-  // 2) GDELT DOC API (secondary): returns real publisher URLs directly. Only
-  //    reached when DDG fails, so it is rarely exercised — but it gives the scan
-  //    a second chance to fetch a real preview in production.
+    sourceState.resolvedUrls[googleUrl] = real;
+    return real;
+  };
+  // One DuckDuckGo attempt, serialized + paced + rotating UA. Returns the decoded
+  // publisher URL or null. We try a few query variants (most specific first) to
+  // maximise the chance of a hit despite DDG's occasional challenge page.
+  const tryDdg = (queryTitle) => {
+    const task = ddgResolveChain.then(async () => {
+      const minGap = 700;
+      const wait = lastDdgResolve + minGap - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      lastDdgResolve = Date.now();
+      if (!queryTitle) return null;
+      const site = domain ? ` site:${domain}` : "";
+      const q = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${queryTitle}${site}`)}`;
+      try {
+        const res = await fetchTextResource(q, "text/html,application/xhtml+xml,text/plain", 6000, nextResolverUa());
+        const uddg = (res.text.match(/uddg=([^&"'\s]+)/) || [])[1];
+        if (!uddg) return null;
+        const real = decodeURIComponent(uddg);
+        return /^https?:\/\//i.test(real) ? real : null;
+      } catch {
+        return null;
+      }
+    });
+    // Reassign so the next call (title-only fallback) chains AFTER this one,
+    // keeping DDG strictly serialised.
+    ddgResolveChain = task.catch(() => null);
+    return task;
+  };
+  // 1) DuckDuckGo (primary): title + site, then title alone (broader).
+  const ddgUrl = (await tryDdg(title)) || (await tryDdg(String(title).replace(/\s*[–—-]\s*[^–—-]+$/, "").trim() || title));
+  if (ddgUrl) return cacheAndReturn(ddgUrl);
+  // 2) GDELT DOC API (secondary): real publisher URLs directly. Reached only when
+  //    DDG fails, so rarely exercised — but it gives the scan a second (third)
+  //    chance to fetch a real preview in production.
   const gdeltUrl = await resolveViaGdelt(title, domain);
-  if (gdeltUrl) {
-    resolvedUrlMap.set(googleUrl, gdeltUrl);
-    if (!sourceState.resolvedUrls) sourceState.resolvedUrls = {};
-    sourceState.resolvedUrls[googleUrl] = gdeltUrl;
-  }
-  return gdeltUrl;
+  return cacheAndReturn(gdeltUrl);
 }
 
 // Resolve an article to its real publisher URL via the GDELT DOC API. GDELT
@@ -1276,32 +1295,38 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
 // source, so we never inject an unrelated article. Returns null on any failure.
 async function resolveViaGdelt(title, domain) {
   if (!title || !domain) return null;
+  // Try an exact quoted phrase first, then a looser keyword query, so a partial
+  // title still has a chance of matching the article in GDELT's index.
+  const queries = [];
+  const clean = String(title).replace(/\s*[–—-]\s*[^–—-]+$/, "").trim() || title;
+  queries.push(`domain:${domain} "${clean}"`);
+  const kw = clean.split(/\s+/).filter(w => w.length > 3).slice(0, 6).join(" ");
+  if (kw && kw !== clean) queries.push(`domain:${domain} ${kw}`);
   const task = gdeltResolveChain.then(async () => {
-    const minGap = 5500;
-    const wait = lastGdeltResolve + minGap - Date.now();
-    if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    lastGdeltResolve = Date.now();
-    // Strip a trailing " - Publisher" suffix so the quoted phrase matches the
-    // article's own title rather than the news-headline packaging.
-    const clean = String(title).replace(/\s*[–—-]\s*[^–—-]+$/, "").trim() || title;
-    const q = `domain:${domain} "${clean}"`;
-    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=ArtList&maxrecords=10&format=json&sortby=datedesc`;
-    try {
-      const res = await fetchTextResource(url, "application/json,text/plain", 12000);
-      const j = JSON.parse(res.text);
-      const arts = j.articles || [];
-      const dm = domain.replace(/^www\./i, "");
-      const match = arts.find(a => a.domain && a.domain.replace(/^www\./i, "").includes(dm)) || arts[0];
-      if (!match || !/^https?:\/\//i.test(match.url)) return null;
-      // Guard against an aggregator that GDELT mislabels with our domain.
+    const dm = domain.replace(/^www\./i, "");
+    for (const q of queries) {
+      const minGap = 5500;
+      const wait = lastGdeltResolve + minGap - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      lastGdeltResolve = Date.now();
+      const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=ArtList&maxrecords=10&format=json&sortby=datedesc`;
       try {
-        const host = new URL(match.url).hostname.replace(/^www\./i, "");
-        if (!host.includes(dm)) return null;
-      } catch { return null; }
-      return match.url;
-    } catch {
-      return null;
+        const res = await fetchTextResource(url, "application/json,text/plain", 6000, nextResolverUa());
+        const j = JSON.parse(res.text);
+        const arts = j.articles || [];
+        const match = arts.find(a => a.domain && a.domain.replace(/^www\./i, "").includes(dm)) || arts[0];
+        if (!match || !/^https?:\/\//i.test(match.url)) continue;
+        // Guard against an aggregator that GDELT mislabels with our domain.
+        try {
+          const host = new URL(match.url).hostname.replace(/^www\./i, "");
+          if (!host.includes(dm)) continue;
+        } catch { continue; }
+        return match.url;
+      } catch {
+        continue;
+      }
     }
+    return null;
   });
   gdeltResolveChain = task.catch(() => null);
   return task;
@@ -1589,10 +1614,37 @@ async function runSourceScan({ force = false } = {}) {
     // review panel shows the actual text that would be added (and so the target
     // category can be refined from the full article text, not just the headline).
     // Bounded concurrency + short timeout keep the background scan responsive.
-    if (newProps.length) {
-      await mapWithConcurrency(newProps, 2, async (prop) => {
+    //
+    // SELF-HEALING: also re-enrich EXISTING pending proposals that still have no
+    // preview. Previously a failed resolver fetch left a proposal stuck with
+    // "No extractable summary" forever, because later scans skipped it. Now we
+    // retry those on each scan (capped + cooldown-guarded) so previews fill in
+    // over time as the resolver succeeds, instead of being permanently blank.
+    const toEnrich = [...newProps];
+    const newIds = new Set(newProps.map(p => p.id));
+    const RETRY_CAP = 20;
+    const RETRY_COOLDOWN_MS = 20 * 60 * 1000; // at most one retry / 20 min per proposal
+    let retryAdded = 0;
+    for (const prop of existing) {
+      if (retryAdded >= RETRY_CAP) break;
+      if (newIds.has(prop.id)) continue; // already covered by the newProps pass
+      if (prop.status !== "pending") continue;
+      if (prop.preview && prop.preview.length) continue;
+      if (prop.lastPreviewAttempt) {
+        const since = Date.now() - new Date(prop.lastPreviewAttempt).getTime();
+        if (since < RETRY_COOLDOWN_MS) continue;
+      }
+      toEnrich.push(prop);
+      retryAdded++;
+    }
+
+    if (toEnrich.length) {
+      await mapWithConcurrency(toEnrich, 2, async (prop) => {
         let preview = null;
         try { preview = await fetchArticlePreview(prop, { domain: prop.sourceDomain }); } catch { /* best effort */ }
+        // Record the attempt even on failure so the cooldown guards against
+        // re-hammering a URL that the resolver can't currently resolve.
+        prop.lastPreviewAttempt = new Date().toISOString();
         if (preview) {
           prop.preview = preview;
           if (prop.detectedAction === "new") {
