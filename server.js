@@ -968,19 +968,21 @@ app.get("/api/news", async (req, res) => {
 });
 
 // ============================================================================
-// Curated Source Crawler (Scope B) — keep the site live from an official allowlist
+// Curated Source Monitor (Scope C, P1–P3) — verify & propose, never auto-apply
 // Each source is monitored via domain-scoped Google News RSS (site:<domain>) so
-// results stay official/accurate. New items are written to per-tab "live" overlay
-// files and merged into the tab endpoints, so content adapts as sources update.
+// results stay official/accurate. Fetched items are (1) filtered to English only,
+// (2) compared against the EXISTING curated datasets, and (3) surfaced ONLY as
+// PROPOSED CHANGES when they would genuinely update / expand / correct existing
+// content (or are a clearly new, covered topic). The user reviews and approves
+// each one — nothing is written back to the app automatically.
 // ============================================================================
 const SOURCES_FILE = path.join(__dirname, "data", "sources.json");
 const SOURCE_STATE_FILE = path.join(__dirname, "data", "source-state.json");
-const REG_LIVE_FILE = path.join(__dirname, "data", "regulatory-timeline-live.json");
-const KB_LIVE_FILE = path.join(__dirname, "data", "knowledge-live.json");
-const UC_LIVE_FILE = path.join(__dirname, "data", "current-use-cases-live.json");
+const PROPOSED_FILE = path.join(__dirname, "data", "proposed-changes.json");
 
 let sourcesCache = null;
 let sourceState = loadSourceState();
+let proposedChanges = loadProposed();
 let sourceScanInFlight = false;
 
 function loadSourceRegistry() {
@@ -1008,29 +1010,254 @@ function saveSourceState() {
   } catch (_) { /* non-fatal */ }
 }
 
-function loadLive(file) {
+function loadProposed() {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    const data = JSON.parse(fs.readFileSync(PROPOSED_FILE, "utf8"));
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      dismissedIds: Array.isArray(data.dismissedIds) ? data.dismissedIds : [],
+      integratedIds: Array.isArray(data.integratedIds) ? data.integratedIds : [],
+    };
   } catch (_) {
-    return { events: [], subsections: [], patterns: [] };
+    return { items: [], dismissedIds: [], integratedIds: [] };
   }
 }
 
-function appendLive(file, key, items, cap) {
-  const data = loadLive(file);
-  const existing = data[key] || [];
-  const seen = new Set(existing.map(e => e.url || e.title));
-  const merged = existing.slice();
-  for (const item of items) {
-    const k = item.url || item.title;
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    merged.push(item);
-  }
-  data[key] = merged.slice(-cap);
+function saveProposed() {
   try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    fs.writeFileSync(PROPOSED_FILE, JSON.stringify(proposedChanges, null, 2));
   } catch (_) { /* non-fatal */ }
+}
+
+// ---- Text helpers: English filter + keyword/anchor overlap matching ----
+const STOPWORDS = new Set(
+  "the a an and or of to in for on with by from as at is are was were be been being this that these those it its their his her our your we you they he she new latest update via per into about within across after before between during over under".split(" ")
+);
+// Specific AI-regulation "anchor" terms. A fetched item only counts as relevant
+// (and only matches / qualifies as a proposable "new" item) when it shares one of
+// these with an existing record or is itself clearly about AI regulation/policy.
+const STRONG_TERMS = [
+  "ai act", "eu ai act", "eu ai", "uk ai", "ai regulation", "ai policy",
+  "gdpr", "data protection", "ico", "edpb", "ai safety", "ai governance",
+  "frontier model", "frontier models", "model evaluation", "foundation model",
+  "copyright", "ai risk", "high-risk", "high risk", "ai office", "aisi", "oecd",
+  "council of europe", "ai convention", "algorithm", "machine learning",
+  "ai compliance", "ai enforcement", "responsible ai", "ai transparency",
+];
+function tokenize(text) {
+  return (String(text || "").toLowerCase().match(/[a-z][a-z0-9'-]{2,}/g) || [])
+    .filter(w => !STOPWORDS.has(w));
+}
+function strongTermsIn(text) {
+  const t = String(text || "").toLowerCase();
+  const toks = new Set(tokenize(t));
+  const found = new Set();
+  for (const term of STRONG_TERMS) {
+    if (term.includes(" ")) { if (t.includes(term)) found.add(term); }
+    else if (toks.has(term)) found.add(term);
+  }
+  return found;
+}
+function sharedCount(a, b) {
+  let n = 0;
+  for (const x of a) if (b.has(x)) n++;
+  return n;
+}
+// Ranges covering non-Latin scripts (CJK, Cyrillic, Greek, Arabic, Hebrew,
+// Devanagari, Thai, Kana) used to reject clearly non-English items.
+const NON_LATIN = /[㐀-鿿぀-ヿ\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u0590-\u05FF\u0900-\u097F\u0E00-\u0E7F]/;
+function isLikelyEnglish(text) {
+  const t = String(text || "").replace(/<[^>]+>/g, " ");
+  const nonLatin = (t.match(NON_LATIN) || []).length;
+  if (nonLatin > 6) return false; // a solid block of non-Latin -> not English
+  const tokens = t.split(/\s+/).filter(Boolean);
+  if (tokens.length < 4) return true;
+  let latin = 0;
+  for (const tk of tokens) {
+    if (/^[A-Za-z0-9'’.,:;”’“()\-\/!?]+$/.test(tk)) latin++;
+  }
+  return latin / tokens.length >= 0.6;
+}
+function overlap(aSet, bSet) {
+  if (!aSet.size || !bSet.size) return { shared: 0, score: 0 };
+  let shared = 0;
+  for (const t of aSet) if (bSet.has(t)) shared++;
+  const score = shared / (aSet.size + bSet.size - shared); // Jaccard
+  return { shared, score };
+}
+function hashId(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return "pc_" + (h >>> 0).toString(36);
+}
+
+// Build an index of the EXISTING curated content so we can tell whether a fetched
+// item is already covered, expands an entry, or is genuinely new.
+function buildExistingIndex() {
+  const records = [];
+  const push = (dataset, recordId, title, text) => {
+    const full = `${title || ""} ${text || ""}`;
+    const t = tokenize(full);
+    if (!t.length) return;
+    records.push({ dataset, recordId, title: title || "", tokens: new Set(t), strong: strongTermsIn(full) });
+  };
+  try {
+    const tl = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8"));
+    (tl.events || []).forEach((e, i) =>
+      push("timeline", `timeline:${i}`, e.title, `${e.title} ${e.description || ""} ${e.jurisdiction || ""} ${e.category || ""}`));
+  } catch (_) {}
+  try {
+    const kb = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "knowledge.json"), "utf8"));
+    for (const [k, cat] of Object.entries(kb.categories || {})) {
+      (cat.subsections || []).forEach((s, i) => push("knowledge", `knowledge:${k}:${i}`, s.title, `${s.title} ${s.content || ""}`));
+    }
+  } catch (_) {}
+  try {
+    const uc = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8"));
+    (uc.patterns || []).forEach((p, i) => push("use-cases", `uc:${i}`, p.title, `${p.title} ${p.content || ""} ${(p.games || []).join(" ")}`));
+  } catch (_) {}
+  return records;
+}
+
+function bestMatch(itemTokens, itemStrong, index) {
+  let best = null;
+  for (const rec of index) {
+    const { shared, score } = overlap(itemTokens, rec.tokens);
+    const sharedStrong = rec.strong ? sharedCount(rec.strong, itemStrong) : 0;
+    // Match only when there is a strong AI-regulation anchor in common AND at
+    // least one other shared term (precise, avoids trivial "ai"-only matches),
+    // or a solid general-text overlap.
+    const isMatch = (sharedStrong >= 1 && shared >= 1) || (score >= 0.12 && shared >= 2);
+    if (!isMatch) continue;
+    const rank = (sharedStrong >= 1 ? 1 : 0) + score;
+    if (!best || rank > best.rank) best = { ...rec, shared, score, sharedStrong, rank };
+  }
+  return best;
+}
+
+// P3 — auto-draft the suggested edit shown in the review panel (pre-filled).
+function draftEdit(source, item, action, matched, publisher, label) {
+  const cite = ` [Source: ${publisher}, ${label}]`;
+  const clean = stripHtml(item.description || "");
+  if (action === "deadline") return `New compliance deadline announced: ${item.title}.${cite}`;
+  if (action === "correction") return `This position appears to have changed — ${item.title}. ${clean}${cite}`;
+  return `Latest (${label}): ${clean}${cite}`;
+}
+function draftNewRecord(source, item, publisher, label) {
+  const cite = `Source: ${publisher} (${label}).`;
+  const clean = stripHtml(item.description || "");
+  if (source.category === "use-case") return `Add as a new AI use-case pattern — "${item.title}". ${clean} ${cite}`;
+  if (source.category === "academic") return `Add as new research note — "${item.title}". ${clean} ${cite}`;
+  return `Add as new regulatory development — "${item.title}". ${clean} ${cite}`;
+}
+
+// Classify a fetched item: English-only, compared to existing content, and either
+// dropped (duplicate/non-English) or returned as a proposed change.
+function classifyItem(source, item, index) {
+  const text = `${item.title} ${item.description || ""}`;
+  if (!isLikelyEnglish(text)) return null; // (a) drop non-English
+  const itemTokens = new Set(tokenize(text));
+  if (itemTokens.size < 2) return null;
+  const itemStrong = strongTermsIn(text);
+
+  const publisher = item.sourceName || source.name;
+  const base = {
+    id: hashId(item.url || item.title),
+    source: source.id,
+    publisher,
+    title: item.title,
+    url: item.url,
+    snippet: stripHtml(item.description || ""),
+    publishedAt: item.publishedAt,
+    publishedLabel: item.publishedAt ? formatLabel(item.publishedAt) : "Recent",
+    category: source.category,
+    createdAt: new Date().toISOString(),
+    status: "pending",
+  };
+
+  const matched = bestMatch(itemTokens, itemStrong, index);
+  if (matched) {
+    let action = "update";
+    const lc = text.toLowerCase();
+    if (/\b(deadline|due|compliance date|effective|enters? into force|by \d{4}|from \d{4})\b/.test(lc) && /\d{4}/.test(lc)) action = "deadline";
+    else if (/\b(ruling|decision|judg|court|fine|ban|prohibit|overturn|supersede|repeal|amend|enforce)\b/.test(lc)) action = "correction";
+    base.detectedAction = action;
+    base.matchConfidence = Number((matched.rank).toFixed(2));
+    base.matchedRecord = { dataset: matched.dataset, recordId: matched.recordId, title: matched.title };
+    base.suggestedEdit = draftEdit(source, item, action, matched, publisher, base.publishedLabel);
+    return base;
+  }
+
+  // No matching existing record. Surfacing a brand-new topic is noisy, so only
+  // propose it when it is clearly about AI regulation/policy AND comes from an
+  // official regulator / legislation / academic source. Competitor & industry
+  // "news" with no existing anchor is dropped entirely.
+  if (itemStrong.size >= 1 && (source.category === "regulation" || source.category === "academic")) {
+    base.detectedAction = "new";
+    base.matchConfidence = 0;
+    base.matchedRecord = null;
+    base.suggestedEdit = draftNewRecord(source, item, publisher, base.publishedLabel);
+    return base;
+  }
+
+  return null; // drop: noise / not relevant to existing curated content
+}
+
+// Apply an approved proposal to the real curated dataset (user-gated write).
+function integrateProposal(prop, edit, target, targetCategoryKey) {
+  const fileMap = { timeline: "regulatory-timeline.json", knowledge: "knowledge.json", "use-cases": "current-use-cases.json" };
+  const file = fileMap[target];
+  if (!file) throw new Error("Unknown target dataset: " + target);
+  const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", file), "utf8"));
+  const publisher = prop.publisher;
+  const url = prop.url;
+
+  if (prop.matchedRecord && prop.matchedRecord.dataset === target) {
+    if (target === "timeline") {
+      const ev = (data.events || []).find(e => e.title === prop.matchedRecord.title);
+      if (ev) ev.description = `${ev.description || ""}\n\n${edit}`.trim();
+    } else if (target === "knowledge") {
+      for (const cat of Object.values(data.categories || {})) {
+        const sub = (cat.subsections || []).find(s => s.title === prop.matchedRecord.title);
+        if (sub) { sub.content = `${sub.content || ""}\n\n${edit}`.trim(); break; }
+      }
+    } else if (target === "use-cases") {
+      const p = (data.patterns || []).find(p => p.title === prop.matchedRecord.title);
+      if (p) p.content = `${p.content || ""}\n\n${edit}`.trim();
+    }
+  } else {
+    if (target === "timeline") {
+      data.events = data.events || [];
+      data.events.unshift({
+        date: (prop.publishedAt || "").slice(0, 10) || new Date().toISOString().slice(0, 10),
+        label: prop.publishedLabel || "Recent",
+        title: prop.title,
+        jurisdiction: sourceRegistryJurisdiction(prop) || "EU/UK",
+        category: "Proposed Update",
+        description: edit,
+        impact: `Proposed from ${publisher}. Verify via the official link before relying on it.`,
+        link: url,
+        linkLabel: publisher,
+      });
+    } else if (target === "knowledge") {
+      const key = targetCategoryKey || "regulations";
+      if (!data.categories[key]) data.categories[key] = { label: key, icon: "🟢", subsections: [] };
+      data.categories[key].subsections = data.categories[key].subsections || [];
+      data.categories[key].subsections.unshift({ title: prop.title, content: edit, sources: [{ label: publisher, url }] });
+    } else if (target === "use-cases") {
+      data.patterns = data.patterns || [];
+      data.patterns.unshift({ title: prop.title, content: edit, games: [] });
+    }
+  }
+
+  fs.writeFileSync(path.join(__dirname, "data", file), JSON.stringify(data, null, 2));
+  if (target === "timeline") regulatoryTimelineCache = null;
+  if (target === "knowledge") knowledgeCache = null;
+  if (target === "use-cases") currentUseCasesCache = null;
+}
+function sourceRegistryJurisdiction(prop) {
+  const s = (loadSourceRegistry() || []).find(x => x.id === prop.source);
+  return s ? (s.jurisdiction || "EU/UK") : "EU/UK";
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1048,56 +1275,6 @@ async function fetchSourceItems(source) {
   return parseNewsRss(resource.text, source.name, query, source.limit || 5, []);
 }
 
-function shapeRecords(source, item) {
-  const publisher = item.sourceName || source.name;
-  const foundAt = new Date().toISOString();
-  const out = {};
-
-  if (source.category === "regulation") {
-    out.timeline = {
-      date: item.publishedAt ? item.publishedAt.slice(0, 10) : foundAt.slice(0, 10),
-      label: item.publishedAt ? formatLabel(item.publishedAt) : "Recent",
-      title: item.title,
-      jurisdiction: source.jurisdiction || "EU/UK",
-      category: "Live Update",
-      description: item.description || "Auto-sourced regulatory update.",
-      impact: `Auto-sourced from ${publisher}. Verify via the official link before relying on it.`,
-      link: item.url,
-      linkLabel: publisher,
-      live: true,
-      publisher,
-      foundAt,
-    };
-    out.kb = {
-      categoryKey: source.kbCategory || "regulations",
-      categoryLabel: source.kbCategoryLabel || "Regulatory Frameworks",
-      title: item.title,
-      content: item.description || item.title,
-      sources: [{ label: publisher, url: item.url }],
-      live: true,
-    };
-  } else if (source.category === "use-case") {
-    out.uc = {
-      title: item.title,
-      content: item.description || item.title,
-      games: [],
-      live: true,
-      publisher,
-      foundAt,
-    };
-  } else if (source.category === "academic") {
-    out.kb = {
-      categoryKey: source.kbCategory || "research",
-      categoryLabel: source.kbCategoryLabel || "Research & Standards",
-      title: item.title,
-      content: item.description || item.title,
-      sources: [{ label: publisher, url: item.url }],
-      live: true,
-    };
-  }
-  return out;
-}
-
 async function runSourceScan({ force = false } = {}) {
   if (sourceScanInFlight) return { skipped: true, reason: "scan already in flight" };
   sourceScanInFlight = true;
@@ -1113,11 +1290,16 @@ async function runSourceScan({ force = false } = {}) {
       (now - sourceState.sources[s.id].lastScanAt) >= (s.ttlMinutes || 15) * 60000
     );
 
-    const regEvents = [];
-    const kbSubs = [];
-    const ucPatterns = [];
-    let scanned = 0;
-    let found = 0;
+    const index = buildExistingIndex();
+    const knownIds = new Set((proposedChanges.items || []).map(i => i.id));
+    const pendingKeys = new Set(
+      (proposedChanges.items || [])
+        .filter(i => i.status === "pending")
+        .map(i => `${i.matchedRecord ? i.matchedRecord.title : ""}|${i.detectedAction}|${i.url}`)
+    );
+    const existing = proposedChanges.items || [];
+    let scanned = 0, considered = 0, proposed = 0;
+    const counts = { update: 0, deadline: 0, correction: 0, new: 0 };
 
     for (const source of due) {
       try {
@@ -1127,16 +1309,22 @@ async function runSourceScan({ force = false } = {}) {
         for (const item of items) {
           if (!item.url || seen.has(item.url)) continue;
           seen.add(item.url);
-          const records = shapeRecords(source, item);
-          if (records.timeline) regEvents.push(records.timeline);
-          if (records.kb) kbSubs.push(records.kb);
-          if (records.uc) ucPatterns.push(records.uc);
-          found++;
+          considered++;
+          const prop = classifyItem(source, item, index);
+          if (!prop) continue;                       // dropped: non-English or duplicate
+          if (knownIds.has(prop.id)) continue;        // already proposed/acted on
+          const dedupeKey = `${prop.matchedRecord ? prop.matchedRecord.title : ""}|${prop.detectedAction}|${prop.url}`;
+          if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
+          existing.push(prop);
+          knownIds.add(prop.id);
+          pendingKeys.add(dedupeKey);
+          proposed++;
+          counts[prop.detectedAction] = (counts[prop.detectedAction] || 0) + 1;
         }
         sourceState.sources[source.id] = {
           lastScanAt: now,
           name: source.name,
-          seen: [...seen].slice(-200),
+          seen: [...seen].slice(-300),
         };
         scanned++;
       } catch (_) {
@@ -1144,44 +1332,38 @@ async function runSourceScan({ force = false } = {}) {
       }
     }
 
-    if (regEvents.length) appendLive(REG_LIVE_FILE, "events", regEvents, 60);
-    if (kbSubs.length) appendLive(KB_LIVE_FILE, "subsections", kbSubs, 80);
-    if (ucPatterns.length) appendLive(UC_LIVE_FILE, "patterns", ucPatterns, 50);
-
+    proposedChanges.items = existing.slice(-300);
     sourceState.lastFullScan = new Date().toISOString();
     saveSourceState();
-
-    // Invalidate base caches so the tab endpoints re-merge live overlays.
-    regulatoryTimelineCache = null;
-    knowledgeCache = null;
-    currentUseCasesCache = null;
+    saveProposed();
 
     return {
       scanned,
       due: due.length,
-      found,
-      regulatory: regEvents.length,
-      knowledge: kbSubs.length,
-      useCases: ucPatterns.length,
+      considered,
+      proposed,
+      counts,
       durationMs: Date.now() - startedAt,
     };
   } finally {
     sourceScanInFlight = false;
   }
 }
-
+// Status for the client: how many PROPOSED changes are waiting for review.
 app.get("/api/regulatory-status", (req, res) => {
-  const reg = (loadLive(REG_LIVE_FILE).events || []).length;
-  const kb = (loadLive(KB_LIVE_FILE).subsections || []).length;
-  const uc = (loadLive(UC_LIVE_FILE).patterns || []).length;
+  const pending = (proposedChanges.items || []).filter(i => i.status === "pending");
+  const counts = { update: 0, deadline: 0, correction: 0, new: 0 };
+  pending.forEach(i => { counts[i.detectedAction] = (counts[i.detectedAction] || 0) + 1; });
   res.json({
     success: true,
+    monitoring: true,
     lastScanAt: sourceState.lastFullScan,
-    counts: { regulatory: reg, knowledge: kb, useCases: uc },
-    total: reg + kb + uc,
+    pendingCount: pending.length,
+    counts,
   });
 });
 
+// Trigger a crawl of the allowlist (server does the work; single-flight locked).
 app.post("/api/source-scan", async (req, res) => {
   try {
     const force = !!(req.body && req.body.force);
@@ -1190,6 +1372,47 @@ app.post("/api/source-scan", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// List pending proposed changes for the review panel.
+app.get("/api/proposed-changes", (req, res) => {
+  const items = (proposedChanges.items || [])
+    .filter(i => i.status === "pending")
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ success: true, pending: items, pendingCount: items.length });
+});
+
+// Integrate an approved proposal into the curated dataset (user-gated write).
+app.post("/api/proposed-changes/:id/integrate", (req, res) => {
+  try {
+    const id = req.params.id;
+    const prop = (proposedChanges.items || []).find(i => i.id === id);
+    if (!prop) return res.status(404).json({ error: "Proposal not found" });
+    const edit = (req.body && req.body.edit) ? String(req.body.edit) : (prop.suggestedEdit || prop.title);
+    const target =
+      (req.body && req.body.targetDataset) ||
+      (prop.matchedRecord && prop.matchedRecord.dataset) ||
+      (prop.category === "use-case" ? "use-cases" : prop.category === "academic" ? "knowledge" : "timeline");
+    const targetCategoryKey = req.body && req.body.targetCategoryKey;
+    integrateProposal(prop, edit, target, targetCategoryKey);
+    prop.status = "integrated";
+    (proposedChanges.integratedIds = proposedChanges.integratedIds || []).push(id);
+    saveProposed();
+    res.json({ success: true, target });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Dismiss a proposal so it stops showing and isn't re-proposed.
+app.post("/api/proposed-changes/:id/dismiss", (req, res) => {
+  const id = req.params.id;
+  const prop = (proposedChanges.items || []).find(i => i.id === id);
+  if (!prop) return res.status(404).json({ error: "Proposal not found" });
+  prop.status = "dismissed";
+  (proposedChanges.dismissedIds = proposedChanges.dismissedIds || []).push(id);
+  saveProposed();
+  res.json({ success: true });
 });
 
 // Server-side scheduler: scan sources whose TTL has elapsed. The single-flight
@@ -1320,23 +1543,11 @@ app.get("/api/knowledge", (req, res) => {
       );
     }
 
-    // Merge live (auto-sourced) subsections on top of the curated base.
-    const live = loadLive(KB_LIVE_FILE).subsections || [];
+    // Curated base only — live/auto-sourced items are NOT injected here; they
+    // surface via the proposed-changes review queue instead.
     const categories = {};
     for (const [key, cat] of Object.entries(knowledgeCache.categories)) {
       categories[key] = { ...cat, subsections: [...(cat.subsections || [])] };
-    }
-    for (const sub of live) {
-      const key = sub.categoryKey || "regulations";
-      if (!categories[key]) {
-        categories[key] = { label: sub.categoryLabel || key, icon: "🟢", subsections: [] };
-      }
-      categories[key].subsections.push({
-        title: sub.title,
-        content: sub.content,
-        sources: sub.sources,
-        live: true,
-      });
     }
 
     let result;
@@ -1413,11 +1624,10 @@ app.get("/api/current-use-cases", (req, res) => {
         fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8")
       );
     }
-    // Merge live (auto-sourced) patterns on top of the curated base.
-    const livePatterns = loadLive(UC_LIVE_FILE).patterns || [];
+    // Curated base only — live/auto-sourced items surface via the review queue.
     const data = {
       ...currentUseCasesCache,
-      patterns: [...livePatterns, ...(currentUseCasesCache.patterns || [])],
+      patterns: [...(currentUseCasesCache.patterns || [])],
     };
     res.json({ success: true, data });
   } catch (err) {
@@ -1462,11 +1672,10 @@ app.get("/api/regulatory-timeline", (req, res) => {
         fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8")
       );
     }
-    // Merge live (auto-sourced) events on top of the curated base timeline.
-    const liveEvents = loadLive(REG_LIVE_FILE).events || [];
+    // Curated base only — live/auto-sourced items surface via the review queue.
     const data = {
       ...regulatoryTimelineCache,
-      events: [...liveEvents, ...(regulatoryTimelineCache.events || [])],
+      events: [...(regulatoryTimelineCache.events || [])],
     };
     res.json({ success: true, data });
   } catch (err) {

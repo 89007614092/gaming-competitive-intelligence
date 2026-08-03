@@ -30,7 +30,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSearchReportsWorkspace();
   setupSummarise();
   setupTabDragDrop();
-  setupAutoUpdate();
+  setupSourceMonitor();
+  setupReviewPanel();
 });
 
 // ===== Navigation =====
@@ -1236,8 +1237,8 @@ function renderKBContent(searchQuery = null) {
       }
 
       html += `
-        <div class="kb-card${sub.live ? " live" : ""}">
-          <div class="kb-card-title">${sub.title}${sub.live ? ' <span class="live-tag">LIVE</span>' : ""}</div>
+        <div class="kb-card">
+          <div class="kb-card-title">${sub.title}</div>
           <div class="kb-card-content">${displayContent}</div>
           ${sourceLinks}
         </div>`;
@@ -2309,8 +2310,8 @@ function renderCurrentUseCases() {
     </div>
     <div class="use-case-pattern-grid">
       ${currentUseCasesData.patterns.map(pattern => `
-        <article class="use-case-pattern-card${pattern.live ? " live" : ""}">
-          <h3>${pattern.title}${pattern.live ? ' <span class="live-tag">LIVE</span>' : ""}</h3>
+        <article class="use-case-pattern-card">
+          <h3>${pattern.title}</h3>
           <p>${pattern.content}</p>
           <div class="use-case-pattern-games">
             ${pattern.games.map(game => `<span>${game}</span>`).join("")}
@@ -2702,12 +2703,11 @@ function renderRegulatoryTimeline(filter) {
     const linkHtml = e.link ? `<a href="${e.link}" target="_blank" rel="noopener" class="timeline-link">${e.linkLabel || "Official source →"}</a>` : "";
 
     html += `
-      <div class="timeline-event${e.live ? " live" : ""}">
+      <div class="timeline-event">
         <div class="timeline-dot ${dotClass}"></div>
         <div class="timeline-date">${e.label}</div>
         <h3>
           ${e.title}
-          ${e.live ? '<span class="timeline-badge live">LIVE</span>' : ""}
           <span class="timeline-badge ${badgeClass}">${e.category === "Critical Deadline" ? "⚠ Critical" : e.jurisdiction}</span>
           <span class="event-cat">${e.category}</span>
         </h3>
@@ -2879,81 +2879,177 @@ function renderRisks(filter = "all") {
   categoriesEl.innerHTML = catHtml || '<div class="empty-state"><p>No risks match the selected filter</p></div>';
 }
 
-// ===== Auto-Update: live monitoring of an official source allowlist (Scope B) =====
-// Client polls status every 5 minutes; the server does the actual crawl on a
-// per-source TTL (fast official feeds ~15 min, slower legislation every few hours)
-// with a single-flight lock. New items are merged into the timeline, knowledge
-// base and use-case tabs automatically by the server.
-const SCAN_INTERVAL_MS = 5 * 60 * 1000;       // client check every 5 minutes
-const SCAN_COOLDOWN_MS = 15 * 60 * 1000;      // server re-crawl cooldown
-const LAST_SCAN_KEY = "lastAutoScan";
+// ===== Source Monitor + Review Queue (Scope C, P1–P3) =====
+// The server crawls the official allowlist and, instead of auto-editing the site,
+// queues PROPOSED CHANGES (only when they would update/expand/correct existing
+// content, or are a clearly new, covered topic). This client polls the queue every
+// 5 minutes and shows a single quiet "Suggested updates" badge. Opening it shows
+// the review panel where the user approves each change.
+const SU_POLL_MS = 5 * 60 * 1000;
 
-function setupAutoUpdate() {
-  // Check on app open
-  checkAndScan();
-
-  // Poll status every 5 minutes
-  setInterval(checkAndScan, SCAN_INTERVAL_MS);
-
-  // Also re-check when the tab becomes visible (user returns to the app)
+function setupSourceMonitor() {
+  pollProposedChanges();
+  setInterval(pollProposedChanges, SU_POLL_MS);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) checkAndScan();
+    if (!document.hidden) pollProposedChanges();
   });
 }
 
-async function checkAndScan() {
+async function pollProposedChanges() {
   try {
     const statusRes = await fetch(`${API_BASE}/regulatory-status`);
     const status = statusRes.ok ? await statusRes.json() : null;
-    const prevCounts = status?.counts || { regulatory: 0, knowledge: 0, useCases: 0 };
-    updateAutoUpdateBadges(prevCounts);
-
-    const now = Date.now();
-    const lastScan = parseInt(localStorage.getItem(LAST_SCAN_KEY) || "0", 10);
-    const serverStale = !status?.lastScanAt || (now - Date.parse(status.lastScanAt)) > SCAN_COOLDOWN_MS;
-    const localStale = (now - lastScan) > SCAN_COOLDOWN_MS;
-
-    if (serverStale || localStale) {
-      localStorage.setItem(LAST_SCAN_KEY, now.toString());
-      const scanRes = await fetch(`${API_BASE}/source-scan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (scanRes.ok) {
-        const fresh = await (await fetch(`${API_BASE}/regulatory-status`)).json();
-        const counts = fresh.counts || prevCounts;
-        updateAutoUpdateBadges(counts);
-        const before = prevCounts.regulatory + prevCounts.knowledge + prevCounts.useCases;
-        const after = counts.regulatory + counts.knowledge + counts.useCases;
-        if (after > before) {
-          showUpdateNotification(
-            counts.regulatory - prevCounts.regulatory,
-            counts.knowledge - prevCounts.knowledge,
-            counts.useCases - prevCounts.useCases
-          );
-        }
-      }
+    const lastScan = status?.lastScanAt ? Date.parse(status.lastScanAt) : 0;
+    const stale = !lastScan || (Date.now() - lastScan) > 30 * 60 * 1000;
+    if (stale) {
+      fetch(`${API_BASE}/source-scan`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      }).catch(() => {});
     }
+    await updateSuggestedUpdatesBadge();
   } catch (_) {
     // Silent failure — will retry on the next interval.
   }
 }
 
-function showUpdateNotification(regCount, kbCount, ucCount) {
-  const parts = [];
-  if (regCount) parts.push(`${regCount} regulatory update${regCount > 1 ? "s" : ""}`);
-  if (kbCount) parts.push(`${kbCount} knowledge item${kbCount > 1 ? "s" : ""}`);
-  if (ucCount) parts.push(`${ucCount} use-case update${ucCount > 1 ? "s" : ""}`);
-  if (!parts.length) return;
-
-  showToast(`Auto-scan found ${parts.join(" and ")}. The timeline, knowledge base and use cases are now updated.`, "info");
+async function updateSuggestedUpdatesBadge() {
+  try {
+    const res = await fetch(`${API_BASE}/proposed-changes`);
+    const json = res.ok ? await res.json() : null;
+    const count = json?.pendingCount || 0;
+    const btn = document.getElementById("suggestedUpdatesBtn");
+    const countEl = document.getElementById("suggestedUpdatesCount");
+    if (!btn) return;
+    if (countEl) countEl.textContent = count;
+    btn.style.display = count > 0 ? "inline-flex" : "none";
+    btn.dataset.count = String(count);
+  } catch (_) {}
 }
 
-function updateAutoUpdateBadges(counts = { regulatory: 0, knowledge: 0, useCases: 0 }) {
-  updateTabBadge("regulatory-timeline", counts.regulatory || 0);
-  updateTabBadge("knowledge-base", counts.knowledge || 0);
-  updateTabBadge("current-use-cases", counts.useCases || 0);
+// ---- Review panel: list proposed changes; user Integrates or Dismisses ----
+function setupReviewPanel() {
+  const btn = document.getElementById("suggestedUpdatesBtn");
+  const overlay = document.getElementById("reviewPanelOverlay");
+  const closeBtn = document.getElementById("closeReviewPanel");
+  const listEl = document.getElementById("reviewPanelList");
+  const emptyEl = document.getElementById("reviewPanelEmpty");
+
+  if (btn) btn.addEventListener("click", async () => {
+    await renderReviewPanel();
+    if (overlay) overlay.style.display = "flex";
+  });
+  if (closeBtn) closeBtn.addEventListener("click", () => { if (overlay) overlay.style.display = "none"; });
+  if (overlay) overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
+
+  if (listEl) listEl.addEventListener("click", async (e) => {
+    const integrateBtn = e.target.closest("[data-integrate]");
+    const dismissBtn = e.target.closest("[data-dismiss]");
+    if (dismissBtn) {
+      const id = dismissBtn.dataset.dismiss;
+      await fetch(`${API_BASE}/proposed-changes/${id}/dismiss`, { method: "POST" }).catch(() => {});
+      const card = dismissBtn.closest(".proposal-card");
+      if (card) card.remove();
+      await updateSuggestedUpdatesBadge();
+      checkReviewEmpty();
+      return;
+    }
+    if (integrateBtn) {
+      const id = integrateBtn.dataset.integrate;
+      const card = integrateBtn.closest(".proposal-card");
+      const editBox = card.querySelector(".proposal-edit-box");
+      const targetSel = card.querySelector(".proposal-target");
+      const catKey = card.querySelector(".proposal-catkey");
+      const body = { edit: editBox ? editBox.value : "" };
+      if (targetSel && targetSel.value) body.targetDataset = targetSel.value;
+      if (catKey && catKey.value) body.targetCategoryKey = catKey.value;
+      integrateBtn.disabled = true;
+      try {
+        const res = await fetch(`${API_BASE}/proposed-changes/${id}/integrate`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          card.remove();
+          await updateSuggestedUpdatesBadge();
+          checkReviewEmpty();
+          showToast("Change integrated into the app.", "success");
+        } else {
+          integrateBtn.disabled = false;
+          showToast("Could not integrate that change.", "error");
+        }
+      } catch (_) {
+        integrateBtn.disabled = false;
+      }
+    }
+  });
+}
+
+async function renderReviewPanel() {
+  const listEl = document.getElementById("reviewPanelList");
+  const emptyEl = document.getElementById("reviewPanelEmpty");
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading proposed changes…</p></div>';
+  try {
+    const res = await fetch(`${API_BASE}/proposed-changes`);
+    const json = res.ok ? await res.json() : { pending: [] };
+    const items = json.pending || [];
+    if (!items.length) {
+      listEl.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "block";
+      return;
+    }
+    if (emptyEl) emptyEl.style.display = "none";
+    const actionLabel = {
+      update: "Expand existing entry",
+      deadline: "New deadline",
+      correction: "Corrects / supersedes",
+      new: "New topic",
+    };
+    listEl.innerHTML = items.map(p => {
+      const targetDefault = p.matchedRecord ? p.matchedRecord.dataset
+        : (p.category === "use-case" ? "use-cases" : p.category === "academic" ? "knowledge" : "timeline");
+      const showCatKey = targetDefault === "knowledge";
+      return `
+      <div class="proposal-card" data-id="${p.id}">
+        <div class="proposal-head">
+          <span class="proposal-action proposal-action-${p.detectedAction}">${actionLabel[p.detectedAction] || p.detectedAction}</span>
+          <span class="proposal-source">${escapeHtml(p.publisher || p.source || "")}</span>
+          <span class="proposal-date">${escapeHtml(p.publishedLabel || "")}</span>
+        </div>
+        <div class="proposal-title">${escapeHtml(p.title)}</div>
+        ${p.matchedRecord
+          ? `<div class="proposal-match">Matches: <strong>${escapeHtml(p.matchedRecord.title)}</strong> <span class="proposal-confidence">(${Math.round((p.matchConfidence || 0) * 100)}% overlap)</span></div>`
+          : `<div class="proposal-match proposal-match-new">Not currently in the app — a new topic.</div>`}
+        <div class="proposal-snippet">${escapeHtml(p.snippet || "")}</div>
+        <label class="proposal-field">Suggested integration (editable before you approve):</label>
+        <textarea class="proposal-edit-box text-input" rows="4">${escapeHtml(p.suggestedEdit || "")}</textarea>
+        <div class="proposal-controls">
+          <label class="proposal-field">Add to:
+            <select class="proposal-target text-input">
+              <option value="timeline" ${targetDefault === "timeline" ? "selected" : ""}>AI Regulatory Timeline</option>
+              <option value="knowledge" ${targetDefault === "knowledge" ? "selected" : ""}>Knowledge Base</option>
+              <option value="use-cases" ${targetDefault === "use-cases" ? "selected" : ""}>AI Use Cases</option>
+            </select>
+          </label>
+          ${showCatKey ? `<input class="proposal-catkey text-input" placeholder="Category key (e.g. regulations)" value="regulations" />` : ""}
+        </div>
+        <div class="proposal-actions">
+          <button class="btn btn-sm btn-primary" data-integrate="${p.id}" type="button">Integrate</button>
+          <button class="btn btn-sm" data-dismiss="${p.id}" type="button">Dismiss</button>
+        </div>
+        <a class="proposal-link" href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">View official source →</a>
+      </div>`;
+    }).join("");
+  } catch (err) {
+    listEl.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
+  }
+}
+
+function checkReviewEmpty() {
+  const listEl = document.getElementById("reviewPanelList");
+  const emptyEl = document.getElementById("reviewPanelEmpty");
+  if (listEl && emptyEl && !listEl.querySelector(".proposal-card")) {
+    emptyEl.style.display = "block";
+  }
 }
 
 function updateTabBadge(viewId, count) {

@@ -106,21 +106,9 @@ function buildCorpus() {
   const news = readJson("news-cache.json");
   (news.articles || []).forEach(item => addChunk(chunks, "News", item.title, item, item.competitorKeyword, item.url));
 
-  // Live (auto-sourced) overlays — keep Summarise current with the same live data
-  // the regulatory timeline, knowledge base and use-case tabs receive.
-  const readLive = (fileName) => {
-    try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, fileName), "utf8")); }
-    catch (_) { return null; }
-  };
-  const regLive = readLive("regulatory-timeline-live.json");
-  (regLive?.events || []).forEach(item =>
-    addChunk(chunks, "AI Regulatory Timeline", item.title, item, `${item.label || item.date} · ${item.jurisdiction || ""} · Live`));
-  const kbLive = readLive("knowledge-live.json");
-  (kbLive?.subsections || []).forEach(item =>
-    addChunk(chunks, "Knowledge Base", item.title, item, `${item.categoryLabel || item.categoryKey || "Live"} · Live`));
-  const ucLive = readLive("current-use-cases-live.json");
-  (ucLive?.patterns || []).forEach(item =>
-    addChunk(chunks, "AI Use Cases", item.title, item, "Live update"));
+  // NOTE: live/auto-sourced findings are intentionally NOT injected here. They
+  // reach the app only through the proposed-changes review queue (user-approved),
+  // so the Summarise corpus stays aligned with the curated, reviewed datasets.
 
   corpusCache = chunks;
   return corpusCache;
