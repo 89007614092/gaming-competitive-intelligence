@@ -912,7 +912,8 @@ const spiderViewState = {
   y: 0,
   hiddenSectors: new Set(),
   showPeerLinks: false,
-  controlsReady: false
+  controlsReady: false,
+  pinnedNodeId: null
 };
 
 async function loadSpiderWeb() {
@@ -1139,9 +1140,25 @@ function renderSpiderDiagram(data, container) {
 
   container.querySelectorAll(".spider-node-group").forEach(group => {
     group.addEventListener("mouseenter", () => showSpiderDetail(group.dataset.id));
-    group.addEventListener("mouseleave", hideSpiderDetail);
+    group.addEventListener("mouseleave", () => {
+      if (spiderViewState.pinnedNodeId === group.dataset.id) return;
+      hideSpiderDetail();
+    });
     group.addEventListener("focus", () => showSpiderDetail(group.dataset.id));
-    group.addEventListener("blur", hideSpiderDetail);
+    group.addEventListener("blur", () => {
+      if (spiderViewState.pinnedNodeId === group.dataset.id) return;
+      hideSpiderDetail();
+    });
+    group.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleSpiderPin(group.dataset.id);
+    });
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleSpiderPin(group.dataset.id);
+      }
+    });
   });
 
   svg.addEventListener("wheel", event => {
@@ -1154,6 +1171,7 @@ function renderSpiderDiagram(data, container) {
   let lastY = 0;
   svg.addEventListener("pointerdown", event => {
     if (event.target.closest(".spider-node-group")) return;
+    unpinSpiderNode();
     dragging = true;
     lastX = event.clientX;
     lastY = event.clientY;
@@ -1223,9 +1241,31 @@ function showSpiderDetail(nodeId) {
 
   sectorsEl.innerHTML = html;
   detail.style.display = "block";
+
+  // Visual pin indicator
+  const allGroups = document.querySelectorAll(".spider-node-group");
+  allGroups.forEach(g => g.classList.toggle("is-pinned", g.dataset.id === spiderViewState.pinnedNodeId));
 }
 
 function hideSpiderDetail() {
+  if (spiderViewState.pinnedNodeId) return; // Don't hide if pinned
+  document.getElementById("spiderDetail").style.display = "none";
+}
+
+function toggleSpiderPin(nodeId) {
+  if (spiderViewState.pinnedNodeId === nodeId) {
+    // Clicking the same node again — unpin
+    unpinSpiderNode();
+  } else {
+    // Pin this node
+    spiderViewState.pinnedNodeId = nodeId;
+    showSpiderDetail(nodeId);
+  }
+}
+
+function unpinSpiderNode() {
+  spiderViewState.pinnedNodeId = null;
+  document.querySelectorAll(".spider-node-group.is-pinned").forEach(g => g.classList.remove("is-pinned"));
   document.getElementById("spiderDetail").style.display = "none";
 }
 
@@ -1233,7 +1273,7 @@ function hideSpiderDetail() {
 document.addEventListener("DOMContentLoaded", () => {
   const closeBtn = document.getElementById("spiderDetailClose");
   if (closeBtn) {
-    closeBtn.addEventListener("click", hideSpiderDetail);
+    closeBtn.addEventListener("click", () => { unpinSpiderNode(); hideSpiderDetail(); });
   }
 });
 

@@ -1306,6 +1306,12 @@ body {
   filter: url(#nodeShadow) brightness(1.08);
 }
 
+.spider-node-group.is-pinned .spider-node {
+  stroke-width: 5;
+  stroke: #1d4ed8;
+  filter: url(#nodeShadow) brightness(1.12);
+}
+
 .spider-label {
   pointer-events: none;
   paint-order: stroke;
