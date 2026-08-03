@@ -565,6 +565,89 @@
           </div>
         </div>
 
+        <!-- Risk level explanation -->
+        <div class="risk-methodology">
+          <details class="risk-methodology-details" open>
+            <summary class="risk-methodology-summary">
+              <span class="rm-icon">📊</span>
+              <span class="rm-title">How risk levels are evaluated</span>
+              <span class="rm-hint">What Critical, High &amp; Medium mean — and how each rating is assigned</span>
+            </summary>
+            <div class="rm-body">
+              <p class="rm-intro">
+                Every risk on this page carries one of three severity ratings. The rating signals how urgently a
+                risk needs attention based on the combined weight of four factors: how large the regulatory penalty
+                or prohibition exposure is, how many companies and products it touches, how close the relevant rule
+                or deadline is, and how severe the business consequence would be if left unaddressed.
+              </p>
+
+              <div class="rm-levels">
+                <div class="rm-level rm-critical">
+                  <div class="rm-level-head">
+                    <span class="rm-dot"></span>
+                    <h4>Critical</h4>
+                  </div>
+                  <p>
+                    An existential or business-stopping exposure. Usually tied to a binding prohibition or the sharpest
+                    penalties under the EU AI Act — up to <strong>€35M or 7% of global annual turnover</strong> for
+                    prohibited-practice breaches (Art. 5), or <strong>€15M / 3%</strong> for transparency and governance
+                    failures (Art. 50) — with imminent enforcement and broad reach across products and companies.
+                  </p>
+                </div>
+
+                <div class="rm-level rm-high">
+                  <div class="rm-level-head">
+                    <span class="rm-dot"></span>
+                    <h4>High</h4>
+                  </div>
+                  <p>
+                    A major compliance or competitive exposure that demands active mitigation. Typically a high-risk-system
+                    obligation under the AI Act, a structural market, IP, or data-protection risk, or a requirement with a
+                    defined compliance deadline and a material financial or reputational downside.
+                  </p>
+                </div>
+
+                <div class="rm-level rm-medium">
+                  <div class="rm-level-head">
+                    <span class="rm-dot"></span>
+                    <h4>Medium</h4>
+                  </div>
+                  <p>
+                    A contained or emerging exposure to monitor. Often a forthcoming obligation, a narrower product or
+                    segment impact, or a softer guidance / voluntary standard where the timeline or business effect is
+                    not yet acute.
+                  </p>
+                </div>
+              </div>
+
+              <h4 class="rm-factors-title">How each rating is decided</h4>
+              <ul class="rm-factors">
+                <li>
+                  <span class="rm-factor-key">Regulatory penalty exposure</span> — magnitude of fines or prohibition risk
+                  under the EU AI Act, the UK regime, the DMA, and similar frameworks.
+                </li>
+                <li>
+                  <span class="rm-factor-key">Breadth of impact</span> — number and scale of affected companies, products,
+                  and user bases (see the coloured severity tags on each item).
+                </li>
+                <li>
+                  <span class="rm-factor-key">Enforcement proximity</span> — how close the applicable rule or deadline is:
+                  in force now, phased in, or still proposed.
+                </li>
+                <li>
+                  <span class="rm-factor-key">Business impact</span> — severity of the financial, operational, IP, or
+                  reputational consequence if the risk is left unaddressed.
+                </li>
+              </ul>
+
+              <p class="rm-note">
+                Ratings are a curated cross-reference of the Knowledge Base, Competitor Web, EU AI Act, UK regulation, and
+                proprietary research documents — not an automated score. Use the filters above to focus on a single level.
+              </p>
+            </div>
+          </details>
+        </div>
+
         <!-- Filters -->
         <div class="risks-filters" id="risksFilters">
           <button class="btn btn-sm risks-filter-btn active" data-filter="all">All</button>
