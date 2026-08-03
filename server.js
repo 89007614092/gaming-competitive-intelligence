@@ -9,6 +9,7 @@ const {
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
   buildExtractiveFallback,
+  warmUpModel,
 } = require("./summarise-engine");
 
 const app = express();
@@ -661,7 +662,12 @@ app.post("/api/summarise", async (req, res) => {
     if (!question) return res.status(400).json({ error: "Enter a question to summarise" });
     if (question.length > 700) return res.status(400).json({ error: "Question must be 700 characters or fewer" });
 
-    const appEvidence = retrieveApplicationEvidence(question, 7);
+    const appEvidence = [];
+    try {
+      appEvidence.push(...retrieveApplicationEvidence(question, 7));
+    } catch (err) {
+      console.warn("[summarise] evidence retrieval failed:", err.message);
+    }
     let webEvidence = [];
     let webSearchError = "";
 
@@ -1828,4 +1834,10 @@ app.listen(PORT, () => {
   console.log(`  Server running at http://localhost:${PORT}`);
   console.log(`  Python: ${PYTHON ? `${PYTHON} — search & transcripts enabled` : "NOT FOUND — search & transcripts disabled"}`);
   console.log(`  Search: DuckDuckGo (free, no API key)\n`);
+  // Warm up the local summarisation model in the background so the first user
+  // request does not pay the cold-start download/initialisation cost (which
+  // previously triggered a 70s timeout -> extractive fallback).
+  warmUpModel().then(ready => {
+    if (ready) console.log("  Summarise: local model ready");
+  });
 });

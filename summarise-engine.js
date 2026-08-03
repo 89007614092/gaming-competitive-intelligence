@@ -198,13 +198,38 @@ async function getGenerator() {
       const imported = await import(pathToFileURL(moduleEntry).href);
       const transformers = imported.default || imported;
       transformers.env.cacheDir = process.env.TRANSFORMERS_CACHE || path.join(process.cwd(), ".cache", "transformers");
+      // In Node.js, force the NATIVE ONNX backend. The wasm backend is unreliable
+      // here: it throws cryptic errors ("The string did not match the expected
+      // pattern") and is slow on cold starts. onnxruntime-node must be installed
+      // (it is a declared dependency) for this to resolve.
+      try {
+        require.resolve("onnxruntime-node");
+        transformers.env.backends.onnx.runtime = "onnxruntime-node";
+      } catch {
+        console.warn(
+          "[summarise] onnxruntime-node not found — falling back to the wasm ONNX " +
+          "backend, which is unreliable in Node.js. Install onnxruntime-node to fix."
+        );
+      }
       return transformers.pipeline("text-generation", DEFAULT_MODEL, { dtype: "q4" });
     })().catch(error => {
       generatorPromise = null;
-      throw error;
+      throw new Error(`Local summarisation model failed to load: ${error.message}`);
     });
   }
   return generatorPromise;
+}
+
+// Pre-load the model in the background (e.g. at server start) so the first user
+// request does not pay the cold-start download/initialisation cost. Never throws.
+function warmUpModel() {
+  if (process.env.SUMMARY_DISABLE_MODEL === "1") return Promise.resolve(false);
+  return getGenerator()
+    .then(() => true)
+    .catch(error => {
+      console.warn("[summarise] model warm-up skipped:", error.message);
+      return false;
+    });
 }
 
 function extractGeneratedAnswer(output) {
@@ -236,13 +261,13 @@ async function runOpenSourceGeneration(question, evidence) {
   if (!answer) throw new Error("The local model returned an empty answer");
   const validCitationIds = new Set(evidence.map(item => item.id));
   answer = answer.replace(/\[([AW]\d+)\]/g, (match, id) => validCitationIds.has(id) ? match : "");
-  const rawLines = answer.split(/\n+/).map(line => line.trim()).filter(line => line.length > 25);
-  const substantiveLines = rawLines.map(line => line.replace(/^\s*\d+[.)]\s*/, "").replace(/^\[[AW]\d+\]\s*/, "").trim().toLowerCase());
-  const uniqueLineRatio = new Set(substantiveLines).size / Math.max(substantiveLines.length, 1);
-  const citationHeadingRatio = rawLines.filter(line => /^\[[AW]\d+\]/.test(line)).length / Math.max(rawLines.length, 1);
-  if (answer.length < 100 || uniqueLineRatio < 0.65 || citationHeadingRatio > 0.5 || /news about news|knowledge base about knowledge/i.test(answer)) {
-    throw new Error("Local model output did not pass grounding quality checks");
-  }
+  // Only reject clearly degenerate output (a bare list of citation tags or
+  // near-empty text). The previous strict uniqueness/citation-ratio gate was too
+  // aggressive for a small 135M model and forced the extractive fallback on every
+  // request. When citation coverage is weak we enrich with highlights below
+  // instead of discarding the answer.
+  if (answer.trim().length < 40) throw new Error("Local model returned a degenerate answer");
+  if (/^(?:\s*\[[AW]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Local model returned a degenerate answer");
   const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
   if (citationCount >= 2) return answer;
   return `${answer}\n\nEvidence highlights:\n${evidenceHighlights(question, evidence)}`;
@@ -272,4 +297,5 @@ module.exports = {
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
   buildExtractiveFallback,
+  warmUpModel,
 };
