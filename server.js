@@ -3,6 +3,13 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
+const {
+  DEFAULT_MODEL,
+  buildCorpus,
+  retrieveApplicationEvidence,
+  generateOpenSourceAnswer,
+  buildExtractiveFallback,
+} = require("./summarise-engine");
 
 const app = express();
 app.use(cors());
@@ -626,6 +633,102 @@ app.post("/api/search", async (req, res) => {
 
     const results = await ddgSearch(query, limit);
     res.json({ success: true, data: results, total: results.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/summarise/status — describe the local evidence and model setup
+app.get("/api/summarise/status", (req, res) => {
+  try {
+    res.json({
+      success: true,
+      corpusItems: buildCorpus().length,
+      model: DEFAULT_MODEL,
+      license: "Apache-2.0",
+      localModel: true,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/summarise — answer questions from app data with optional web evidence
+app.post("/api/summarise", async (req, res) => {
+  try {
+    const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
+    const useInternet = req.body?.useInternet === true;
+    if (!question) return res.status(400).json({ error: "Enter a question to summarise" });
+    if (question.length > 700) return res.status(400).json({ error: "Question must be 700 characters or fewer" });
+
+    const appEvidence = retrieveApplicationEvidence(question, 7);
+    let webEvidence = [];
+    let webSearchError = "";
+
+    if (useInternet) {
+      try {
+        const webResults = await ddgSearch(`${question} latest evidence official`, 5);
+        webEvidence = webResults
+          .filter(item => item.url && (item.title || item.description))
+          .slice(0, 5)
+          .map((item, index) => ({
+            id: `W${index + 1}`,
+            sourceType: "internet",
+            dataset: "Internet search",
+            title: item.title || item.url,
+            section: "Additional evidence",
+            text: String(item.description || item.title || "").slice(0, 900),
+            excerpt: String(item.description || item.title || "").slice(0, 360),
+            url: item.url,
+          }));
+      } catch (error) {
+        webSearchError = error.message;
+      }
+    }
+
+    const evidence = [...appEvidence, ...webEvidence];
+    let answer;
+    let mode = "local-open-source-model";
+    let modelError = "";
+    let modelTimer;
+    try {
+      answer = await Promise.race([
+        generateOpenSourceAnswer(question, evidence),
+        new Promise((_, reject) => {
+          modelTimer = setTimeout(() => reject(new Error("Local model initialization timed out; retry after the model finishes warming")), 70000);
+        }),
+      ]);
+    } catch (error) {
+      modelError = error.message;
+      mode = "extractive-fallback";
+      answer = buildExtractiveFallback(question, evidence);
+    } finally {
+      clearTimeout(modelTimer);
+    }
+
+    res.json({
+      success: true,
+      answer,
+      question,
+      internetUsed: webEvidence.length > 0,
+      webSearchError,
+      model: {
+        name: DEFAULT_MODEL,
+        license: "Apache-2.0",
+        mode,
+        error: modelError,
+      },
+      sources: evidence.map(({ id, sourceType, dataset, title, section, url, text, excerpt }) => ({
+        id,
+        sourceType,
+        dataset,
+        title,
+        section,
+        url,
+        excerpt: String(excerpt || text || "").slice(0, 360),
+      })),
+      generatedAt: new Date().toISOString(),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

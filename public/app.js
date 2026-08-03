@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNewsFavorites();
   setupNewsCompetitors();
   setupSearchReportsWorkspace();
+  setupSummarise();
   setupTabDragDrop();
   setupAutoUpdate();
 });
@@ -135,20 +136,137 @@ function updateReportDraftCount() {
   if (count) count.textContent = reportUrls.length;
 }
 
+// ===== Smart Summary =====
+function setupSummarise() {
+  const input = document.getElementById("summaryQuestion");
+  const submit = document.getElementById("summarySubmitBtn");
+  if (!input || !submit) return;
+
+  submit.addEventListener("click", runSummary);
+  input.addEventListener("keydown", event => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      runSummary();
+    }
+  });
+
+  document.querySelectorAll(".summary-suggestion").forEach(button => {
+    button.addEventListener("click", () => {
+      input.value = button.textContent.trim();
+      input.focus();
+    });
+  });
+
+  fetch(`${API_BASE}/summarise/status`)
+    .then(response => response.json())
+    .then(data => {
+      if (!data.success) return;
+      const modelName = String(data.model || "SmolLM2").split("/").pop();
+      document.getElementById("summaryModelLabel").textContent = `${modelName} · ${data.license} · ${data.corpusItems} app records`;
+    })
+    .catch(() => { /* Keep the default label if status is unavailable. */ });
+}
+
+async function runSummary() {
+  const input = document.getElementById("summaryQuestion");
+  const button = document.getElementById("summarySubmitBtn");
+  const result = document.getElementById("summaryResult");
+  const answer = document.getElementById("summaryAnswer");
+  const question = input.value.trim();
+  if (!question) {
+    showToast("Enter a topic or question to summarise.");
+    input.focus();
+    return;
+  }
+
+  button.disabled = true;
+  button.textContent = "Summarising...";
+  result.style.display = "block";
+  document.getElementById("summaryResultQuestion").textContent = question;
+  document.getElementById("summaryResultMeta").textContent = "Retrieving application evidence...";
+  answer.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Preparing the local model and synthesising evidence...</p></div>';
+  document.getElementById("summaryEvidence").innerHTML = "";
+  document.getElementById("summaryWarning").style.display = "none";
+  result.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  try {
+    const response = await fetch(`${API_BASE}/summarise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        useInternet: document.getElementById("summaryUseInternet").checked,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Summary generation failed");
+
+    answer.textContent = data.answer;
+    const sourceCount = data.sources?.length || 0;
+    const internetLabel = data.internetUsed ? " · internet evidence included" : "";
+    document.getElementById("summaryResultMeta").textContent = `${sourceCount} sources${internetLabel} · ${new Date(data.generatedAt).toLocaleTimeString()}`;
+
+    const warning = document.getElementById("summaryWarning");
+    const warnings = [];
+    if (data.model?.mode === "extractive-fallback") warnings.push("The open-source model was unavailable, so an extractive evidence summary was returned.");
+    if (data.webSearchError) warnings.push(`Internet search was unavailable: ${data.webSearchError}`);
+    if (warnings.length) {
+      warning.textContent = warnings.join(" ");
+      warning.style.display = "block";
+    }
+
+    renderSummaryEvidence(data.sources || []);
+  } catch (error) {
+    answer.textContent = `Unable to generate a summary: ${error.message}`;
+    document.getElementById("summaryResultMeta").textContent = "Summary failed";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Summarise";
+  }
+}
+
+function renderSummaryEvidence(sources) {
+  const container = document.getElementById("summaryEvidence");
+  if (!sources.length) {
+    container.innerHTML = '<p class="hint">No evidence sources were returned.</p>';
+    return;
+  }
+
+  container.innerHTML = sources.map(source => {
+    const validUrl = /^https?:\/\//i.test(source.url || "");
+    const title = escapeHtml(source.title || source.dataset || "Evidence source");
+    const titleMarkup = validUrl
+      ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">${title}</a>`
+      : `<strong>${title}</strong>`;
+    return `
+      <article class="summary-evidence-card">
+        <div class="summary-evidence-card-header">
+          <span class="summary-evidence-id">${escapeHtml(source.id)}</span>
+          <span class="summary-evidence-kind">${source.sourceType === "internet" ? "Internet" : escapeHtml(source.dataset || "Application")}</span>
+        </div>
+        ${titleMarkup}
+        <p>${escapeHtml(source.excerpt || "")}</p>
+      </article>`;
+  }).join("");
+}
+
 // ===== Drag-and-Drop Tab Reordering =====
 const TAB_ORDER_KEY = "tabOrder";
+const DEFAULT_TAB_ORDER = [
+  "knowledge-base", "news-view", "search-view", "summarise-view",
+  "spider-web", "tencent-products", "gaming-trends",
+  "current-use-cases", "regulatory-timeline", "risks", "company-map"
+];
 
 function getTabOrder() {
   const stored = localStorage.getItem(TAB_ORDER_KEY);
   if (stored) {
-    try { return JSON.parse(stored); } catch (_) { /* ignore */ }
+    try {
+      const saved = JSON.parse(stored).filter(viewId => DEFAULT_TAB_ORDER.includes(viewId));
+      return [...saved, ...DEFAULT_TAB_ORDER.filter(viewId => !saved.includes(viewId))];
+    } catch (_) { /* use defaults */ }
   }
-  // Default order
-  return [
-    "knowledge-base", "news-view", "search-view",
-    "spider-web", "tencent-products", "gaming-trends",
-    "current-use-cases", "regulatory-timeline", "risks", "company-map"
-  ];
+  return [...DEFAULT_TAB_ORDER];
 }
 
 function saveTabOrder(order) {
