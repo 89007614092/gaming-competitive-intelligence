@@ -10,6 +10,7 @@ const {
   generateOpenSourceAnswer,
   buildExtractiveFallback,
   warmUpModel,
+  isModelReady,
 } = require("./summarise-engine");
 
 const app = express();
@@ -639,7 +640,8 @@ app.post("/api/search", async (req, res) => {
   }
 });
 
-// GET /api/summarise/status — describe the local evidence and model setup
+// GET /api/summarise/status — describe the local evidence and model setup.
+// The AI model is OPT-IN: the default answer mode is extractive-citation.
 app.get("/api/summarise/status", (req, res) => {
   try {
     res.json({
@@ -648,17 +650,34 @@ app.get("/api/summarise/status", (req, res) => {
       model: DEFAULT_MODEL,
       license: "Apache-2.0",
       localModel: true,
+      modelOptIn: true,
+      defaultMode: "extractive-citation",
+      modelLoaded: isModelReady(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/summarise — answer questions from app data with optional web evidence
+// POST /api/summarise/warm — preload the opt-in AI model in the background so the
+// first real useModel request is fast. Never blocks the caller.
+app.post("/api/summarise/warm", (req, res) => {
+  if (process.env.SUMMARY_DISABLE_MODEL === "1") {
+    return res.json({ success: true, warming: false, reason: "disabled" });
+  }
+  warmUpModel();
+  res.json({ success: true, warming: true });
+});
+
+// POST /api/summarise — answer questions from app data with optional web evidence.
+// Default mode is extractive-citation (fast, fully cited, accurate). The local AI
+// model is used only when the caller opts in with useModel=true; if it is still
+// warming up or fails, the response gracefully falls back to extractive.
 app.post("/api/summarise", async (req, res) => {
   try {
     const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
     const useInternet = req.body?.useInternet === true;
+    const useModel = req.body?.useModel === true;
     if (!question) return res.status(400).json({ error: "Enter a question to summarise" });
     if (question.length > 700) return res.status(400).json({ error: "Question must be 700 characters or fewer" });
 
@@ -694,22 +713,35 @@ app.post("/api/summarise", async (req, res) => {
 
     const evidence = [...appEvidence, ...webEvidence];
     let answer;
-    let mode = "local-open-source-model";
+    let mode;
     let modelError = "";
     let modelTimer;
-    try {
-      answer = await Promise.race([
-        generateOpenSourceAnswer(question, evidence),
-        new Promise((_, reject) => {
-          modelTimer = setTimeout(() => reject(new Error("Local model initialization timed out; retry after the model finishes warming")), 70000);
-        }),
-      ]);
-    } catch (error) {
-      modelError = error.message;
-      mode = "extractive-fallback";
+
+    if (useModel) {
+      // Kick off a background warm-up so subsequent requests are fast; the first
+      // opt-in request may still finish loading within the timeout window.
+      warmUpModel();
+      mode = "local-open-source-model";
+      try {
+        answer = await Promise.race([
+          generateOpenSourceAnswer(question, evidence),
+          new Promise((_, reject) => {
+            modelTimer = setTimeout(
+              () => reject(new Error("Local model is still warming up; an extractive summary was returned. Try again in a moment for an AI synthesis.")),
+              70000
+            );
+          }),
+        ]);
+      } catch (error) {
+        modelError = error.message;
+        mode = "extractive-fallback";
+        answer = buildExtractiveFallback(question, evidence);
+      } finally {
+        clearTimeout(modelTimer);
+      }
+    } else {
+      mode = "extractive-citation";
       answer = buildExtractiveFallback(question, evidence);
-    } finally {
-      clearTimeout(modelTimer);
     }
 
     res.json({
@@ -723,6 +755,7 @@ app.post("/api/summarise", async (req, res) => {
         license: "Apache-2.0",
         mode,
         error: modelError,
+        optIn: true,
       },
       sources: evidence.map(({ id, sourceType, dataset, title, section, url, text, excerpt }) => ({
         id,
@@ -1834,10 +1867,7 @@ app.listen(PORT, () => {
   console.log(`  Server running at http://localhost:${PORT}`);
   console.log(`  Python: ${PYTHON ? `${PYTHON} — search & transcripts enabled` : "NOT FOUND — search & transcripts disabled"}`);
   console.log(`  Search: DuckDuckGo (free, no API key)\n`);
-  // Warm up the local summarisation model in the background so the first user
-  // request does not pay the cold-start download/initialisation cost (which
-  // previously triggered a 70s timeout -> extractive fallback).
-  warmUpModel().then(ready => {
-    if (ready) console.log("  Summarise: local model ready");
-  });
+  // The local AI model is opt-in (default answer mode is extractive-citation),
+  // so we do NOT preload it at startup. It is warmed in the background the first
+  // time the user enables the "Use AI model" toggle.
 });

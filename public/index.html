@@ -268,12 +268,18 @@
         <div class="summary-composer">
           <textarea id="summaryQuestion" maxlength="700" placeholder="Enter the topic or question you want to summarise"></textarea>
           <div class="summary-composer-footer">
-            <label class="summary-internet-toggle">
-              <input type="checkbox" id="summaryUseInternet" />
-              <span>Search internet for additional evidence</span>
-            </label>
+            <div class="summary-toggles">
+              <label class="summary-internet-toggle">
+                <input type="checkbox" id="summaryUseInternet" />
+                <span>Search internet for additional evidence</span>
+              </label>
+              <label class="summary-model-toggle">
+                <input type="checkbox" id="summaryUseModel" />
+                <span>Use AI model <em>(optional)</em></span>
+              </label>
+            </div>
             <div class="summary-composer-actions">
-              <span class="summary-model-label" id="summaryModelLabel">Local open-source model</span>
+              <span class="summary-mode-label" id="summaryModeLabel">Extractive (cited) by default</span>
               <button class="btn btn-primary summary-submit" id="summarySubmitBtn" type="button">Summarise</button>
             </div>
           </div>

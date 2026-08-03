@@ -1341,7 +1341,14 @@ body {
   border-top: 1px solid #edf0f5;
 }
 
-.summary-internet-toggle {
+.summary-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.summary-internet-toggle,
+.summary-model-toggle {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
@@ -1350,10 +1357,18 @@ body {
   cursor: pointer;
 }
 
-.summary-internet-toggle input {
+.summary-internet-toggle input,
+.summary-model-toggle input {
   width: 17px;
   height: 17px;
   accent-color: var(--primary);
+}
+
+.summary-model-toggle em {
+  color: var(--text-muted);
+  font-style: normal;
+  font-size: 0.76rem;
+  opacity: 0.8;
 }
 
 .summary-composer-actions {
@@ -1362,7 +1377,7 @@ body {
   gap: 0.8rem;
 }
 
-.summary-model-label {
+.summary-mode-label {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
@@ -1530,6 +1545,12 @@ body {
   .summary-result-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .summary-toggles {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.9rem;
   }
 
   .summary-composer-actions {

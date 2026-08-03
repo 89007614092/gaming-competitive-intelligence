@@ -220,8 +220,9 @@ async function getGenerator() {
   return generatorPromise;
 }
 
-// Pre-load the model in the background (e.g. at server start) so the first user
-// request does not pay the cold-start download/initialisation cost. Never throws.
+// Pre-load the model in the background (e.g. when the user opts in) so the first
+// model request does not pay the full cold-start download/initialisation cost.
+// Never throws.
 function warmUpModel() {
   if (process.env.SUMMARY_DISABLE_MODEL === "1") return Promise.resolve(false);
   return getGenerator()
@@ -230,6 +231,13 @@ function warmUpModel() {
       console.warn("[summarise] model warm-up skipped:", error.message);
       return false;
     });
+}
+
+// True once the model generator promise exists (i.e. a load has been kicked off,
+// successfully or not). Used by the status endpoint to tell the UI whether the
+// opt-in AI model is already cached/warm.
+function isModelReady() {
+  return generatorPromise !== null;
 }
 
 function extractGeneratedAnswer(output) {
@@ -298,4 +306,5 @@ module.exports = {
   generateOpenSourceAnswer,
   buildExtractiveFallback,
   warmUpModel,
+  isModelReady,
 };
