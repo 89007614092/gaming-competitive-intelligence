@@ -89,6 +89,84 @@ function tavilySearch(query, limit = 10) {
   });
 }
 
+// ===== Jina Reader (keyless option for the proposed-changes resolver) =====
+// r.jina.ai/<url> returns the article body as clean text; s.jina.ai/<query>
+// returns search results already extracted as markdown. Used when
+// SEARCH_PROVIDER=jina so the resolver needs NO API key (an optional
+// JINA_API_KEY simply lifts anonymous rate limits). Works from any IP,
+// bypassing the DDG/GDELT sandbox block.
+
+function activeSearchProvider() {
+  return (process.env.SEARCH_PROVIDER || "jina").toLowerCase().trim();
+}
+
+function jinaHeaders() {
+  const headers = { Accept: "text/markdown,text/plain" };
+  if (process.env.JINA_API_KEY) headers["Authorization"] = `Bearer ${process.env.JINA_API_KEY}`;
+  return headers;
+}
+
+// Resolve a title to the real publisher URL via Jina's search endpoint.
+async function jinaSearch(query, limit = 5) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const resp = await fetch(`https://s.jina.ai/${encodeURIComponent(query)}`, {
+      headers: jinaHeaders(),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`Jina search HTTP ${resp.status}`);
+    const md = await resp.text();
+    return parseJinaSearch(md, limit);
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("Jina search timed out");
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Tolerant parser for Jina's markdown search results. We only strictly need the
+// first real publisher URL; the title/content are best-effort.
+function parseJinaSearch(md, limit) {
+  const blocks = md.split(/^#{1,4}\s+Result\s+\d+/gim).slice(1);
+  const out = [];
+  for (const block of blocks) {
+    if (out.length >= limit) break;
+    const urls = [...block.matchAll(/https?:\/\/[^\s)"'\]]+/g)]
+      .map((m) => m[0])
+      .filter((u) => !/^(https?:\/\/)?(s\.jina\.ai|r\.jina\.ai)/i.test(u));
+    const url = urls[0];
+    if (!url) continue;
+    const titleLine = (block.match(/^\s*#+\s*(?:Result\s+\d+:\s*)?(.+)$/m) || [])[1] || "";
+    out.push({
+      title: titleLine.trim(),
+      url,
+      content: block.replace(/https?:\/\/\S+/g, "").replace(/\n+/g, " ").trim().slice(0, 600),
+    });
+  }
+  return out;
+}
+
+// Extract the main article body as clean text via Jina's reader endpoint.
+async function jinaExtract(url, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`https://r.jina.ai/${url}`, {
+      headers: jinaHeaders(),
+      signal: controller.signal,
+    });
+    if (!resp.ok) throw new Error(`Jina extract HTTP ${resp.status}`);
+    return (await resp.text()).replace(/\s+/g, " ").trim();
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("Jina extract timed out");
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ===== Website and Video Transcript Extraction — free, no API key needed =====
 
 const SCRAPE_USER_AGENT =
@@ -1276,6 +1354,18 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
     sourceState.resolvedUrls[googleUrl] = real;
     return real;
   };
+  // 0) Jina Reader (keyless) — tried first when SEARCH_PROVIDER=jina. Resolves
+  //    the title to the real publisher URL via Jina's search endpoint, which
+  //    works from any IP (no DDG/GDELT bot-challenge). Falls back to DDG/GDELT
+  //    if Jina is unavailable or rate-limited.
+  if (activeSearchProvider() === "jina") {
+    try {
+      const hit = (await jinaSearch(`${title}${domain ? ` site:${domain}` : ""}`, 5))[0];
+      if (hit && hit.url) return cacheAndReturn(hit.url);
+    } catch (e) {
+      console.warn("[resolve] Jina failed, falling back to DDG/GDELT:", e.message);
+    }
+  }
   // One DuckDuckGo attempt, serialized + paced + rotating UA. Returns the decoded
   // publisher URL or null. We try a few query variants (most specific first) to
   // maximise the chance of a hit despite DDG's occasional challenge page.
@@ -1397,8 +1487,13 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
     articleUrl = real;
   }
   try {
-    const resource = await fetchTextResource(articleUrl, "text/html,application/xhtml+xml,text/plain", timeoutMs);
-    const body = extractText(resource.text).replace(/\s+/g, " ").trim();
+    let body;
+    if (activeSearchProvider() === "jina") {
+      body = await jinaExtract(articleUrl, timeoutMs);
+    } else {
+      const resource = await fetchTextResource(articleUrl, "text/html,application/xhtml+xml,text/plain", timeoutMs);
+      body = extractText(resource.text).replace(/\s+/g, " ").trim();
+    }
     if (body.length < 140) return null;
     const sentences = body.match(/[^.!?]+[.!?]+/g) || [body];
     let lead = sentences.slice(0, 4).join(" ").trim();
