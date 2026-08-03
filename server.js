@@ -637,45 +637,79 @@ app.post("/api/search", async (req, res) => {
 const NEWS_TOPICS = [
   {
     label: "AI Technology Trends",
-    queries: [
-      "generative AI gaming world models AI agents",
-      "AI video 3D generation game development technology",
-    ],
+    queries: ["generative AI gaming world models agents video 3D technology"],
   },
   {
     label: "AI Regulation",
-    queries: [
-      "EU AI Act UK AI regulation big tech compliance enforcement",
-      "AI copyright transparency regulation technology companies",
-    ],
+    queries: ["EU UK AI regulation big tech compliance enforcement copyright transparency"],
   },
   {
     label: "Current Use Cases",
-    queries: [
-      "AI gaming use cases NPC procedural content game development",
-      "generative AI current use cases games entertainment",
-    ],
+    queries: ["AI gaming use cases NPC procedural content game development entertainment"],
   },
   {
     label: "Competitor News",
-    queries: [
-      "Tencent NetEase HoYoverse AI gaming",
-      "Sony Microsoft Epic Unity Roblox AI gaming",
-    ],
+    queries: ["Tencent gaming AI technology news"],
   },
 ];
 
-let newsCache = null;
+const DEFAULT_NEWS_COMPETITOR_IDS = ["netease", "mihoyo", "sony", "microsoft"];
+let newsCompetitorCatalog = [];
 try {
-  newsCache = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "news-cache.json"), "utf8"));
+  const networkData = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "network.json"), "utf8"));
+  newsCompetitorCatalog = networkData.competitors || [];
+} catch (_) { /* News still works with broad topic searches. */ }
+
+function resolveNewsCompetitors(value = "") {
+  const requested = String(value).split(",").map(id => id.trim()).filter(Boolean);
+  const ids = requested.length ? requested : DEFAULT_NEWS_COMPETITOR_IDS;
+  const allowed = new Map(newsCompetitorCatalog.map(company => [company.id, company]));
+  return [...new Set(ids)].map(id => allowed.get(id)).filter(Boolean);
+}
+
+let bundledNewsCache = null;
+const newsCacheBySelection = new Map();
+try {
+  bundledNewsCache = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "news-cache.json"), "utf8"));
 } catch (_) { /* no cache file yet */ }
+
+function newsCompetitorAliases(company) {
+  return company.name
+    .split(/\s*\/\s*|\s+x\s+/i)
+    .map(alias => alias.replace(/\s*\([^)]*\)\s*/g, " ").trim())
+    .filter(alias => alias.length > 2);
+}
+
+function newsSelectionKey(competitors) {
+  return competitors.map(company => company.id).sort().join(",");
+}
+
+function getNewsFallback(competitors) {
+  const exact = newsCacheBySelection.get(newsSelectionKey(competitors));
+  if (exact?.articles?.length) return exact;
+  if (!bundledNewsCache?.articles?.length) return null;
+
+  const aliases = competitors.flatMap(newsCompetitorAliases).map(alias => alias.toLowerCase());
+  const articles = bundledNewsCache.articles.filter(article => {
+    const text = `${article.title || ""} ${article.description || ""} ${article.competitorKeyword || ""}`.toLowerCase();
+    return aliases.some(alias => text.includes(alias));
+  });
+
+  if (!articles.length) return null;
+  return {
+    generatedAt: bundledNewsCache.generatedAt,
+    source: bundledNewsCache.source,
+    count: articles.length,
+    articles,
+  };
+}
 
 function extractXmlTag(xml, tag) {
   const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i").exec(xml);
   return match ? stripHtml(match[1].replace(/^<!\[CDATA\[|\]\]>$/g, "")) : "";
 }
 
-function parseNewsRss(xml, topicLabel, query, limit = 6) {
+function parseNewsRss(xml, topicLabel, query, limit = 6, candidateCompetitors = []) {
   const articles = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
   let match;
@@ -691,11 +725,18 @@ function parseNewsRss(xml, topicLabel, query, limit = 6) {
     if (!title || !url) continue;
     if (NEWS_EXCLUDED_DOMAINS.some(domain => url.toLowerCase().includes(domain))) continue;
 
+    const articleText = `${title} ${description}`.toLowerCase();
+    const matchedCompetitor = candidateCompetitors.find(company =>
+      newsCompetitorAliases(company).some(alias => articleText.includes(alias.toLowerCase()))
+    );
+
     articles.push({
       title,
       url,
       description,
-      competitorKeyword: topicLabel,
+      competitorKeyword: matchedCompetitor?.name || topicLabel,
+      topicCategory: topicLabel,
+      competitorName: matchedCompetitor?.name || null,
       searchQuery: query,
       sourceName,
       publishedAt: publishedAt && !Number.isNaN(Date.parse(publishedAt))
@@ -707,17 +748,34 @@ function parseNewsRss(xml, topicLabel, query, limit = 6) {
   return articles;
 }
 
-async function searchGoogleNewsRss(query, topicLabel, limit = 6) {
+async function searchGoogleNewsRss(query, topicLabel, limit = 6, candidateCompetitors = []) {
   const freshnessQuery = `${query} when:60d`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(freshnessQuery)}&hl=en-GB&gl=GB&ceid=GB:en`;
   const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
-  return parseNewsRss(resource.text, topicLabel, query, limit);
+  return parseNewsRss(resource.text, topicLabel, query, limit, candidateCompetitors);
 }
 
-async function getLiveNewsArticles() {
-  const searches = NEWS_TOPICS.flatMap(topic =>
+function buildCompetitorNewsQueries(competitors) {
+  const batches = [];
+  for (let index = 0; index < competitors.length; index += 5) {
+    const batch = competitors.slice(index, index + 5);
+    const names = batch.flatMap(newsCompetitorAliases).map(alias => `"${alias}"`).join(" OR ");
+    batches.push({
+      query: `(${names}) AI gaming technology news`,
+      competitors: batch,
+    });
+  }
+  return batches;
+}
+
+async function getLiveNewsArticles(selectedCompetitors = []) {
+  const topicSearches = NEWS_TOPICS.flatMap(topic =>
     topic.queries.map(query => searchGoogleNewsRss(query, topic.label, 6))
   );
+  const competitorSearches = buildCompetitorNewsQueries(selectedCompetitors).map(batch =>
+    searchGoogleNewsRss(batch.query, "Competitor News", 8, batch.competitors)
+  );
+  const searches = [...topicSearches, ...competitorSearches];
   const settled = await Promise.allSettled(searches);
   const seen = new Set();
   const articles = [];
@@ -746,22 +804,24 @@ app.get("/api/news", async (req, res) => {
   res.set("Cache-Control", "no-store, max-age=0");
 
   try {
-    const liveArticles = await getLiveNewsArticles();
+    const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
+    const liveArticles = await getLiveNewsArticles(monitoredCompetitors);
 
     if (liveArticles.length > 0) {
       const searchedAt = new Date().toISOString();
-      newsCache = {
+      newsCacheBySelection.set(newsSelectionKey(monitoredCompetitors), {
         generatedAt: searchedAt,
         source: "Google News RSS",
         count: liveArticles.length,
         articles: liveArticles,
-      };
+      });
 
       return res.json({
         success: true,
         count: liveArticles.length,
         articles: liveArticles,
         topics: NEWS_TOPICS.map(topic => topic.label),
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name })),
         searchedAt,
         live: true,
         cached: false,
@@ -770,13 +830,15 @@ app.get("/api/news", async (req, res) => {
 
     // Promise.allSettled does not throw when all searches fail, so an explicit
     // empty-result fallback is required here (the previous implementation missed it).
-    if (newsCache?.articles?.length) {
+    const fallback = getNewsFallback(monitoredCompetitors);
+    if (fallback?.articles?.length) {
       return res.json({
         success: true,
-        count: newsCache.articles.length,
-        articles: newsCache.articles,
+        count: fallback.articles.length,
+        articles: fallback.articles,
         topics: NEWS_TOPICS.map(topic => topic.label),
-        searchedAt: newsCache.generatedAt,
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name })),
+        searchedAt: fallback.generatedAt,
         live: false,
         cached: true,
       });
@@ -784,13 +846,16 @@ app.get("/api/news", async (req, res) => {
 
     return res.status(503).json({ error: "No live or cached news articles are available" });
   } catch (err) {
-    if (newsCache?.articles?.length) {
+    const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
+    const fallback = getNewsFallback(monitoredCompetitors);
+    if (fallback?.articles?.length) {
       return res.json({
         success: true,
-        count: newsCache.articles.length,
-        articles: newsCache.articles,
+        count: fallback.articles.length,
+        articles: fallback.articles,
         topics: NEWS_TOPICS.map(topic => topic.label),
-        searchedAt: newsCache.generatedAt,
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name })),
+        searchedAt: fallback.generatedAt,
         live: false,
         cached: true,
       });

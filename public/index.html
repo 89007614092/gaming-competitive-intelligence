@@ -28,10 +28,7 @@
           News
         </button>
         <button class="nav-btn" data-view="search-view" draggable="true">
-          Search
-        </button>
-        <button class="nav-btn" data-view="reports" draggable="true">
-          Reports
+          Search &amp; Reports
         </button>
         <button class="nav-btn" data-view="spider-web" draggable="true">
           Competitor Web
@@ -69,8 +66,8 @@
       <!-- ===== NEWS VIEW ===== -->
       <section class="view" id="news-view">
         <header class="page-header">
-          <h1>Tencent Gaming Competitive Intelligence</h1>
-          <p class="subtitle">Tracking competitor moves in gaming technology</p>
+          <h1>Focused News Feed</h1>
+          <p class="subtitle">Tracking AI developments, regulation, use cases, and selected competitors</p>
           <div class="header-actions">
             <button class="btn btn-primary" id="refreshNewsBtn">
               <span class="btn-icon">&#x21BB;</span> Refresh News
@@ -85,13 +82,11 @@
             <div class="stat-value" id="articleCount">--</div>
             <div class="stat-label">Articles Tracked</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card competitor-monitor-card" id="competitorMonitorCard" tabindex="0">
             <div class="stat-value" id="competitorCount">--</div>
             <div class="stat-label">Competitors Monitored</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" id="reportCount">0</div>
-            <div class="stat-label">Reports Generated</div>
+            <button class="btn btn-sm add-competitors-btn" id="addCompetitorsBtn" type="button">Add Competitors</button>
+            <div class="competitor-hover-list" id="competitorHoverList" role="tooltip"></div>
           </div>
         </div>
 
@@ -119,10 +114,16 @@
       <!-- ===== SEARCH VIEW ===== -->
       <section class="view" id="search-view">
         <header class="page-header">
-          <h1>Search &amp; Scrape</h1>
-          <p class="subtitle">Search the web for specific competitive intelligence</p>
+          <h1>Search &amp; Reports</h1>
+          <p class="subtitle">Discover, extract, and synthesize competitive intelligence in one workspace</p>
         </header>
 
+        <div class="workspace-switcher" role="tablist" aria-label="Search and reports workspace">
+          <button class="workspace-tab-btn active" data-workspace-mode="search" role="tab" aria-selected="true">Search</button>
+          <button class="workspace-tab-btn" data-workspace-mode="reports" role="tab" aria-selected="false">Reports <span class="workspace-count" id="reportDraftCount">0</span></button>
+        </div>
+
+        <div class="workspace-panel active" id="searchWorkspace" data-workspace-panel="search">
         <div class="search-box">
           <input
             type="text"
@@ -179,17 +180,12 @@
             <button class="btn btn-accent" id="addToReport">+ Add to Report</button>
           </div>
         </div>
-      </section>
+        </div>
 
-      <!-- ===== REPORTS VIEW ===== -->
-      <section class="view" id="reports">
-        <header class="page-header">
-          <h1>Summarized Reports</h1>
-          <p class="subtitle">Generate and review intelligence reports from scraped data</p>
-        </header>
-
+      <!-- ===== REPORTS WORKSPACE ===== -->
+      <div class="workspace-panel" id="reportsWorkspace" data-workspace-panel="reports">
         <!-- Sub-tab Navigation -->
-        <div class="sub-tab-bar" data-view="reports">
+        <div class="sub-tab-bar" data-view="reports-workspace">
           <button class="sub-tab-btn active" data-target="reportBuilderSection">New Report</button>
           <button class="sub-tab-btn" data-target="savedReportsSection">Saved Reports</button>
         </div>
@@ -248,6 +244,7 @@
             <p class="hint">No saved reports yet</p>
           </div>
         </div>
+      </div>
       </section>
       <!-- ===== KNOWLEDGE BASE VIEW ===== -->
       <section class="view active" id="knowledge-base">
@@ -569,6 +566,34 @@
         <p class="map-hint">Hover to preview each office's function. Click a pin to keep the complete role, relevant products, and source links open.</p>
       </section>
     </main>
+  </div>
+
+  <!-- Competitor Selection Modal -->
+  <div class="modal-overlay" id="competitorModal" style="display:none;">
+    <div class="modal competitor-modal" role="dialog" aria-modal="true" aria-labelledby="competitorModalTitle">
+      <div class="modal-header">
+        <div>
+          <h3 id="competitorModalTitle">Add Competitors</h3>
+          <p class="modal-subtitle">Choose competitors to include in focused News searches.</p>
+        </div>
+        <button class="btn btn-sm" id="closeCompetitorModal" type="button" aria-label="Close">&#x2715;</button>
+      </div>
+      <div class="competitor-modal-tools">
+        <input type="search" id="competitorPickerSearch" class="text-input" placeholder="Find a competitor..." />
+        <div class="competitor-selection-actions">
+          <button class="btn btn-sm" id="selectAllCompetitors" type="button">Select all</button>
+          <button class="btn btn-sm" id="clearAllCompetitors" type="button">Clear</button>
+        </div>
+      </div>
+      <div class="competitor-picker-list" id="competitorPickerList">
+        <div class="loading-state"><div class="spinner"></div><p>Loading competitors...</p></div>
+      </div>
+      <div class="modal-footer competitor-modal-footer">
+        <span class="hint" id="competitorSelectionSummary"></span>
+        <button class="btn" id="cancelCompetitorSelection" type="button">Cancel</button>
+        <button class="btn btn-primary" id="applyCompetitorSelection" type="button">Apply &amp; Refresh</button>
+      </div>
+    </div>
   </div>
 
   <!-- Settings Modal -->

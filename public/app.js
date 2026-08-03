@@ -26,6 +26,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadKnowledgeBase();
   setupSubTabs();
   setupNewsFavorites();
+  setupNewsCompetitors();
+  setupSearchReportsWorkspace();
   setupTabDragDrop();
   setupAutoUpdate();
 });
@@ -45,7 +47,7 @@ function setupNavigation() {
       resetSubTabForView(viewId);
 
       if (viewId === "news-view") loadNews();
-      if (viewId === "reports") renderSavedReports();
+      if (viewId === "search-view" && searchReportsMode === "reports") renderSavedReports();
       if (viewId === "knowledge-base") loadKnowledgeBase();
       if (viewId === "spider-web") loadSpiderWeb();
       if (viewId === "tencent-products") loadTencentProducts();
@@ -100,6 +102,39 @@ function setupNavigation() {
   document.getElementById("toggleFullContent").addEventListener("click", toggleFullContent);
 }
 
+// ===== Search & Reports Workspace =====
+let searchReportsMode = "search";
+
+function setupSearchReportsWorkspace() {
+  document.querySelectorAll("[data-workspace-mode]").forEach(button => {
+    button.addEventListener("click", () => switchSearchReportsWorkspace(button.dataset.workspaceMode));
+  });
+  updateReportDraftCount();
+}
+
+function switchSearchReportsWorkspace(mode) {
+  searchReportsMode = mode === "reports" ? "reports" : "search";
+
+  document.querySelectorAll("[data-workspace-mode]").forEach(button => {
+    const active = button.dataset.workspaceMode === searchReportsMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll("[data-workspace-panel]").forEach(panel => {
+    panel.classList.toggle("active", panel.dataset.workspacePanel === searchReportsMode);
+  });
+
+  if (searchReportsMode === "reports") {
+    renderUrlList();
+    renderSavedReports();
+  }
+}
+
+function updateReportDraftCount() {
+  const count = document.getElementById("reportDraftCount");
+  if (count) count.textContent = reportUrls.length;
+}
+
 // ===== Drag-and-Drop Tab Reordering =====
 const TAB_ORDER_KEY = "tabOrder";
 
@@ -110,7 +145,7 @@ function getTabOrder() {
   }
   // Default order
   return [
-    "knowledge-base", "news-view", "search-view", "reports",
+    "knowledge-base", "news-view", "search-view",
     "spider-web", "tencent-products", "gaming-trends",
     "current-use-cases", "regulatory-timeline", "risks", "company-map"
   ];
@@ -262,14 +297,147 @@ async function checkApiStatus() {
   }
 }
 
+// ===== News Competitor Selection =====
+const NEWS_COMPETITORS_KEY = "selectedNewsCompetitors";
+const DEFAULT_NEWS_COMPETITORS = ["netease", "mihoyo", "sony", "microsoft"];
+let newsCompetitorCatalog = [];
+let selectedNewsCompetitorIds = loadSelectedNewsCompetitors();
+let pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
+
+function loadSelectedNewsCompetitors() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NEWS_COMPETITORS_KEY) || "null");
+    return Array.isArray(saved) && saved.length ? saved : [...DEFAULT_NEWS_COMPETITORS];
+  } catch (_) {
+    return [...DEFAULT_NEWS_COMPETITORS];
+  }
+}
+
+async function setupNewsCompetitors() {
+  document.getElementById("addCompetitorsBtn")?.addEventListener("click", openCompetitorModal);
+  document.getElementById("closeCompetitorModal")?.addEventListener("click", closeCompetitorModal);
+  document.getElementById("cancelCompetitorSelection")?.addEventListener("click", closeCompetitorModal);
+  document.getElementById("applyCompetitorSelection")?.addEventListener("click", applyCompetitorSelection);
+  document.getElementById("selectAllCompetitors")?.addEventListener("click", () => {
+    pendingNewsCompetitorIds = new Set(newsCompetitorCatalog.map(company => company.id));
+    renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
+  });
+  document.getElementById("clearAllCompetitors")?.addEventListener("click", () => {
+    pendingNewsCompetitorIds.clear();
+    renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
+  });
+  document.getElementById("competitorPickerSearch")?.addEventListener("input", event => {
+    renderCompetitorPicker(event.target.value);
+  });
+  document.getElementById("competitorModal")?.addEventListener("click", event => {
+    if (event.target.id === "competitorModal") closeCompetitorModal();
+  });
+
+  updateCompetitorMonitorCard();
+  try {
+    const response = await fetch(`${API_BASE}/network`);
+    const result = await response.json();
+    if (!response.ok || !result.success || !result.data?.competitors) {
+      throw new Error(result.error || "Competitor list is unavailable");
+    }
+    newsCompetitorCatalog = result.data.competitors;
+    const validIds = new Set(newsCompetitorCatalog.map(company => company.id));
+    selectedNewsCompetitorIds = selectedNewsCompetitorIds.filter(id => validIds.has(id));
+    if (!selectedNewsCompetitorIds.length) selectedNewsCompetitorIds = [...DEFAULT_NEWS_COMPETITORS];
+    pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
+    localStorage.setItem(NEWS_COMPETITORS_KEY, JSON.stringify(selectedNewsCompetitorIds));
+    updateCompetitorMonitorCard();
+  } catch (_) {
+    // The defaults remain usable even if the network list cannot be loaded.
+  }
+}
+
+function getSelectedNewsCompetitors() {
+  return selectedNewsCompetitorIds.map(id => {
+    const company = newsCompetitorCatalog.find(item => item.id === id);
+    return company || { id, name: id.replace(/-/g, " ").replace(/\b\w/g, char => char.toUpperCase()) };
+  });
+}
+
+function updateCompetitorMonitorCard() {
+  const selected = getSelectedNewsCompetitors();
+  const count = document.getElementById("competitorCount");
+  const hoverList = document.getElementById("competitorHoverList");
+  if (count) count.textContent = selected.length;
+  if (hoverList) {
+    hoverList.innerHTML = selected.length
+      ? `<strong>Currently monitored</strong>${selected.map(company => escapeHtml(company.name)).join("<br>")}`
+      : "<strong>No competitors selected</strong>Use Add Competitors to build a focused list.";
+  }
+}
+
+function openCompetitorModal() {
+  pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
+  const search = document.getElementById("competitorPickerSearch");
+  if (search) search.value = "";
+  renderCompetitorPicker();
+  document.getElementById("competitorModal").style.display = "flex";
+}
+
+function closeCompetitorModal() {
+  document.getElementById("competitorModal").style.display = "none";
+}
+
+function renderCompetitorPicker(searchQuery = "") {
+  const container = document.getElementById("competitorPickerList");
+  const query = searchQuery.trim().toLowerCase();
+  const companies = newsCompetitorCatalog.filter(company => !query || company.name.toLowerCase().includes(query));
+
+  if (!newsCompetitorCatalog.length) {
+    container.innerHTML = '<div class="empty-state"><p>Competitor list is unavailable. Please try again.</p></div>';
+    updateCompetitorSelectionSummary();
+    return;
+  }
+
+  container.innerHTML = companies.length
+    ? companies.map(company => `
+      <label class="competitor-picker-option">
+        <input type="checkbox" value="${escapeHtml(company.id)}" ${pendingNewsCompetitorIds.has(company.id) ? "checked" : ""}>
+        <span>${escapeHtml(company.name)}</span>
+      </label>`).join("")
+    : '<div class="empty-state"><p>No competitors match that search.</p></div>';
+
+  container.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    input.addEventListener("change", () => {
+      if (input.checked) pendingNewsCompetitorIds.add(input.value);
+      else pendingNewsCompetitorIds.delete(input.value);
+      updateCompetitorSelectionSummary();
+    });
+  });
+  updateCompetitorSelectionSummary();
+}
+
+function updateCompetitorSelectionSummary() {
+  const summary = document.getElementById("competitorSelectionSummary");
+  if (summary) summary.textContent = `${pendingNewsCompetitorIds.size} selected`;
+}
+
+function applyCompetitorSelection() {
+  if (!pendingNewsCompetitorIds.size) {
+    showToast("Select at least one competitor to monitor.");
+    return;
+  }
+  selectedNewsCompetitorIds = [...pendingNewsCompetitorIds];
+  localStorage.setItem(NEWS_COMPETITORS_KEY, JSON.stringify(selectedNewsCompetitorIds));
+  updateCompetitorMonitorCard();
+  closeCompetitorModal();
+  loadNews(true);
+}
+
 // ===== Load News =====
 async function loadNews(forceRefresh = false) {
   const feed = document.getElementById("newsFeed");
   feed.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Scanning competitor news...</p></div>';
 
   try {
-    const refreshParam = forceRefresh ? `?refresh=${Date.now()}` : "";
-    const res = await fetch(`${API_BASE}/news${refreshParam}`, { cache: "no-store" });
+    const params = new URLSearchParams({ competitors: selectedNewsCompetitorIds.join(",") });
+    if (forceRefresh) params.set("refresh", Date.now().toString());
+    const res = await fetch(`${API_BASE}/news?${params.toString()}`, { cache: "no-store" });
     const data = await res.json();
 
     if (!data.success) {
@@ -287,12 +455,12 @@ async function loadNews(forceRefresh = false) {
       updatedEl.textContent = "Last updated: " + new Date(data.searchedAt).toLocaleTimeString();
     }
 
-    // Extract unique competitors from keywords
+    // Article tags include both broad news topics and focused competitor searches.
     const competitors = new Set();
     data.articles?.forEach((a) => {
       if (a.competitorKeyword) competitors.add(a.competitorKeyword);
     });
-    document.getElementById("competitorCount").textContent = competitors.size;
+    updateCompetitorMonitorCard();
 
     if (!data.articles?.length) {
       feed.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F4ED;</div><p>No articles found. Try refreshing or check the Search tab for custom queries.</p></div>';
@@ -656,6 +824,7 @@ function removeUrlFromReport(url) {
 
 function renderUrlList() {
   const list = document.getElementById("urlList");
+  updateReportDraftCount();
   if (!reportUrls.length) {
     list.innerHTML = '<p class="hint">Add website or video URLs. Public captions are extracted as transcripts when available.</p>';
     return;
@@ -718,9 +887,6 @@ async function generateReport() {
 
     displayReport(report);
 
-    document.getElementById("reportCount").textContent =
-      parseInt(document.getElementById("reportCount").textContent) + 1;
-
     // Save the complete sourced report for later review.
     savedReports.unshift({
       ...report,
@@ -729,6 +895,7 @@ async function generateReport() {
     });
     if (savedReports.length > 20) savedReports = savedReports.slice(0, 20);
     localStorage.setItem("savedReports", JSON.stringify(savedReports));
+    renderSavedReports();
 
     // Clear report URLs
     reportUrls = [];
@@ -832,7 +999,6 @@ function renderSavedReports() {
       savedReports.splice(idx, 1);
       localStorage.setItem("savedReports", JSON.stringify(savedReports));
       renderSavedReports();
-      document.getElementById("reportCount").textContent = savedReports.length;
     });
   });
 }
@@ -841,6 +1007,7 @@ function loadSavedReport(idx) {
   const report = savedReports[idx];
   if (!report) return;
 
+  switchSearchReportsWorkspace("reports");
   displayReport(report);
   document.getElementById("reportResult").scrollIntoView({ behavior: "smooth" });
 }
