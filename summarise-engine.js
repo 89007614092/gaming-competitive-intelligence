@@ -296,7 +296,7 @@ function generateOpenSourceAnswer(question, evidence) {
 // disabled or the request fails — callers must degrade gracefully. Routed
 // through the shared generationQueue so we never open two concurrent API
 // requests at once (keeps host rate limits happy).
-async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, temperature = 0.2, json = false } = {}) {
+async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, temperature = 0.2, json = false, timeoutMs = 60000 } = {}) {
   if (MODEL_DISABLED) return null;
   const messages = [
     { role: "system", content: json ? `${systemPrompt}\nRespond with ONLY valid JSON, no prose, no markdown code fences.` : systemPrompt },
@@ -306,7 +306,7 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
     .catch(() => undefined)
     .then(async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000);
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
           method: "POST",

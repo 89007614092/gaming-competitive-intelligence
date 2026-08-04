@@ -1127,6 +1127,11 @@ let sourcesCache = null;
 let sourceState = loadSourceState();
 let proposedChanges = loadProposed();
 let sourceScanInFlight = false;
+let sourceScanStartedAt = 0;
+// If a scan is somehow still "in flight" after this long, treat the lock as
+// stale and allow a new scan to supersede it (otherwise a single slow/hung
+// scan would block every subsequent trigger forever on the free tier).
+const SOURCE_SCAN_STALE_MS = 4 * 60 * 1000;
 
 // Cache of resolved real article URLs (Google News redirect -> publisher URL),
 // persisted via sourceState.resolvedUrls so we rarely re-query a search engine.
@@ -1646,7 +1651,7 @@ Return ONLY valid JSON:
   "updateReason": one short sentence (max 20 words) explaining why this is suggested,
   "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
 }`;
-  const raw = await runModelChat(system, user, { maxTokens: 700, temperature: 0.2, json: true });
+  const raw = await runModelChat(system, user, { maxTokens: 700, temperature: 0.2, json: true, timeoutMs: 25000 });
   if (!raw) return null;
   try {
     const obj = extractJson(raw);
@@ -1794,8 +1799,16 @@ async function fetchSourceItems(source) {
 }
 
 async function runSourceScan({ force = false } = {}) {
-  if (sourceScanInFlight) return { skipped: true, reason: "scan already in flight" };
+  if (sourceScanInFlight) {
+    const held = Date.now() - sourceScanStartedAt;
+    if (held < SOURCE_SCAN_STALE_MS) {
+      return { skipped: true, reason: "scan already in flight" };
+    }
+    console.warn(`[source-scan] stale lock held ${Math.round(held / 1000)}s — superseding with a new scan`);
+  }
   sourceScanInFlight = true;
+  sourceScanStartedAt = Date.now();
+  console.log(`[source-scan] starting (force=${!!force})`);
   const startedAt = Date.now();
 
   try {
@@ -1952,6 +1965,8 @@ app.get("/api/regulatory-status", (req, res) => {
   res.json({
     success: true,
     monitoring: true,
+    scanning: sourceScanInFlight,
+    scanStartedAt: sourceScanInFlight ? sourceScanStartedAt : null,
     lastScanAt: sourceState.lastFullScan,
     pendingCount: pending.length,
     counts,
@@ -1963,13 +1978,11 @@ app.get("/api/regulatory-status", (req, res) => {
 // and return immediately. The client polls /api/proposed-changes separately.
 app.post("/api/source-scan", (req, res) => {
   const force = !!(req.body && req.body.force);
-  if (sourceScanInFlight) {
-    return res.json({ success: true, started: false, reason: "scan already in flight" });
-  }
-  runSourceScan({ force })
-    .then(result => console.log("[source-scan] completed:", JSON.stringify(result)))
+  const result = runSourceScan({ force });
+  result
+    .then(r => console.log("[source-scan] completed:", JSON.stringify(r)))
     .catch(err => console.warn("[source-scan] failed:", err.message));
-  res.json({ success: true, started: true });
+  res.json({ success: true, started: true, scanning: sourceScanInFlight });
 });
 
 // List pending proposed changes for the review panel.
