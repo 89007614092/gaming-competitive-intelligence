@@ -3158,17 +3158,35 @@ async function renderReviewPanel() {
       const k = reasonLabels[p.updateCategory] ? p.updateCategory : "new-development";
       (groups[k] = groups[k] || []).push(p);
     }
-    listEl.innerHTML = reasonOrder
-      .filter(k => groups[k] && groups[k].length)
-      .map(k => `
-        <div class="proposal-group">
+    const presentKeys = reasonOrder.filter(k => groups[k] && groups[k].length);
+    const navHtml = `
+      <nav class="proposal-nav" aria-label="Jump to update category">
+        <span class="proposal-nav-label">Jump to:</span>
+        ${presentKeys.map(k => `
+          <a class="proposal-nav-chip" data-jump="proposal-group-${k}" href="#proposal-group-${k}">
+            <span class="proposal-reason-pill proposal-reason-${k}">${reasonLabels[k]}</span>
+            <span class="proposal-nav-count">${groups[k].length}</span>
+          </a>`).join("")}
+      </nav>`;
+    listEl.innerHTML = navHtml + presentKeys.map(k => `
+        <div class="proposal-group" id="proposal-group-${k}">
           <div class="proposal-group-head">
             <span class="proposal-reason-pill proposal-reason-${k}">${reasonLabels[k]}</span>
             <span class="proposal-group-count">${groups[k].length}</span>
           </div>
           ${groups[k].map(cardHtml).join("")}
-        </div>`)
-      .join("");
+        </div>`).join("");
+    // Quick-nav: clicking a category chip smoothly scrolls to that group.
+    const nav = listEl.querySelector(".proposal-nav");
+    if (nav) {
+      nav.addEventListener("click", (e) => {
+        const a = e.target.closest("a[data-jump]");
+        if (!a) return;
+        e.preventDefault();
+        const target = document.getElementById(a.getAttribute("data-jump"));
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
   } catch (err) {
     listEl.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
   }

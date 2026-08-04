@@ -4063,7 +4063,7 @@ body {
 }
 .proposal-nopreview a { color: #b45309; font-weight: 600; }
 /* Grouping by "why suggested" category */
-.proposal-group { margin-bottom: 1.1rem; }
+.proposal-group { margin-bottom: 1.1rem; scroll-margin-top: 2.8rem; }
 .proposal-group-head {
   display: flex;
   align-items: center;
@@ -4072,9 +4072,9 @@ body {
   margin-bottom: 0.5rem;
   border-bottom: 1px solid #e2e8f0;
   position: sticky;
-  top: 0;
+  top: 2.8rem;
   background: #fff;
-  z-index: 1;
+  z-index: 2;
 }
 .proposal-group-count {
   font-size: 0.74rem;
@@ -4083,6 +4083,42 @@ body {
   background: #f1f5f9;
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
+}
+/* Quick-nav menu: category chips at the top of "Suggested Updates" */
+.proposal-nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.25rem;
+  margin-bottom: 0.6rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+}
+.proposal-nav-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin-right: 0.15rem;
+}
+.proposal-nav-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  text-decoration: none;
+  padding: 0.1rem 0.15rem;
+  border-radius: 999px;
+}
+.proposal-nav-chip:hover { background: #f1f5f9; }
+.proposal-nav-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
 }
 /* "Why suggested" reason pill (matches the category bucket) */
 .proposal-reason { display: flex; align-items: center; gap: 0.5rem; margin: 0.1rem 0 0.5rem; font-size: 0.8rem; color: #334155; }
