@@ -3024,6 +3024,27 @@ function setupReviewPanel() {
   if (listEl) listEl.addEventListener("click", async (e) => {
     const integrateBtn = e.target.closest("[data-integrate]");
     const dismissBtn = e.target.closest("[data-dismiss]");
+    const editToggle = e.target.closest("[data-edit-toggle]");
+    if (editToggle) {
+      const card = editToggle.closest(".proposal-card");
+      if (!card) return;
+      const textEl = card.querySelector(".proposal-summary-text");
+      const box = card.querySelector(".proposal-edit-box");
+      if (!box) return;
+      const editing = box.style.display !== "none";
+      if (editing) {
+        if (textEl) textEl.textContent = box.value;
+        box.style.display = "none";
+        if (textEl) textEl.style.display = "";
+        editToggle.textContent = "Edit summary";
+      } else {
+        if (textEl) textEl.style.display = "none";
+        box.style.display = "block";
+        box.focus();
+        editToggle.textContent = "Save";
+      }
+      return;
+    }
     if (dismissBtn) {
       const id = dismissBtn.dataset.dismiss;
       await fetch(`${API_BASE}/proposed-changes/${id}/dismiss`, { method: "POST" }).catch(() => {});
@@ -3095,21 +3116,29 @@ async function renderReviewPanel() {
     const matchHtml = (p) => p.matchedRecord
       ? `<div class="proposal-match">Matches: <strong>${escapeHtml(p.matchedRecord.title)}</strong> <span class="proposal-confidence">(${Math.round((p.matchConfidence || 0) * 100)}% overlap)</span></div>`
       : `<div class="proposal-match proposal-match-new">Not currently in the app — a new topic.</div>`;
+    // The AI-generated, app-style summary is the primary preview. Editing is
+    // opt-in: a hidden textarea (pre-filled with the summary) is revealed only
+    // when the user clicks "Edit summary", so the default view prioritises the
+    // AI summary without an always-on editable box. The hidden box is kept in
+    // the DOM so the existing Integrate handler reads the (edited) summary.
+    const summaryText = (p) => p.styledSummary || p.preview || p.suggestedEdit || "";
     const previewHtml = (p) => {
-      const styled = p.styledSummary;
+      const summary = summaryText(p);
+      if (!summary) {
+        return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
+      }
       const raw = p.preview;
-      if (styled) {
-        return `<div class="proposal-preview-label">Proposed entry (in app style):</div>
-          <div class="proposal-preview">${escapeHtml(styled)}</div>
-          ${raw && raw !== styled ? `<details class="proposal-source-details"><summary>Original source excerpt</summary><div class="proposal-preview proposal-preview-raw">${escapeHtml(raw)}</div></details>` : ""}
-          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}`;
-      }
-      if (raw) {
-        return `<div class="proposal-preview-label">What this would add (from the source):</div>
-          <div class="proposal-preview">${escapeHtml(raw)}</div>
-          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}`;
-      }
-      return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
+      return `
+        <div class="proposal-summary-block">
+          <div class="proposal-preview-label">Proposed entry (AI-generated, in app style):</div>
+          <div class="proposal-preview proposal-summary-text">${escapeHtml(summary)}</div>
+          <div class="proposal-edit-row">
+            <button class="btn btn-sm proposal-edit-toggle" data-edit-toggle type="button">Edit summary</button>
+          </div>
+          <textarea class="proposal-edit-box text-input" rows="4" style="display:none">${escapeHtml(summary)}</textarea>
+          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
+          ${p.styledSummary && raw && raw !== p.styledSummary ? `<details class="proposal-source-details"><summary>Original source excerpt</summary><div class="proposal-preview proposal-preview-raw">${escapeHtml(raw)}</div></details>` : ""}
+        </div>`;
     };
     const cardHtml = (p) => {
       const targetDefault = p.targetDataset
@@ -3131,8 +3160,6 @@ async function renderReviewPanel() {
         ${matchHtml(p)}
         ${p.updateReason ? `<div class="proposal-reason"><span class="proposal-reason-pill proposal-reason-${reasonKey}">${reasonLabels[reasonKey]}</span> ${escapeHtml(p.updateReason)}</div>` : ""}
         ${previewHtml(p)}
-        <label class="proposal-field">Suggested integration (editable before you approve):</label>
-        <textarea class="proposal-edit-box text-input" rows="4">${escapeHtml(p.suggestedEdit || "")}</textarea>
         <div class="proposal-controls">
           <label class="proposal-field">Add to:
             <select class="proposal-target text-input">

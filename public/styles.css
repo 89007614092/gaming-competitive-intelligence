@@ -4120,6 +4120,10 @@ body {
   font-weight: 700;
   color: #64748b;
 }
+/* Opt-in "Edit summary" toggle — keeps the AI summary as the default view */
+.proposal-summary-block { margin: 0.2rem 0 0.5rem; }
+.proposal-edit-row { margin: 0.4rem 0; }
+.proposal-edit-box { margin-top: 0.4rem; }
 /* "Why suggested" reason pill (matches the category bucket) */
 .proposal-reason { display: flex; align-items: center; gap: 0.5rem; margin: 0.1rem 0 0.5rem; font-size: 0.8rem; color: #334155; }
 .proposal-reason-pill {
