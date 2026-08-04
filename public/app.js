@@ -3127,7 +3127,6 @@ async function renderReviewPanel() {
       if (!summary) {
         return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
       }
-      const raw = p.preview;
       return `
         <div class="proposal-summary-block">
           <div class="proposal-preview-label">Proposed entry (AI-generated, in app style):</div>
@@ -3137,7 +3136,6 @@ async function renderReviewPanel() {
           </div>
           <textarea class="proposal-edit-box text-input" rows="4" style="display:none">${escapeHtml(summary)}</textarea>
           ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
-          ${p.styledSummary && raw && raw !== p.styledSummary ? `<details class="proposal-source-details"><summary>Original source excerpt</summary><div class="proposal-preview proposal-preview-raw">${escapeHtml(raw)}</div></details>` : ""}
         </div>`;
     };
     const cardHtml = (p) => {

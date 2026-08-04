@@ -1850,9 +1850,12 @@ async function runSourceScan({ force = false } = {}) {
       if (prop.status !== "pending") continue;
       const hasPreview = prop.preview && prop.preview.length;
       const hasReason = prop.updateCategory && UPDATE_REASON_LABELS[prop.updateCategory];
-      // Skip only when fully enriched (preview + model reason). Otherwise it may
-      // still need a resolver fetch or the model categorisation/summary pass.
-      if (hasPreview && hasReason) continue;
+      const hasStyled = prop.styledSummary && prop.styledSummary.length;
+      // Skip only when FULLY enriched: preview + model reason + a styled summary.
+      // A proposal that got a heuristic category but no styledSummary (e.g. the
+      // model was offline on its first scan) must be retried so it can later
+      // receive the AI "Proposed Entry" summary once the model key is available.
+      if (hasPreview && hasReason && hasStyled) continue;
       if (prop.lastPreviewAttempt) {
         const since = Date.now() - new Date(prop.lastPreviewAttempt).getTime();
         if (since < RETRY_COOLDOWN_MS) continue;
