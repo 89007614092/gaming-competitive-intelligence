@@ -1970,6 +1970,12 @@ app.get("/api/regulatory-status", (req, res) => {
     lastScanAt: sourceState.lastFullScan,
     pendingCount: pending.length,
     counts,
+    model: {
+      enabled: isModelReady(),
+      keyLoaded: !!process.env.OPEN_MODEL_API_KEY,
+      name: DEFAULT_MODEL,
+      baseUrl: (process.env.OPEN_MODEL_BASE_URL || "https://api.groq.com/openai/v1"),
+    },
   });
 });
 

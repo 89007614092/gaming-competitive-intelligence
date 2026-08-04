@@ -321,7 +321,8 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
         }
         const j = await resp.json().catch(() => null);
         return j?.choices?.[0]?.message?.content?.trim() || null;
-      } catch {
+      } catch (err) {
+        console.error(`[model] chat completion request failed: ${err && err.message ? err.message : err}`);
         return null;
       } finally {
         clearTimeout(timeout);
