@@ -12,6 +12,8 @@ const {
   buildExtractiveAnswer,
   warmUpModel,
   isModelReady,
+  isModelRateLimited,
+  getModelRateLimitedUntil,
 } = require("./summarise-engine");
 
 const app = express();
@@ -1388,7 +1390,10 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
       const hit = (await jinaSearch(`${title}${domain ? ` site:${domain}` : ""}`, 5))[0];
       if (hit && hit.url) return cacheAndReturn(hit.url);
     } catch (e) {
-      console.warn("[resolve] Jina failed, falling back to DDG/GDELT:", e.message);
+      // HTTP 401/402 from Jina's search endpoint are expected on a keyless/free
+      // key (search is a paid feature) — resolution falls back to DDG/GDELT, so
+      // stay quiet. Only log genuine failures (timeouts, 5xx).
+      if (!/HTTP 40[12]/.test(e.message)) console.warn("[resolve] Jina failed, falling back to DDG/GDELT:", e.message);
     }
   }
   // One DuckDuckGo attempt, serialized + paced + rotating UA. Returns the decoded
@@ -1651,7 +1656,8 @@ Return ONLY valid JSON:
   "updateReason": one short sentence (max 20 words) explaining why this is suggested,
   "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
 }`;
-  const raw = await runModelChat(system, user, { maxTokens: 700, temperature: 0.2, json: true, timeoutMs: 25000 });
+  const raw = await runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000 });
+  if (raw && raw.rateLimited) return { rateLimited: true };
   if (!raw) return null;
   try {
     const obj = extractJson(raw);
@@ -1892,6 +1898,9 @@ async function runSourceScan({ force = false } = {}) {
       // model was offline on its first scan) must be retried so it can later
       // receive the AI "Proposed Entry" summary once the model key is available.
       if (hasPreview && hasReason && hasStyled) continue;
+      // Skip proposals still inside a model rate-limit cooldown — re-calling the
+      // model now would just 429 again and burn the daily token quota.
+      if (prop.enrichCooldownUntil && Date.now() < new Date(prop.enrichCooldownUntil).getTime()) continue;
       if (prop.lastPreviewAttempt) {
         const since = Date.now() - new Date(prop.lastPreviewAttempt).getTime();
         if (since < RETRY_COOLDOWN_MS) continue;
@@ -1901,6 +1910,11 @@ async function runSourceScan({ force = false } = {}) {
     }
 
     if (toEnrich.length) {
+      // If the model is already rate-limited we skip model calls for the WHOLE
+      // batch and degrade to the heuristic reason, so a single 429 doesn't
+      // trigger 20 more doomed calls that burn the rest of the daily quota.
+      const modelBlocked = isModelRateLimited();
+      if (modelBlocked) console.warn(`[source-scan] model rate-limited — ${toEnrich.length} proposals will use heuristic reason only this scan`);
       await mapWithConcurrency(toEnrich, 2, async (prop) => {
         let preview = null;
         try { preview = await fetchArticlePreview(prop, { domain: prop.sourceDomain }); } catch { /* best effort */ }
@@ -1915,11 +1929,18 @@ async function runSourceScan({ force = false } = {}) {
         }
         // Combined enrichment: model-based "why suggested" category + reason +
         // a house-style rewrite of the source excerpt. Falls back to the
-        // deterministic heuristic when the model is unavailable or errors.
+        // deterministic heuristic when the model is unavailable or rate-limited.
         const baseText = preview || stripHtml(prop.snippet || prop.description || "");
         let enriched = null;
-        if (baseText) {
+        if (baseText && !modelBlocked && !isModelRateLimited()) {
           try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
+        }
+        if (enriched && enriched.rateLimited) {
+          // Model hit a rate limit on this call — record a cooldown so this
+          // proposal (and the rest of the batch, via modelBlocked) falls back to
+          // heuristic until the quota recovers, instead of re-calling each scan.
+          prop.enrichCooldownUntil = getModelRateLimitedUntil();
+          enriched = heuristicReason(prop);
         }
         if (!enriched) {
           // Don't clobber a previously enriched proposal if the model just

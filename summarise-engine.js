@@ -7,7 +7,10 @@ const path = require("path");
 // free-tier RAM and caused cold-start "warming up" failures, so we call a hosted
 // open-weight model instead. The Render instance stays tiny and the same
 // inline-citation prompt runs on a far larger model than could ever fit locally.
-const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "llama-3.3-70b-versatile";
+// Default to the 8B "instant" model: on Groq's free tier it carries a 500K
+// tokens/day cap (vs 100K for llama-3.3-70b), which is what this app's
+// background enrichment + Q&A workload needs. Override with OPEN_MODEL_NAME.
+const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "llama-3.1-8b-instant";
 const OPEN_MODEL_API_KEY = process.env.OPEN_MODEL_API_KEY || "";
 const OPEN_MODEL_BASE_URL = (process.env.OPEN_MODEL_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
 const MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
@@ -26,6 +29,8 @@ const OMIT_KEYS = new Set([
 
 let corpusCache = null;
 let generationQueue = Promise.resolve();
+// Epoch-ms timestamp until which model calls are paused due to a rate limit.
+let modelRateLimitedUntil = 0;
 
 function readJson(fileName) {
   return JSON.parse(fs.readFileSync(path.join(DATA_DIR, fileName), "utf8"));
@@ -316,6 +321,25 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
         });
         if (!resp.ok) {
           const txt = await resp.text().catch(() => "");
+          if (resp.status === 429) {
+            const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
+            let cooldownMs;
+            if (Number.isFinite(retryAfter) && retryAfter > 0) {
+              cooldownMs = retryAfter * 1000;
+            } else if (/per day|TPD/i.test(txt)) {
+              // Daily token quota exhausted — wait until just after midnight PT
+              // (Groq resets free-tier TPD at midnight Pacific).
+              const nowPt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+              nowPt.setHours(24, 5, 0, 0);
+              cooldownMs = nowPt.getTime() - Date.now();
+              if (cooldownMs < 0) cooldownMs += 24 * 3600 * 1000;
+            } else {
+              cooldownMs = 60 * 60 * 1000;
+            }
+            modelRateLimitedUntil = Date.now() + cooldownMs;
+            console.warn(`[model] rate limited (HTTP 429) — model calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(modelRateLimitedUntil).toISOString()}`);
+            return { rateLimited: true };
+          }
           console.error(`[model] chat completion HTTP ${resp.status}: ${txt.slice(0, 200)}`);
           return null;
         }
@@ -343,6 +367,11 @@ function warmUpModel() {
 function isModelReady() {
   return !MODEL_DISABLED;
 }
+
+// Rate-limit tracking so callers can avoid re-hammering the API on every scan
+// and burning the daily token quota. Set when runModelChat sees HTTP 429.
+function getModelRateLimitedUntil() { return modelRateLimitedUntil; }
+function isModelRateLimited() { return Date.now() < modelRateLimitedUntil; }
 
 function truncate(text, n) {
   const t = String(text || "").trim();
@@ -399,4 +428,6 @@ module.exports = {
   buildExtractiveAnswer,
   warmUpModel,
   isModelReady,
+  isModelRateLimited,
+  getModelRateLimitedUntil,
 };
