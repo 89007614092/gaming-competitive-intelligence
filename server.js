@@ -1565,6 +1565,29 @@ function stripFences(s) {
   return t;
 }
 
+// Robust JSON extraction for model output. Tries, in order: the raw string, a
+// fenced block (``` or ```json ... ```), and finally the outermost {...} span so
+// that prose such as "Here is the JSON:" before/after the object does not break
+// parsing. Returns the parsed object, or undefined on total failure.
+function extractJson(s) {
+  const t = String(s || "").trim();
+  const tryParse = (str) => {
+    try { return JSON.parse(str); } catch { return undefined; }
+  };
+  let obj = tryParse(t);
+  if (obj && typeof obj === "object") return obj;
+  const fenced = t.replace(/^```[a-zA-Z]*\n?/, "").replace(/```\s*$/, "").trim();
+  obj = tryParse(fenced);
+  if (obj && typeof obj === "object") return obj;
+  const first = t.indexOf("{");
+  const last = t.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    obj = tryParse(t.slice(first, last + 1));
+    if (obj && typeof obj === "object") return obj;
+  }
+  return undefined;
+}
+
 // Look up the curated content of an existing matched record so the model can
 // frame a rewrite as a DELTA against what the app already says.
 function existingRecordContent(matched) {
@@ -1626,7 +1649,7 @@ Return ONLY valid JSON:
   const raw = await runModelChat(system, user, { maxTokens: 700, temperature: 0.2, json: true });
   if (!raw) return null;
   try {
-    const obj = JSON.parse(stripFences(raw));
+    const obj = extractJson(raw);
     if (!obj || typeof obj.styledSummary !== "string" || !obj.styledSummary.trim()) return null;
     return {
       updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
@@ -1887,8 +1910,11 @@ async function runSourceScan({ force = false } = {}) {
         }
         if (!enriched) {
           // Don't clobber a previously enriched proposal if the model just
-          // hiccuped — keep its existing styled summary / reason.
-          if (prop.styledSummary || prop.updateCategory) return;
+          // hiccuped — keep its existing styled summary. But if it still lacks a
+          // styled summary (only a heuristic category from an earlier failed
+          // model call), do NOT skip: let the model path above retry, or fall
+          // back to the heuristic reason so the proposal can be completed.
+          if (prop.styledSummary) return;
           enriched = heuristicReason(prop);
         }
         prop.updateCategory = enriched.updateCategory;

@@ -314,7 +314,11 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
           body: JSON.stringify({ model: DEFAULT_MODEL, messages, max_tokens: maxTokens, temperature }),
           signal: controller.signal,
         });
-        if (!resp.ok) return null;
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => "");
+          console.error(`[model] chat completion HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+          return null;
+        }
         const j = await resp.json().catch(() => null);
         return j?.choices?.[0]?.message?.content?.trim() || null;
       } catch {
