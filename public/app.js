@@ -3172,7 +3172,6 @@ async function renderReviewPanel() {
           <button class="btn btn-sm btn-primary" data-integrate="${p.id}" type="button">Integrate</button>
           <button class="btn btn-sm" data-dismiss="${p.id}" type="button">Dismiss</button>
         </div>
-        <a class="proposal-link" href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">View official source →</a>
       </div>`;
     };
     // Group proposals by their "why suggested" category so the user can scan and
