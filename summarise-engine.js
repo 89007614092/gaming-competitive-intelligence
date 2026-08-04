@@ -291,6 +291,42 @@ function generateOpenSourceAnswer(question, evidence) {
   return task;
 }
 
+// Generic chat-completions call used by background enrichment (proposed-changes
+// styling + categorisation). Returns the model text, or null when the model is
+// disabled or the request fails — callers must degrade gracefully. Routed
+// through the shared generationQueue so we never open two concurrent API
+// requests at once (keeps host rate limits happy).
+async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, temperature = 0.2, json = false } = {}) {
+  if (MODEL_DISABLED) return null;
+  const messages = [
+    { role: "system", content: json ? `${systemPrompt}\nRespond with ONLY valid JSON, no prose, no markdown code fences.` : systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
+  const task = generationQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      try {
+        const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${OPEN_MODEL_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: DEFAULT_MODEL, messages, max_tokens: maxTokens, temperature }),
+          signal: controller.signal,
+        });
+        if (!resp.ok) return null;
+        const j = await resp.json().catch(() => null);
+        return j?.choices?.[0]?.message?.content?.trim() || null;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
+  generationQueue = task.catch(() => undefined);
+  return task;
+}
+
 // Pre-load hook. For an API-backed model there is nothing to preload, so this
 // simply reports whether the model is configured. Never throws.
 function warmUpModel() {
@@ -354,6 +390,7 @@ module.exports = {
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
+  runModelChat,
   buildExtractiveAnswer,
   warmUpModel,
   isModelReady,

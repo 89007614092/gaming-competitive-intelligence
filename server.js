@@ -8,6 +8,7 @@ const {
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
+  runModelChat,
   buildExtractiveAnswer,
   warmUpModel,
   isModelReady,
@@ -1324,6 +1325,25 @@ const CATEGORY_LABELS = {
   "current-game-ai": "Current Game AI",
 };
 const NAMED_MODEL = /\b(gpt-?[345]\b|claude|gemini|llama|kimi|qwen|mistral|grok|deepseek|ernie|yi-|phi-|mixtral|o[13]\b|gpt4|gpt5)\b/;
+
+// ---- Proposed-change "why suggested" taxonomy. This is intentionally SEPARATE
+// from detectedAction (which describes the integration action: update/deadline/
+// correction/new). These buckets answer WHY an update is proposed so the user
+// can group/skim them and compare each one against the existing app entry.
+const UPDATE_REASON_KEYS = ["information-outdated", "additional-information", "new-case-study", "new-deadline", "new-development"];
+const UPDATE_REASON_LABELS = {
+  "information-outdated": "Information Outdated",
+  "additional-information": "Additional Information",
+  "new-case-study": "New Case Study",
+  "new-deadline": "New Deadline",
+  "new-development": "New Development",
+};
+// Few-shot anchors so the model's rewrite matches the app's house style (formal,
+// neutral, evidential, concrete figures/dates). These facts are illustrative
+// only — the model must use the supplied excerpt, never these examples.
+const STYLE_EXAMPLES = `Example entries (match the register only, do NOT reuse these facts):
+"On 23 July 2026, the European Commission fined Google (Alphabet) €890 million under the Digital Markets Act: €460M for self-preferencing in Search, €430M for anti-steering on Google Play. This signals the enforcement posture organisations should anticipate as AI obligations become operational."
+"Unlike the EU's single horizontal AI law, the UK relies on five principles implemented through existing regulators (ICO, Ofcom, CMA, FCA), creating a dual compliance burden for multinationals."`;
 function detectKnowledgeCategory(text, sourceCategory) {
   const t = String(text || "").toLowerCase();
   const caseStudy = /\b(assessment|evaluation|preliminary assessment|benchmark|capabilit|cyber capab|red[ -]?team|model card|safety (case|test)|case study|proliferation|frontier model)\b/;
@@ -1538,6 +1558,86 @@ function draftNewRecord(item, publisher, label, categoryKey, preview) {
   return `Add as new ${catLabel} — "${item.title}".\n\n${body}\n\n${cite} Verify details against the official source before relying on this entry.`;
 }
 
+// Strip ```json ... ``` fences the model sometimes wraps around JSON output.
+function stripFences(s) {
+  const t = String(s || "").trim();
+  if (t.startsWith("```")) return t.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
+  return t;
+}
+
+// Look up the curated content of an existing matched record so the model can
+// frame a rewrite as a DELTA against what the app already says.
+function existingRecordContent(matched) {
+  if (!matched || !matched.dataset) return "";
+  try {
+    if (matched.dataset === "timeline") {
+      const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8"));
+      const ev = (data.events || []).find(e => e.title === matched.title);
+      return ev ? ev.description || "" : "";
+    }
+    if (matched.dataset === "use-cases") {
+      const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8"));
+      const p = (data.patterns || []).find(p => p.title === matched.title);
+      return p ? p.content || "" : "";
+    }
+    if (matched.dataset === "knowledge") {
+      const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "knowledge.json"), "utf8"));
+      for (const cat of Object.values(data.categories || {})) {
+        const sub = (cat.subsections || []).find(s => s.title === matched.title);
+        if (sub) return sub.content || "";
+      }
+    }
+  } catch { /* best effort */ }
+  return "";
+}
+
+// Deterministic fallback when the model is unavailable: map the already-known
+// detectedAction / target category onto a "why suggested" bucket.
+function heuristicReason(prop) {
+  if (prop.detectedAction === "deadline") return { updateCategory: "new-deadline", updateReason: "Adds a new compliance deadline." };
+  if (prop.detectedAction === "correction") return { updateCategory: "information-outdated", updateReason: "Appears to correct or supersede an existing position." };
+  if (prop.detectedAction === "update") return { updateCategory: "additional-information", updateReason: "Adds detail to an existing entry." };
+  // detectedAction === "new"
+  if (prop.targetCategory === "case-studies") return { updateCategory: "new-case-study", updateReason: "New assessment or case study from a regulator/academic source." };
+  return { updateCategory: "new-development", updateReason: "New AI regulation or policy development." };
+}
+
+// Combined enrichment: ask the model to (a) classify why this is suggested and
+// (b) rewrite the raw source excerpt into the app's house style. For updates we
+// pass the existing entry so the rewrite reads as a delta. Returns null on any
+// failure so the caller falls back to heuristicReason + the raw excerpt.
+async function enrichWithModel(prop, excerpt) {
+  const text = (excerpt || stripHtml(prop.snippet || prop.description || "")).trim();
+  if (!text) return null;
+  const existing = prop.matchedRecord
+    ? `EXISTING APP ENTRY (title: ${prop.matchedRecord.title}):\n${existingRecordContent(prop.matchedRecord).slice(0, 700) || "(content unavailable)"}\n\n`
+    : "";
+  const system = `You rewrite AI-regulation/policy news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-3 sentences; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}`;
+  const user = `Classify why this update is proposed and rewrite the source excerpt into ONE knowledge-base entry in house style.${existing}
+NEW SOURCE (${prop.publisher || "unknown"}): ${prop.title}
+${text}
+
+Return ONLY valid JSON:
+{
+  "updateCategory": one of "information-outdated" | "additional-information" | "new-case-study" | "new-deadline" | "new-development",
+  "updateReason": one short sentence (max 20 words) explaining why this is suggested,
+  "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
+}`;
+  const raw = await runModelChat(system, user, { maxTokens: 700, temperature: 0.2, json: true });
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(stripFences(raw));
+    if (!obj || typeof obj.styledSummary !== "string" || !obj.styledSummary.trim()) return null;
+    return {
+      updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
+      updateReason: String(obj.updateReason || "").slice(0, 240),
+      styledSummary: obj.styledSummary.slice(0, 600).trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Classify a fetched item: English-only, compared to existing content, and either
 // dropped (duplicate/non-English) or returned as a proposed change.
 function classifyItem(source, item, index) {
@@ -1748,7 +1848,11 @@ async function runSourceScan({ force = false } = {}) {
       if (retryAdded >= RETRY_CAP) break;
       if (newIds.has(prop.id)) continue; // already covered by the newProps pass
       if (prop.status !== "pending") continue;
-      if (prop.preview && prop.preview.length) continue;
+      const hasPreview = prop.preview && prop.preview.length;
+      const hasReason = prop.updateCategory && UPDATE_REASON_LABELS[prop.updateCategory];
+      // Skip only when fully enriched (preview + model reason). Otherwise it may
+      // still need a resolver fetch or the model categorisation/summary pass.
+      if (hasPreview && hasReason) continue;
       if (prop.lastPreviewAttempt) {
         const since = Date.now() - new Date(prop.lastPreviewAttempt).getTime();
         if (since < RETRY_COOLDOWN_MS) continue;
@@ -1770,9 +1874,27 @@ async function runSourceScan({ force = false } = {}) {
             prop.targetCategory = detectKnowledgeCategory(`${prop.title} ${preview}`, prop.category);
           }
         }
+        // Combined enrichment: model-based "why suggested" category + reason +
+        // a house-style rewrite of the source excerpt. Falls back to the
+        // deterministic heuristic when the model is unavailable or errors.
+        const baseText = preview || stripHtml(prop.snippet || prop.description || "");
+        let enriched = null;
+        if (baseText) {
+          try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
+        }
+        if (!enriched) {
+          // Don't clobber a previously enriched proposal if the model just
+          // hiccuped — keep its existing styled summary / reason.
+          if (prop.styledSummary || prop.updateCategory) return;
+          enriched = heuristicReason(prop);
+        }
+        prop.updateCategory = enriched.updateCategory;
+        prop.updateReason = enriched.updateReason;
+        prop.styledSummary = enriched.styledSummary || null;
+        const styled = enriched.styledSummary || baseText;
         prop.suggestedEdit = prop.detectedAction === "new"
-          ? draftNewRecord(prop, prop.publisher, prop.publishedLabel, prop.targetCategory, preview || "")
-          : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, preview || "");
+          ? draftNewRecord(prop, prop.publisher, prop.publishedLabel, prop.targetCategory, styled)
+          : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, styled);
       });
     }
 

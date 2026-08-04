@@ -3084,7 +3084,34 @@ async function renderReviewPanel() {
       correction: "Corrects / supersedes",
       new: "New topic",
     };
-    listEl.innerHTML = items.map(p => {
+    const reasonLabels = {
+      "information-outdated": "Information Outdated",
+      "additional-information": "Additional Information",
+      "new-case-study": "New Case Study",
+      "new-deadline": "New Deadline",
+      "new-development": "New Development",
+    };
+    const reasonOrder = ["information-outdated", "additional-information", "new-case-study", "new-deadline", "new-development"];
+    const matchHtml = (p) => p.matchedRecord
+      ? `<div class="proposal-match">Matches: <strong>${escapeHtml(p.matchedRecord.title)}</strong> <span class="proposal-confidence">(${Math.round((p.matchConfidence || 0) * 100)}% overlap)</span></div>`
+      : `<div class="proposal-match proposal-match-new">Not currently in the app — a new topic.</div>`;
+    const previewHtml = (p) => {
+      const styled = p.styledSummary;
+      const raw = p.preview;
+      if (styled) {
+        return `<div class="proposal-preview-label">Proposed entry (in app style):</div>
+          <div class="proposal-preview">${escapeHtml(styled)}</div>
+          ${raw && raw !== styled ? `<details class="proposal-source-details"><summary>Original source excerpt</summary><div class="proposal-preview proposal-preview-raw">${escapeHtml(raw)}</div></details>` : ""}
+          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}`;
+      }
+      if (raw) {
+        return `<div class="proposal-preview-label">What this would add (from the source):</div>
+          <div class="proposal-preview">${escapeHtml(raw)}</div>
+          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}`;
+      }
+      return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
+    };
+    const cardHtml = (p) => {
       const targetDefault = p.targetDataset
         || (p.matchedRecord ? p.matchedRecord.dataset
            : (p.category === "use-case" ? "use-cases"
@@ -3092,6 +3119,7 @@ async function renderReviewPanel() {
               : "knowledge"));
       const showCatKey = targetDefault === "knowledge";
       const catKey = p.targetCategory || "regulations";
+      const reasonKey = reasonLabels[p.updateCategory] ? p.updateCategory : "new-development";
       return `
       <div class="proposal-card" data-id="${p.id}">
         <div class="proposal-head">
@@ -3100,14 +3128,9 @@ async function renderReviewPanel() {
           <span class="proposal-date">${escapeHtml(p.publishedLabel || "")}</span>
         </div>
         <div class="proposal-title">${escapeHtml(p.title)}</div>
-        ${p.matchedRecord
-          ? `<div class="proposal-match">Matches: <strong>${escapeHtml(p.matchedRecord.title)}</strong> <span class="proposal-confidence">(${Math.round((p.matchConfidence || 0) * 100)}% overlap)</span></div>`
-          : `<div class="proposal-match proposal-match-new">Not currently in the app — a new topic.</div>`}
-        ${p.preview
-          ? `<div class="proposal-preview-label">What this would add (from the source):</div>
-             <div class="proposal-preview">${escapeHtml(p.preview)}</div>
-             ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}`
-          : `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`}
+        ${matchHtml(p)}
+        ${p.updateReason ? `<div class="proposal-reason"><span class="proposal-reason-pill proposal-reason-${reasonKey}">${reasonLabels[reasonKey]}</span> ${escapeHtml(p.updateReason)}</div>` : ""}
+        ${previewHtml(p)}
         <label class="proposal-field">Suggested integration (editable before you approve):</label>
         <textarea class="proposal-edit-box text-input" rows="4">${escapeHtml(p.suggestedEdit || "")}</textarea>
         <div class="proposal-controls">
@@ -3126,7 +3149,26 @@ async function renderReviewPanel() {
         </div>
         <a class="proposal-link" href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">View official source →</a>
       </div>`;
-    }).join("");
+    };
+    // Group proposals by their "why suggested" category so the user can scan and
+    // compare updates of the same kind together (Information Outdated, Additional
+    // Information, New Case Study, ...).
+    const groups = {};
+    for (const p of items) {
+      const k = reasonLabels[p.updateCategory] ? p.updateCategory : "new-development";
+      (groups[k] = groups[k] || []).push(p);
+    }
+    listEl.innerHTML = reasonOrder
+      .filter(k => groups[k] && groups[k].length)
+      .map(k => `
+        <div class="proposal-group">
+          <div class="proposal-group-head">
+            <span class="proposal-reason-pill proposal-reason-${k}">${reasonLabels[k]}</span>
+            <span class="proposal-group-count">${groups[k].length}</span>
+          </div>
+          ${groups[k].map(cardHtml).join("")}
+        </div>`)
+      .join("");
   } catch (err) {
     listEl.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
   }

@@ -4062,6 +4062,47 @@ body {
   margin-bottom: 0.7rem;
 }
 .proposal-nopreview a { color: #b45309; font-weight: 600; }
+/* Grouping by "why suggested" category */
+.proposal-group { margin-bottom: 1.1rem; }
+.proposal-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.2rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+.proposal-group-count {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+/* "Why suggested" reason pill (matches the category bucket) */
+.proposal-reason { display: flex; align-items: center; gap: 0.5rem; margin: 0.1rem 0 0.5rem; font-size: 0.8rem; color: #334155; }
+.proposal-reason-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.proposal-reason-information-outdated { background: #fee2e2; color: #b91c1c; }
+.proposal-reason-additional-information { background: #dbeafe; color: #1d4ed8; }
+.proposal-reason-new-case-study { background: #ede9fe; color: #6d28d9; }
+.proposal-reason-new-deadline { background: #fef3c7; color: #b45309; }
+.proposal-reason-new-development { background: #dcfce7; color: #15803d; }
+/* Original-source excerpt disclosed under the styled summary */
+.proposal-source-details { margin: 0 0 0.5rem; font-size: 0.78rem; }
+.proposal-source-details summary { cursor: pointer; color: #2563eb; font-weight: 600; }
+.proposal-preview-raw { background: #f8fafc; border-color: #e2e8f0; border-left-color: #cbd5e1; color: #475569; font-style: italic; }
 .proposal-field { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-muted, #475569); margin-bottom: 0.25rem; }
 .proposal-edit-box {
   width: 100%;
