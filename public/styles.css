@@ -1454,6 +1454,15 @@ body {
   white-space: nowrap;
 }
 
+.summary-result-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  text-align: right;
+}
+.summary-print-btn { white-space: nowrap; }
+
 .summary-answer {
   padding: 1.3rem 0;
   color: var(--text);
@@ -4183,4 +4192,39 @@ body {
   letter-spacing: 0.04em;
   vertical-align: middle;
   text-transform: uppercase;
+}
+
+/* ===== Print / Save-as-PDF for the Q&A answer ===== */
+@media print {
+  html, body { background: #fff !important; }
+  #summarise-view { display: block !important; }
+  /* Hide the entire app chrome, then reveal only the answer subtree */
+  body * { visibility: hidden !important; }
+  #summaryResult, #summaryResult * {
+    visibility: visible !important;
+    color: #000 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+  #summaryResult {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  #summaryPrintBtn { display: none !important; }
+  .summary-result-header { border-color: #ccc !important; }
+  #summaryResult .ans-cite {
+    background: #eee !important;
+    color: #000 !important;
+    border: 1px solid #ccc !important;
+  }
+  #summaryResult .summary-answer a {
+    color: #000 !important;
+    text-decoration: underline !important;
+  }
 }

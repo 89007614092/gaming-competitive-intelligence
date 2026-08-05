@@ -151,6 +151,9 @@ function setupQA() {
     }
   });
 
+  const printBtn = document.getElementById("summaryPrintBtn");
+  if (printBtn) printBtn.addEventListener("click", () => window.print());
+
   document.querySelectorAll(".summary-suggestion").forEach(button => {
     button.addEventListener("click", () => {
       input.value = button.textContent.trim();
