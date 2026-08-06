@@ -378,45 +378,126 @@ function truncate(text, n) {
   return t.length > n ? `${t.slice(0, n - 1).trim()}…` : t;
 }
 
-// Build a detailed, comprehensive answer assembled directly from the retrieved
-// evidence, with each claim tagged by its source ID inline (e.g. [A3]). Evidence
-// is grouped by dataset so the response reads as a structured briefing rather
-// than a flat bullet list, and every claim carries its citation in-line.
+// Local, dependency-free relevance scorer used by the extractive Key Points
+// section. Ranks a sentence by overlap with the question plus a small
+// risk/action keyword boost (mirroring the scoring inside relevantExcerpt), so
+// the model-free fallback can surface the most on-topic sentences. Short
+// takeaways are gently preferred to keep Key Points punchy.
+function scoreSentence(sentence, questionWords) {
+  const matched = words(sentence).filter(word => questionWords.has(word)).length * 3;
+  const riskBoost = /\b(?:risk|exposure|liability|compliance|copyright|privacy|transparency|moderation|requires?|creates?|faces?|enables?|allows?)\b/i.test(sentence) ? 4 : 0;
+  const lengthPenalty = sentence.length > 240 ? 2 : 0;
+  return matched + riskBoost - lengthPenalty;
+}
+
+// Build a structured, Markdown 3-part answer (Detailed Answer / Key Points /
+// Conclusion) directly from the retrieved evidence, with every claim tagged by
+// its source ID inline. It mirrors the Markdown structure the AI model path
+// emits, so the same renderer and "Answer style" selector work with no model
+// loaded. Nothing is synthesised or invented:
+//   - Detailed Answer  = the retrieved evidence, grouped and cited (app A* vs
+//     web W* kept distinguishable), exactly as the AI prompt frames the two.
+//   - Key Points       = the most question-relevant extracted sentences, chosen
+//     by a local scorer (real extractive summarisation, no API).
+//   - Conclusion       = a metadata-driven coverage note (counts, source types,
+//     recency) that uses the same calibrated thin/no-evidence phrasing.
 function buildExtractiveAnswer(question, evidence) {
   const usable = evidence.filter(item => (item.excerpt || item.text || "").length >= 40);
   if (!usable.length) {
-    return "No sufficiently relevant evidence was found in the application data for that question. Try rephrasing, or enable internet search for broader coverage.";
+    return "## Conclusion\nNo sufficiently relevant evidence was found in the application data for that question. Try rephrasing, or enable internet search for broader coverage.";
   }
 
-  const groups = [];
-  const byDataset = new Map();
-  for (const item of usable) {
-    if (!byDataset.has(item.dataset)) {
-      const arr = [];
-      byDataset.set(item.dataset, arr);
-      groups.push({ dataset: item.dataset, items: arr });
-    }
-    byDataset.get(item.dataset).push(item);
-  }
+  const appItems = usable.filter(item => item.sourceType !== "internet");
+  const webItems = usable.filter(item => item.sourceType === "internet");
+  const questionWords = new Set(words(question));
 
-  const blocks = [
-    `Here is a detailed answer to "${truncate(question, 160)}", drawn from the application's curated evidence:`,
+  // --- Detailed Answer: grouped, cited evidence (app vs web) ---
+  const detailedLines = [
+    `Here is what the curated evidence shows for "${truncate(question, 160)}":`,
   ];
-
-  for (const group of groups) {
-    blocks.push(`\n■ ${group.dataset}`);
-    for (const item of group.items) {
+  if (appItems.length) {
+    detailedLines.push("\n**Application evidence**");
+    for (const item of appItems) {
       const excerpt = relevantExcerpt(item, question, 3, 900, item.title);
       if (!excerpt) continue;
       const label = item.section ? `${item.title} (${item.section})` : item.title;
-      blocks.push(`**${label}** — ${excerpt} [${item.id}]`);
+      detailedLines.push(`- **${label}** — ${excerpt} [${item.id}]`);
+    }
+  }
+  if (webItems.length) {
+    detailedLines.push("\n**Web context**");
+    for (const item of webItems) {
+      const excerpt = relevantExcerpt(item, question, 3, 900, item.title);
+      if (!excerpt) continue;
+      detailedLines.push(`- **${item.title}** — ${excerpt} [${item.id}]`);
     }
   }
 
-  blocks.push(
-    `\nEach claim above is tagged with its source ID (e.g. [${usable[0].id}]); the Sources list below expands every citation with a link to the original.`
-  );
-  return blocks.join("\n").trim();
+  // --- Key Points: top-K question-relevant extracted sentences ---
+  const candidates = [];
+  for (const item of usable) {
+    const excerpt = relevantExcerpt(item, question, 3, 900, item.title);
+    if (!excerpt) continue;
+    const sentences = excerpt.match(/[^.!?]+(?:[.!?]+|$)/g) || [excerpt];
+    for (const raw of sentences) {
+      const s = raw.trim();
+      if (s.length < 40 || s.length > 300) continue;
+      candidates.push({ sentence: s, score: scoreSentence(s, questionWords), id: item.id });
+    }
+  }
+  const seenSentences = new Set();
+  const rankedKeyPoints = candidates
+    .sort((a, b) => b.score - a.score)
+    .filter(kp => {
+      const key = kp.sentence.toLowerCase().replace(/\s+/g, " ").trim();
+      if (seenSentences.has(key)) return false;
+      seenSentences.add(key);
+      return true;
+    })
+    .slice(0, 5);
+
+  const keyPointLines = [];
+  if (rankedKeyPoints.length) {
+    for (const kp of rankedKeyPoints) {
+      keyPointLines.push(`- ${kp.sentence.replace(/\.$/, "")} [${kp.id}]`);
+    }
+  } else {
+    // Fallback: list the most relevant retrieved items directly.
+    for (const item of usable.slice(0, 5)) {
+      const excerpt = relevantExcerpt(item, question, 1, 240, item.title);
+      keyPointLines.push(`- **${item.title}** — ${excerpt} [${item.id}]`);
+    }
+  }
+
+  // --- Conclusion: metadata-driven coverage note (no fabrication) ---
+  const appCount = appItems.length;
+  const webCount = webItems.length;
+  const total = usable.length;
+  const lowerQuestion = question.toLowerCase();
+  const wantsRecency = /\b(latest|recent|current|new|deadline|when|2024|2025|2026)\b/.test(lowerQuestion);
+  const conclusionLines = [];
+  if (total < 3) {
+    conclusionLines.push(`Evidence on this topic is limited — only ${total} relevant record${total === 1 ? "" : "s"} were found. Try rephrasing the question or enabling internet search for broader coverage.`);
+  } else {
+    let lead = `Based on ${appCount} curated application record${appCount === 1 ? "" : "s"}`;
+    if (webCount) lead += ` and ${webCount} web source${webCount === 1 ? "" : "s"}`;
+    lead += `, the evidence above covers the main aspects of "${truncate(question, 120)}".`;
+    conclusionLines.push(lead);
+  }
+  if (wantsRecency && !webCount) {
+    conclusionLines.push("This answer draws only on curated application data and may not reflect the very latest developments — enable internet search for the most recent context.");
+  }
+
+  return [
+    "## Detailed Answer",
+    detailedLines.join("\n").trim(),
+    "",
+    "## Key Points",
+    keyPointLines.join("\n"),
+    "",
+    "## Conclusion",
+    conclusionLines.join(" "),
+  ].join("\n").trim();
 }
 
 module.exports = {
