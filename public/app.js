@@ -154,6 +154,9 @@ function setupQA() {
   const printBtn = document.getElementById("summaryPrintBtn");
   if (printBtn) printBtn.addEventListener("click", () => window.print());
 
+  const styleSelect = document.getElementById("summaryStyle");
+  if (styleSelect) styleSelect.addEventListener("change", renderAnswerByStyle);
+
   document.querySelectorAll(".summary-suggestion").forEach(button => {
     button.addEventListener("click", () => {
       input.value = button.textContent.trim();
@@ -236,7 +239,9 @@ async function runSummary() {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Answer generation failed");
 
-    answer.innerHTML = renderAnswerWithCitations(data.answer, data.sources);
+    lastAnswerText = data.answer || "";
+    lastAnswerSources = data.sources || [];
+    renderAnswerByStyle();
     const sourceCount = data.sources?.length || 0;
     const internetLabel = data.internetUsed ? " · internet evidence included" : "";
     const modeText =
@@ -266,10 +271,11 @@ async function runSummary() {
   }
 }
 
-// Render the answer as structured, inline-cited prose. The engine emits a simple
-// format: lines starting with "■ " become section headings, **bold** spans are
-// emphasised, and [A1]/[W1] tokens become citation chips linked to their source.
-function renderAnswerWithCitations(text, sources) {
+// Parse a Markdown answer into sections and render it to HTML.
+// Supports: "## " headings -> <h4.ans-section>, "- "/"* " bullets -> <ul><li>,
+// **bold**, and [A#]/[W#] inline citation chips/links. Legacy "■ " headings and
+// citation behaviour are preserved. Unknown headings become "other" sections.
+function parseAnswer(text, sources) {
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
   const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const renderInline = (line) => {
@@ -286,27 +292,84 @@ function renderAnswerWithCitations(text, sources) {
     });
     return html;
   };
-  const lines = String(text || "").split("\n");
-  const out = [];
-  let para = [];
-  const flush = () => {
-    if (para.length) {
-      out.push(`<p>${para.map(renderInline).join(" ")}</p>`);
-      para = [];
+
+  const renderBlocks = (lines) => {
+    const out = [];
+    let para = [];
+    let list = [];
+    const flushPara = () => {
+      if (para.length) { out.push(`<p>${para.map(l => renderInline(l)).join(" ")}</p>`); para = []; }
+    };
+    const flushList = () => {
+      if (list.length) { out.push(`<ul>${list.map(l => `<li>${renderInline(l)}</li>`).join("")}</ul>`); list = []; }
+    };
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) { flushPara(); flushList(); continue; }
+      const bullet = line.match(/^[-*]\s+(.*)$/);
+      if (bullet) { flushPara(); list.push(bullet[1]); continue; }
+      flushList(); para.push(line);
     }
+    flushPara(); flushList();
+    return out.join("");
   };
+
+  const SECTION_IDS = { "detailed answer": "detailed", "key points": "keyPoints", "conclusion": "conclusion" };
+  const classify = (title) => SECTION_IDS[title.trim().toLowerCase()] || "other";
+
+  const lines = String(text || "").split("\n");
+  const sections = [];
+  let cur = null;
+  const pushCur = () => { if (cur) sections.push(cur); };
+  const startCur = (title, id) => { pushCur(); cur = { title, id, lines: [] }; };
+
   for (const raw of lines) {
     const line = raw.trim();
-    if (!line) { flush(); continue; }
-    if (line.startsWith("■ ")) {
-      flush();
-      out.push(`<h4 class="ans-section">${renderInline(line.slice(2))}</h4>`);
-      continue;
-    }
-    para.push(line);
+    if (!line) continue;
+    const h = line.match(/^##\s+(.*)$/);
+    if (h) { startCur(h[1].trim(), classify(h[1])); continue; }
+    const legacy = line.match(/^■\s+(.*)$/);
+    if (legacy) { startCur(legacy[1].trim(), "other"); continue; }
+    if (!cur) startCur("", "detailed");
+    cur.lines.push(line);
   }
-  flush();
-  return out.join("");
+  pushCur();
+
+  const renderSection = (sec) => {
+    let out = "";
+    if (sec.title) out += `<h4 class="ans-section">${renderInline(sec.title)}</h4>`;
+    out += renderBlocks(sec.lines);
+    return out;
+  };
+  const fullHtml = sections.map(renderSection).join("");
+  return { sections, fullHtml, renderSection };
+}
+
+function renderAnswerWithCitations(text, sources) {
+  return parseAnswer(text, sources).fullHtml;
+}
+
+function sectionsForStyle(sections, style) {
+  const get = (id) => sections.find(s => s.id === id);
+  switch (style) {
+    case "detailed":   return [get("detailed"), get("conclusion")].filter(Boolean);
+    case "bullets":    return [get("keyPoints")].filter(Boolean);
+    case "conclusion": return [get("conclusion")].filter(Boolean);
+    case "full":
+    default:           return sections;
+  }
+}
+
+let lastAnswerText = "";
+let lastAnswerSources = [];
+
+function renderAnswerByStyle() {
+  const answer = document.getElementById("summaryAnswer");
+  if (!answer) return;
+  const style = (document.getElementById("summaryStyle")?.value) || "full";
+  const parsed = parseAnswer(lastAnswerText, lastAnswerSources);
+  const chosen = sectionsForStyle(parsed.sections, style);
+  answer.innerHTML = chosen.length ? chosen.map(parsed.renderSection).join("") : parsed.fullHtml;
 }
 
 function renderSummaryEvidence(sources) {

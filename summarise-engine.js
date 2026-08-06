@@ -239,7 +239,7 @@ async function runApiModelGeneration(question, evidence) {
   const messages = [
     {
       role: "system",
-      content: "You are an evidence-focused research analyst. Answer ONLY from the supplied evidence. Write a detailed, comprehensive answer in well-structured paragraphs (and bullet points where useful). Cite the evidence INLINE using the exact IDs in square brackets, e.g. [A1] or [W2], placing each citation right after the claim it supports. Do NOT add a separate list of evidence at the end. If the evidence is thin or silent on part of the question, say so plainly rather than inventing facts.",
+      content: "You are an evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n\nAnswer ONLY from the supplied evidence. Never invent facts, figures, dates, or quotations. When the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite it.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer in well-structured paragraphs and Markdown bullet lists where useful. Cite EVERY claim INLINE with its exact ID in square brackets, e.g. [A1] or [W2], placed immediately after the claim it supports. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways. Cite each bullet inline with its supporting [A#]/[W#] ID.\n\n## Conclusion\nA 2–4 sentence wrap-up that synthesises the answer and states any open caveats. End with a complete sentence.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
     },
     {
       role: "user",
@@ -259,7 +259,7 @@ async function runApiModelGeneration(question, evidence) {
       body: JSON.stringify({
         model: DEFAULT_MODEL,
         messages,
-        max_tokens: 720,
+        max_tokens: 1400,
         temperature: 0,
       }),
       signal: controller.signal,
