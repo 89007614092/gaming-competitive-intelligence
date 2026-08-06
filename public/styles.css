@@ -1488,6 +1488,20 @@ body {
   font-size: 0.93rem;
   line-height: 1.75;
 }
+
+.summary-tier-notice {
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #bcd2f5;
+  border-left: 3px solid #2563eb;
+  border-radius: var(--radius);
+  background: #eef4ff;
+  color: #1e3a8a;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .summary-answer p { margin: 0 0 0.85rem; }
 .summary-answer h4.ans-section {
   margin: 1.1rem 0 0.5rem;

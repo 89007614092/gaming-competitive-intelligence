@@ -224,6 +224,7 @@ async function runSummary() {
   answer.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${loadingText}</p></div>`;
   document.getElementById("summaryEvidence").innerHTML = "";
   document.getElementById("summaryWarning").style.display = "none";
+  document.getElementById("summaryTierNotice").style.display = "none";
   result.scrollIntoView({ behavior: "smooth", block: "start" });
 
   try {
@@ -249,6 +250,19 @@ async function runSummary() {
       : data.model?.mode === "local-open-source-model" ? "AI model"
       : "extractive (model fallback)";
     document.getElementById("summaryResultMeta").textContent = `${sourceCount} sources · ${modeText}${internetLabel} · ${new Date(data.generatedAt).toLocaleTimeString()}`;
+
+    // When the answer was NOT produced by the AI model (the default
+    // extractive-citation mode, or the model falling back to extractive),
+    // surface a clear notice so readers don't mistake a citation summary for
+    // an AI synthesis. The meta line already says "extractive · cited", but
+    // this makes the distinction unmistakable.
+    const tierNotice = document.getElementById("summaryTierNotice");
+    if (data.model?.mode === "local-open-source-model") {
+      tierNotice.style.display = "none";
+    } else {
+      tierNotice.textContent = "AI analysis unavailable - knowledge base summary only.";
+      tierNotice.style.display = "block";
+    }
 
     const warning = document.getElementById("summaryWarning");
     const warnings = [];
