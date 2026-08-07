@@ -777,16 +777,18 @@ app.post("/api/summarise/warm", (req, res) => {
   res.json({ success: true, warming: true });
 });
 
-// POST /api/summarise — answer questions from app data with optional web evidence.
-// Default mode is extractive-citation (fast, fully cited, accurate). The hosted
-// open-source model is used only when the caller opts in with useModel=true;
-// if the model API is unavailable or fails, the response gracefully falls back
-// to the detailed extractive answer.
+// POST /api/summarise — answer questions from app data, synthesised by the
+// hosted open-source model on EVERY answer (graceful extractive fallback if the
+// model is unavailable). Optional web evidence is included only when the caller
+// sends useInternet=true (the single "Includes Internet Sources" tickbox); raw
+// web hits are dropped server-side if the model can't synthesise them.
 app.post("/api/summarise", async (req, res) => {
   try {
     const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
     const useInternet = req.body?.useInternet === true;
-    const useModel = req.body?.useModel === true;
+    // AI now runs on every answer by default. An explicit useModel:false is the
+    // only opt-out (reserved); the UI always sends true.
+    const useModel = req.body?.useModel !== false;
     if (!question) return res.status(400).json({ error: "Enter a question" });
     if (question.length > 700) return res.status(400).json({ error: "Question must be 700 characters or fewer" });
 
@@ -824,20 +826,17 @@ app.post("/api/summarise", async (req, res) => {
       }
     }
 
-    // OPTION A: raw web evidence is only useful when the AI model synthesises
-    // it. If the user asked for internet but left the model off:
-    //  - if the model is configured, honour the intent and force AI synthesis;
-    //  - if the model is unavailable, drop the web evidence so unprocessed web
-    //    hits can never reach the no-AI extractive path (the bug we fixed). The
-    //    UI normally prevents this combination; this is the server-side backstop.
+    // OPTION A (updated): raw web evidence is only useful when the AI model
+    // synthesises it. Since the AI now runs on every answer, the only way web
+    // hits can't be synthesised is when the model is unavailable (no key) or the
+    // caller explicitly opted out. In that case drop the raw web evidence so it
+    // can never reach the extractive path (the bug we fixed). The single
+    // "Includes Internet Sources" tickbox is the UI control; this is the
+    // server-side backstop against malformed requests.
     let internetDropped = false;
-    if (useInternet && !useModel) {
-      if (isModelReady()) {
-        useModel = true;
-      } else {
-        webEvidence = [];
-        internetDropped = true;
-      }
+    if (useInternet && (!useModel || !isModelReady())) {
+      webEvidence = [];
+      internetDropped = true;
     }
 
     const evidence = [...appEvidence, ...webEvidence];

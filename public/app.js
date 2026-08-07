@@ -164,35 +164,10 @@ function setupQA() {
     });
   });
 
-  const modelToggle = document.getElementById("summaryUseModel");
+  // The AI model now runs on EVERY answer. The single "Includes Internet
+  // Sources" checkbox (id summaryUseModel) is the only Q&A control and gates
+  // optional web evidence.
   const modeLabel = document.getElementById("summaryModeLabel");
-
-  // Reflect the AI-model toggle immediately and preload the model in the
-  // background the first time the user opts in, so the first synthesis is fast.
-  function syncModelToggle() {
-    const on = modelToggle && modelToggle.checked;
-    if (modeLabel) {
-      modeLabel.textContent = on ? "AI model enabled (optional)" : "Extractive (cited) by default";
-    }
-    if (on) {
-      fetch(`${API_BASE}/summarise/warm`, { method: "POST" }).catch(() => { /* best-effort */ });
-    }
-  }
-  if (modelToggle) modelToggle.addEventListener("change", syncModelToggle);
-
-  // Internet evidence is only meaningful with the AI model (raw web hits need
-  // synthesis). Keep the internet toggle disabled — and force-unchecked — unless
-  // the model is enabled, so the no-AI + internet combination can't be selected.
-  const internetToggle = document.getElementById("summaryUseInternet");
-  function syncInternetToggle() {
-    const on = !!(modelToggle && modelToggle.checked);
-    if (internetToggle) {
-      internetToggle.disabled = !on;
-      if (!on) internetToggle.checked = false;
-    }
-  }
-  if (modelToggle) modelToggle.addEventListener("change", syncInternetToggle);
-  syncInternetToggle();
 
   fetch(`${API_BASE}/summarise/status`)
     .then(response => response.json())
@@ -200,16 +175,16 @@ function setupQA() {
       if (!data.success) return;
       const modelName = String(data.model || "SmolLM2").split("/").pop();
       const base = `${data.corpusItems} app records`;
-      if (modeLabel) {
-        modeLabel.textContent = modelToggle && modelToggle.checked
-          ? `AI model enabled · ${modelName}`
-          : `Extractive (cited) by default · ${base}`;
-      }
-      if (!data.modelLoaded) {
-        // Defer the warm call until the user actually enables the model (below).
+      if (!modeLabel) return;
+      if (data.modelLoaded) {
+        modeLabel.textContent = `AI model enabled · ${modelName}`;
+        // Warm the model once on load so the first answer is snappy.
+        fetch(`${API_BASE}/summarise/warm`, { method: "POST" }).catch(() => { /* best-effort */ });
+      } else {
+        modeLabel.textContent = `AI model unavailable — cited summary only · ${base}`;
       }
     })
-    .catch(() => { /* Keep the default label if status is unavailable. */ });
+    .catch(() => { if (modeLabel) modeLabel.textContent = "AI model enabled"; });
 }
 
 async function runSummary() {
@@ -224,18 +199,17 @@ async function runSummary() {
     return;
   }
 
-  const useModel = document.getElementById("summaryUseModel")?.checked === true;
-  const useInternet = document.getElementById("summaryUseInternet")?.checked === true;
+  // The AI model runs on every answer; the single "Includes Internet Sources"
+  // checkbox (id summaryUseModel) is the only optional control.
+  const useModel = true;
+  const useInternet = document.getElementById("summaryUseModel")?.checked === true;
 
   button.disabled = true;
   button.textContent = "Asking...";
   result.style.display = "block";
   document.getElementById("summaryResultQuestion").textContent = question;
   document.getElementById("summaryResultMeta").textContent = "Retrieving application evidence...";
-  const loadingText = useModel
-    ? "Loading the AI model and synthesising evidence..."
-    : "Retrieving and synthesising evidence...";
-  answer.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${loadingText}</p></div>`;
+  answer.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading the AI model and synthesising evidence...</p></div>`;
   document.getElementById("summaryEvidence").innerHTML = "";
   document.getElementById("summaryWarning").style.display = "none";
   document.getElementById("summaryTierNotice").style.display = "none";
@@ -284,7 +258,7 @@ async function runSummary() {
     // (the default extractive mode is not an error condition).
     if (useModel && data.model?.mode === "extractive-fallback") warnings.push("The AI model was unavailable or still warming up, so an extractive evidence summary was returned.");
     if (data.webSearchError) warnings.push(`Internet search was unavailable: ${data.webSearchError}`);
-    if (data.internetDropped) warnings.push("Internet search was skipped — the AI model is required to synthesise web evidence. Enable the AI model to include web results.");
+    if (data.internetDropped) warnings.push("Internet search was skipped — web evidence needs the AI model, which is currently unavailable. Add a model API key to include web results.");
     if (warnings.length) {
       warning.textContent = warnings.join(" ");
       warning.style.display = "block";
