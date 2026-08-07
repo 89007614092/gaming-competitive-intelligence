@@ -13,8 +13,9 @@ const {
   buildExtractiveAnswer,
   warmUpModel,
   isModelReady,
-  isModelRateLimited,
-  getModelRateLimitedUntil,
+  isScanModelReady,
+  isScanRateLimited,
+  getScanRateLimitedUntil,
 } = require("./summarise-engine");
 
 const app = express();
@@ -759,6 +760,7 @@ app.get("/api/summarise/status", (req, res) => {
       modelOptIn: true,
       defaultMode: "extractive-citation",
       modelLoaded: isModelReady(),
+      scanModelLoaded: isScanModelReady(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1678,7 +1680,7 @@ Return ONLY valid JSON:
   "updateReason": one short sentence (max 20 words) explaining why this is suggested,
   "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
 }`;
-  const raw = await runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000 });
+  const raw = await runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
   if (raw && raw.rateLimited) return { rateLimited: true };
   if (!raw) return null;
   try {
@@ -1935,7 +1937,7 @@ async function runSourceScan({ force = false } = {}) {
       // If the model is already rate-limited we skip model calls for the WHOLE
       // batch and degrade to the heuristic reason, so a single 429 doesn't
       // trigger 20 more doomed calls that burn the rest of the daily quota.
-      const modelBlocked = isModelRateLimited();
+      const modelBlocked = isScanRateLimited();
       if (modelBlocked) console.warn(`[source-scan] model rate-limited — ${toEnrich.length} proposals will use heuristic reason only this scan`);
       await mapWithConcurrency(toEnrich, 2, async (prop) => {
         let preview = null;
@@ -1954,14 +1956,14 @@ async function runSourceScan({ force = false } = {}) {
         // deterministic heuristic when the model is unavailable or rate-limited.
         const baseText = preview || stripHtml(prop.snippet || prop.description || "");
         let enriched = null;
-        if (baseText && !modelBlocked && !isModelRateLimited()) {
+        if (baseText && !modelBlocked && !isScanRateLimited()) {
           try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
         }
         if (enriched && enriched.rateLimited) {
           // Model hit a rate limit on this call — record a cooldown so this
           // proposal (and the rest of the batch, via modelBlocked) falls back to
           // heuristic until the quota recovers, instead of re-calling each scan.
-          prop.enrichCooldownUntil = getModelRateLimitedUntil();
+          prop.enrichCooldownUntil = getScanRateLimitedUntil();
           enriched = heuristicReason(prop);
         }
         if (!enriched) {

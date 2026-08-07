@@ -13,7 +13,17 @@ const path = require("path");
 const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "llama-3.1-8b-instant";
 const OPEN_MODEL_API_KEY = process.env.OPEN_MODEL_API_KEY || "";
 const OPEN_MODEL_BASE_URL = (process.env.OPEN_MODEL_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
-const MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
+// Dedicated credentials/queue for the background "Suggested Updates" scan so it
+// can never starve interactive Q&A. Falls back to the primary key when no
+// separate scan key is configured — you still get queue + cooldown isolation;
+// supply a DISTINCT OPEN_MODEL_API_KEY_SCAN (e.g. a second free-tier account, or
+// an upgraded paid plan's second key) for independent daily-quota isolation.
+const OPEN_MODEL_API_KEY_SCAN = process.env.OPEN_MODEL_API_KEY_SCAN || OPEN_MODEL_API_KEY;
+const OPEN_MODEL_BASE_URL_SCAN = (process.env.OPEN_MODEL_BASE_URL_SCAN || OPEN_MODEL_BASE_URL).replace(/\/+$/, "");
+// Per-lane readiness. SUMMARY_DISABLE_MODEL gates the Q&A (user-facing) lane;
+// SUMMARY_DISABLE_SCAN gates ONLY the background scan lane.
+const QA_MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
+const SCAN_MODEL_DISABLED = process.env.SUMMARY_DISABLE_SCAN === "1" || !OPEN_MODEL_API_KEY_SCAN;
 const DATA_DIR = path.join(__dirname, "data");
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "because", "been", "before", "being", "between",
@@ -28,9 +38,13 @@ const OMIT_KEYS = new Set([
 ]);
 
 let corpusCache = null;
-let generationQueue = Promise.resolve();
-// Epoch-ms timestamp until which model calls are paused due to a rate limit.
-let modelRateLimitedUntil = 0;
+// Two independent serialisation lanes so the background scan never blocks
+// interactive Q&A (and vice-versa). Each lane has its own queue + cooldown.
+let qaQueue = Promise.resolve();
+let scanQueue = Promise.resolve();
+// Epoch-ms timestamps until which a given lane's model calls are paused.
+let qaRateLimitedUntil = 0;
+let scanRateLimitedUntil = 0;
 
 function readJson(fileName) {
   return JSON.parse(fs.readFileSync(path.join(DATA_DIR, fileName), "utf8"));
@@ -219,21 +233,45 @@ function evidenceHighlights(question, evidence, limit = 4) {
 // larger model than could ever fit locally.
 //
 // Configure via env vars:
-//   OPEN_MODEL_API_KEY   (required) API key for the model host
+//   OPEN_MODEL_API_KEY   (required) API key for the Q&A (user-facing) lane
 //   OPEN_MODEL_BASE_URL  default https://api.groq.com/openai/v1
 //                        (OpenRouter: https://openrouter.ai/api/v1)
 //   OPEN_MODEL_NAME      default llama-3.3-70b-versatile
 //                        (OpenRouter examples: meta-llama/llama-3.3-70b-instruct,
 //                         qwen/qwen2.5-72b-instruct, mistralai/mixtral-8x7b-instruct)
-//   SUMMARY_DISABLE_MODEL=1  disables the AI model entirely (extractive-only)
+//   OPEN_MODEL_API_KEY_SCAN  optional 2nd key for the background scan lane
+//                            (default: same as OPEN_MODEL_API_KEY)
+//   OPEN_MODEL_BASE_URL_SCAN  optional base URL for the scan lane
+//                            (default: same as OPEN_MODEL_BASE_URL)
+//   SUMMARY_DISABLE_MODEL=1  disables the Q&A model entirely (extractive-only)
+//   SUMMARY_DISABLE_SCAN=1   disables ONLY the background scan model
+
+// Given a 429 response, compute how long to pause before retrying. Reads the
+// Retry-After header, or (for Groq free tier) waits until just after midnight PT
+// when the daily token cap resets. Shared by both lanes.
+function cooldownFrom429(resp, txt) {
+  const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
+  if (/per day|TPD/i.test(txt || "")) {
+    const nowPt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
+    nowPt.setHours(24, 5, 0, 0);
+    let ms = nowPt.getTime() - Date.now();
+    if (ms < 0) ms += 24 * 3600 * 1000;
+    return ms;
+  }
+  return 60 * 60 * 1000;
+}
 
 async function runApiModelGeneration(question, evidence) {
-  if (MODEL_DISABLED) {
+  if (QA_MODEL_DISABLED) {
     throw new Error(
       process.env.SUMMARY_DISABLE_MODEL === "1"
         ? "Local model disabled"
         : "Model API key not configured (set OPEN_MODEL_API_KEY)"
     );
+  }
+  if (Date.now() < qaRateLimitedUntil) {
+    throw new Error("Q&A model is rate-limited; please try again later");
   }
   const context = formatContext(evidence, question);
   const messages = [
@@ -264,10 +302,15 @@ async function runApiModelGeneration(question, evidence) {
       }),
       signal: controller.signal,
     });
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => "");
-      throw new Error(`Model API returned HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    if (resp.status === 429) {
+      const cooldownMs = cooldownFrom429(resp, txt);
+      qaRateLimitedUntil = Date.now() + cooldownMs;
+      console.warn(`[model:qa] rate limited (HTTP 429) — Q&A calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(qaRateLimitedUntil).toISOString()}`);
     }
+    throw new Error(`Model API returned HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+  }
     const json = await resp.json();
     let answer = json?.choices?.[0]?.message?.content?.trim() || "";
     if (!answer) throw new Error("The model returned an empty answer");
@@ -289,89 +332,92 @@ async function runApiModelGeneration(question, evidence) {
 // Serialise model calls so we never open two concurrent API requests at once
 // (keeps the host's rate limits happy and response ordering sane).
 function generateOpenSourceAnswer(question, evidence) {
-  const task = generationQueue
+  const task = qaQueue
     .catch(() => undefined)
     .then(() => runApiModelGeneration(question, evidence));
-  generationQueue = task.catch(() => undefined);
+  qaQueue = task.catch(() => undefined);
   return task;
 }
 
-// Generic chat-completions call used by background enrichment (proposed-changes
-// styling + categorisation). Returns the model text, or null when the model is
-// disabled or the request fails — callers must degrade gracefully. Routed
-// through the shared generationQueue so we never open two concurrent API
-// requests at once (keeps host rate limits happy).
-async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, temperature = 0.2, json = false, timeoutMs = 60000 } = {}) {
-  if (MODEL_DISABLED) return null;
+// Generic chat-completions call used by the background scan (proposed-changes
+// styling + categorisation) AND (optionally) any future Q&A path. Returns the
+// model text, or null when the model is disabled/fails — callers degrade
+// gracefully. Routed through a LANE-specific queue (qa | scan) so the two
+// workloads never block each other, and each lane tracks its own rate-limit
+// cooldown. Pass lane: "scan" from the background enrichment path.
+async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, temperature = 0.2, json = false, timeoutMs = 60000, lane = "qa" } = {}) {
+  const isScan = lane === "scan";
+  const apiKey = isScan ? OPEN_MODEL_API_KEY_SCAN : OPEN_MODEL_API_KEY;
+  const baseUrl = isScan ? OPEN_MODEL_BASE_URL_SCAN : OPEN_MODEL_BASE_URL;
+  const queue = isScan ? scanQueue : qaQueue;
+  const disabled = isScan ? SCAN_MODEL_DISABLED : QA_MODEL_DISABLED;
+  if (disabled) return null;
   const messages = [
     { role: "system", content: json ? `${systemPrompt}\nRespond with ONLY valid JSON, no prose, no markdown code fences.` : systemPrompt },
     { role: "user", content: userPrompt },
   ];
-  const task = generationQueue
+  const task = queue
     .catch(() => undefined)
     .then(async () => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
+        const resp = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
-          headers: { Authorization: `Bearer ${OPEN_MODEL_API_KEY}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ model: DEFAULT_MODEL, messages, max_tokens: maxTokens, temperature }),
           signal: controller.signal,
         });
         if (!resp.ok) {
           const txt = await resp.text().catch(() => "");
           if (resp.status === 429) {
-            const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
-            let cooldownMs;
-            if (Number.isFinite(retryAfter) && retryAfter > 0) {
-              cooldownMs = retryAfter * 1000;
-            } else if (/per day|TPD/i.test(txt)) {
-              // Daily token quota exhausted — wait until just after midnight PT
-              // (Groq resets free-tier TPD at midnight Pacific).
-              const nowPt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
-              nowPt.setHours(24, 5, 0, 0);
-              cooldownMs = nowPt.getTime() - Date.now();
-              if (cooldownMs < 0) cooldownMs += 24 * 3600 * 1000;
-            } else {
-              cooldownMs = 60 * 60 * 1000;
-            }
-            modelRateLimitedUntil = Date.now() + cooldownMs;
-            console.warn(`[model] rate limited (HTTP 429) — model calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(modelRateLimitedUntil).toISOString()}`);
+            const cooldownMs = cooldownFrom429(resp, txt);
+            if (isScan) scanRateLimitedUntil = Date.now() + cooldownMs;
+            else qaRateLimitedUntil = Date.now() + cooldownMs;
+            const until = isScan ? scanRateLimitedUntil : qaRateLimitedUntil;
+            console.warn(`[model:${lane}] rate limited (HTTP 429) — ${lane} calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(until).toISOString()}`);
             return { rateLimited: true };
           }
-          console.error(`[model] chat completion HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+          console.error(`[model:${lane}] chat completion HTTP ${resp.status}: ${txt.slice(0, 200)}`);
           return null;
         }
         const j = await resp.json().catch(() => null);
         return j?.choices?.[0]?.message?.content?.trim() || null;
       } catch (err) {
-        console.error(`[model] chat completion request failed: ${err && err.message ? err.message : err}`);
+        console.error(`[model:${lane}] chat completion request failed: ${err && err.message ? err.message : err}`);
         return null;
       } finally {
         clearTimeout(timeout);
       }
     });
-  generationQueue = task.catch(() => undefined);
+  if (isScan) scanQueue = task.catch(() => undefined);
+  else qaQueue = task.catch(() => undefined);
   return task;
 }
 
 // Pre-load hook. For an API-backed model there is nothing to preload, so this
 // simply reports whether the model is configured. Never throws.
 function warmUpModel() {
-  if (MODEL_DISABLED) return Promise.resolve(false);
+  if (QA_MODEL_DISABLED) return Promise.resolve(false);
   return Promise.resolve(true);
 }
 
-// True once the model API key is configured (the "opt-in" AI model is available).
+// True once the user-facing (Q&A) model API key is configured.
 function isModelReady() {
-  return !MODEL_DISABLED;
+  return !QA_MODEL_DISABLED;
 }
 
-// Rate-limit tracking so callers can avoid re-hammering the API on every scan
-// and burning the daily token quota. Set when runModelChat sees HTTP 429.
-function getModelRateLimitedUntil() { return modelRateLimitedUntil; }
-function isModelRateLimited() { return Date.now() < modelRateLimitedUntil; }
+// True once the background scan model is configured (may use a separate key).
+function isScanModelReady() {
+  return !SCAN_MODEL_DISABLED;
+}
+
+// Per-lane rate-limit tracking so callers can avoid re-hammering the API and
+// burning the daily token quota. Set when a lane's call sees HTTP 429.
+function getQaRateLimitedUntil() { return qaRateLimitedUntil; }
+function isQaRateLimited() { return Date.now() < qaRateLimitedUntil; }
+function getScanRateLimitedUntil() { return scanRateLimitedUntil; }
+function isScanRateLimited() { return Date.now() < scanRateLimitedUntil; }
 
 function truncate(text, n) {
   const t = String(text || "").trim();
@@ -565,6 +611,9 @@ module.exports = {
   webResultRelevance,
   warmUpModel,
   isModelReady,
-  isModelRateLimited,
-  getModelRateLimitedUntil,
+  isScanModelReady,
+  isQaRateLimited,
+  getQaRateLimitedUntil,
+  isScanRateLimited,
+  getScanRateLimitedUntil,
 };
