@@ -390,6 +390,61 @@ function scoreSentence(sentence, questionWords) {
   return matched + riskBoost - lengthPenalty;
 }
 
+// Generic comparison/relation verbs that are weak topical signals on their own
+// (a page can contain "compare" yet be about something else entirely).
+const GENERIC_WEAK_TERMS = new Set([
+  "compare", "comparison", "versus", "difference", "similar", "related",
+  "mean", "meaning", "definition",
+]);
+// Short domain-core terms that still count as substantive signals for this app.
+const DOMAIN_CORE_TERMS = new Set([
+  "ai", "eu", "uk", "vr", "npc", "npcs", "gpt", "llm", "api",
+]);
+
+// Relevance-filter raw web-search hits against the question so noisy or
+// off-topic results never reach the answer. Matching is token-based (so
+// "compared" doesn't falsely match "compare"), and a result is only kept if it
+// contains at least one *substantive* query term — i.e. not just the generic
+// verb "compare". An extra penalty drops definition/dictionary pages (e.g.
+// "compare" in the question matched Dictionary.com) unless the question is
+// literally asking for a definition. Returns only on-topic results; callers get
+// a clean, empty web set rather than junk when nothing clears the bar.
+function webResultRelevance(question, results, limit = 5) {
+  const queryWords = [...new Set(words(question))];
+  const querySet = new Set(queryWords);
+  const substantive = queryWords.filter(
+    w => (w.length >= 4 && !GENERIC_WEAK_TERMS.has(w)) || DOMAIN_CORE_TERMS.has(w)
+  );
+  const questionLower = String(question || "").toLowerCase();
+  const wantsDefinition = /\b(define|definition|meaning of|what (is|does|are) .* mean)\b/.test(questionLower);
+
+  return (results || [])
+    .map(item => {
+      const titleWords = new Set(words(item.title || ""));
+      const textWords = new Set(words(item.description || item.content || item.text || ""));
+      // Must contain at least one substantive query term, otherwise it is
+      // almost certainly off-topic (e.g. a dictionary entry for "compare").
+      const hasSubstantive = substantive.some(w => titleWords.has(w) || textWords.has(w));
+      if (!hasSubstantive) return { ...item, _score: -1 };
+
+      let score = 0;
+      for (const w of querySet) {
+        if (titleWords.has(w)) score += 5;
+        let count = 0;
+        for (const t of textWords) if (t === w) count += 1;
+        score += Math.min(count, 4);
+      }
+      const blob = `${item.title || ""} ${item.description || item.content || item.text || ""}`;
+      if (!wantsDefinition && /definition|meaning|synonym|dictionary|merriam|cambridge|oxford|collins|transitive verb|intransitive verb/i.test(blob)) {
+        score -= 10;
+      }
+      return { ...item, _score: score };
+    })
+    .filter(r => r._score > 0)
+    .sort((a, b) => b._score - a._score)
+    .slice(0, limit);
+}
+
 // Build a structured, Markdown 3-part answer (Detailed Answer / Key Points /
 // Conclusion) directly from the retrieved evidence, with every claim tagged by
 // its source ID inline. It mirrors the Markdown structure the AI model path
@@ -507,6 +562,7 @@ module.exports = {
   generateOpenSourceAnswer,
   runModelChat,
   buildExtractiveAnswer,
+  webResultRelevance,
   warmUpModel,
   isModelReady,
   isModelRateLimited,

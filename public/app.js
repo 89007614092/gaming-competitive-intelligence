@@ -180,6 +180,20 @@ function setupQA() {
   }
   if (modelToggle) modelToggle.addEventListener("change", syncModelToggle);
 
+  // Internet evidence is only meaningful with the AI model (raw web hits need
+  // synthesis). Keep the internet toggle disabled — and force-unchecked — unless
+  // the model is enabled, so the no-AI + internet combination can't be selected.
+  const internetToggle = document.getElementById("summaryUseInternet");
+  function syncInternetToggle() {
+    const on = !!(modelToggle && modelToggle.checked);
+    if (internetToggle) {
+      internetToggle.disabled = !on;
+      if (!on) internetToggle.checked = false;
+    }
+  }
+  if (modelToggle) modelToggle.addEventListener("change", syncInternetToggle);
+  syncInternetToggle();
+
   fetch(`${API_BASE}/summarise/status`)
     .then(response => response.json())
     .then(data => {
@@ -270,6 +284,7 @@ async function runSummary() {
     // (the default extractive mode is not an error condition).
     if (useModel && data.model?.mode === "extractive-fallback") warnings.push("The AI model was unavailable or still warming up, so an extractive evidence summary was returned.");
     if (data.webSearchError) warnings.push(`Internet search was unavailable: ${data.webSearchError}`);
+    if (data.internetDropped) warnings.push("Internet search was skipped — the AI model is required to synthesise web evidence. Enable the AI model to include web results.");
     if (warnings.length) {
       warning.textContent = warnings.join(" ");
       warning.style.display = "block";

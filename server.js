@@ -7,6 +7,7 @@ const {
   DEFAULT_MODEL,
   buildCorpus,
   retrieveApplicationEvidence,
+  webResultRelevance,
   generateOpenSourceAnswer,
   runModelChat,
   buildExtractiveAnswer,
@@ -798,10 +799,14 @@ app.post("/api/summarise", async (req, res) => {
 
     if (useInternet) {
       try {
-        const webResults = await tavilySearch(`${question} latest evidence official`, 5);
-        webEvidence = webResults
+        // Fetch more candidates than we keep, then relevance-filter so off-topic
+        // hits (e.g. dictionary definitions of a word in the question) are dropped
+        // before they can pollute the answer. The "analysis" suffix nudges Tavily
+        // away from generic/definition pages toward substantive coverage.
+        const webResults = await tavilySearch(`${question} analysis`, 8);
+        const filtered = webResultRelevance(question, webResults, 5);
+        webEvidence = filtered
           .filter(item => item.url && (item.title || item.description))
-          .slice(0, 5)
           .map((item, index) => ({
             id: `W${index + 1}`,
             sourceType: "internet",
@@ -814,6 +819,22 @@ app.post("/api/summarise", async (req, res) => {
           }));
       } catch (error) {
         webSearchError = error.message;
+      }
+    }
+
+    // OPTION A: raw web evidence is only useful when the AI model synthesises
+    // it. If the user asked for internet but left the model off:
+    //  - if the model is configured, honour the intent and force AI synthesis;
+    //  - if the model is unavailable, drop the web evidence so unprocessed web
+    //    hits can never reach the no-AI extractive path (the bug we fixed). The
+    //    UI normally prevents this combination; this is the server-side backstop.
+    let internetDropped = false;
+    if (useInternet && !useModel) {
+      if (isModelReady()) {
+        useModel = true;
+      } else {
+        webEvidence = [];
+        internetDropped = true;
       }
     }
 
@@ -855,6 +876,7 @@ app.post("/api/summarise", async (req, res) => {
       answer,
       question,
       internetUsed: webEvidence.length > 0,
+      internetDropped,
       webSearchError,
       model: {
         name: DEFAULT_MODEL,
