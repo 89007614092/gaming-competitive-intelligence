@@ -5,6 +5,7 @@ const fs = require("fs");
 const { execFile } = require("child_process");
 const {
   DEFAULT_MODEL,
+  OPEN_MODEL_NAME_SCAN,
   buildCorpus,
   retrieveApplicationEvidence,
   webResultRelevance,
@@ -755,6 +756,7 @@ app.get("/api/summarise/status", (req, res) => {
       success: true,
       corpusItems: buildCorpus().length,
       model: DEFAULT_MODEL,
+      scanModel: OPEN_MODEL_NAME_SCAN,
       license: "open-weight (hosted)",
       localModel: false,
       modelOptIn: true,

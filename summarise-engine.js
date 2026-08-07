@@ -608,6 +608,7 @@ function buildExtractiveAnswer(question, evidence) {
 
 module.exports = {
   DEFAULT_MODEL,
+  OPEN_MODEL_NAME_SCAN,
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,

@@ -4261,3 +4261,19 @@ body {
     text-decoration: underline !important;
   }
 }
+
+/* === AI Transparency Footer === */
+.ai-transparency-footer {
+  margin-top: 24px;
+  padding: 14px 20px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.ai-transparency-footer p {
+  max-width: 760px;
+  margin: 0 auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}

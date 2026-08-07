@@ -167,24 +167,23 @@ function setupQA() {
   // The AI model now runs on EVERY answer. The single "Includes Internet
   // Sources" checkbox (id summaryUseModel) is the only Q&A control and gates
   // optional web evidence.
-  const modeLabel = document.getElementById("summaryModeLabel");
+  const footerText = document.getElementById("aiTransparencyText");
 
   fetch(`${API_BASE}/summarise/status`)
     .then(response => response.json())
     .then(data => {
       if (!data.success) return;
-      const modelName = String(data.model || "SmolLM2").split("/").pop();
-      const base = `${data.corpusItems} app records`;
-      if (!modeLabel) return;
-      if (data.modelLoaded) {
-        modeLabel.textContent = `AI model enabled · ${modelName}`;
-        // Warm the model once on load so the first answer is snappy.
-        fetch(`${API_BASE}/summarise/warm`, { method: "POST" }).catch(() => { /* best-effort */ });
-      } else {
-        modeLabel.textContent = `AI model unavailable — cited summary only · ${base}`;
+      const qaModel = String(data.model || "an AI model").split("/").pop();
+      const scanModel = String(data.scanModel || "an AI model").split("/").pop();
+      if (footerText) {
+        footerText.textContent =
+          `This feature uses ${qaModel} for answering your questions and ${scanModel} for generating suggested updates in the background. ` +
+          `Be aware responses are AI generated to an extent, and so the accuracy of information cannot be assured.`;
       }
+      // Warm the Q&A model once on load so the first answer is snappy.
+      fetch(`${API_BASE}/summarise/warm`, { method: "POST" }).catch(() => { /* best-effort */ });
     })
-    .catch(() => { if (modeLabel) modeLabel.textContent = "AI model enabled"; });
+    .catch(() => { /* best-effort; static fallback disclaimer text remains visible */ });
 }
 
 async function runSummary() {
