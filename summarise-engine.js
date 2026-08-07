@@ -20,6 +20,10 @@ const OPEN_MODEL_BASE_URL = (process.env.OPEN_MODEL_BASE_URL || "https://api.gro
 // an upgraded paid plan's second key) for independent daily-quota isolation.
 const OPEN_MODEL_API_KEY_SCAN = process.env.OPEN_MODEL_API_KEY_SCAN || OPEN_MODEL_API_KEY;
 const OPEN_MODEL_BASE_URL_SCAN = (process.env.OPEN_MODEL_BASE_URL_SCAN || OPEN_MODEL_BASE_URL).replace(/\/+$/, "");
+// Per-lane model name for the scan lane. Lets the scan run on a different host's
+// model id (e.g. an OpenRouter slug like meta-llama/llama-3.3-70b-instruct) than
+// the Q&A lane's Groq slug. Falls back to DEFAULT_MODEL when unset.
+const OPEN_MODEL_NAME_SCAN = process.env.OPEN_MODEL_NAME_SCAN || DEFAULT_MODEL;
 // Per-lane readiness. SUMMARY_DISABLE_MODEL gates the Q&A (user-facing) lane;
 // SUMMARY_DISABLE_SCAN gates ONLY the background scan lane.
 const QA_MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
@@ -349,6 +353,7 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
   const isScan = lane === "scan";
   const apiKey = isScan ? OPEN_MODEL_API_KEY_SCAN : OPEN_MODEL_API_KEY;
   const baseUrl = isScan ? OPEN_MODEL_BASE_URL_SCAN : OPEN_MODEL_BASE_URL;
+  const modelName = isScan ? OPEN_MODEL_NAME_SCAN : DEFAULT_MODEL;
   const queue = isScan ? scanQueue : qaQueue;
   const disabled = isScan ? SCAN_MODEL_DISABLED : QA_MODEL_DISABLED;
   if (disabled) return null;
@@ -365,7 +370,7 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
         const resp = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model: DEFAULT_MODEL, messages, max_tokens: maxTokens, temperature }),
+          body: JSON.stringify({ model: modelName, messages, max_tokens: maxTokens, temperature }),
           signal: controller.signal,
         });
         if (!resp.ok) {
