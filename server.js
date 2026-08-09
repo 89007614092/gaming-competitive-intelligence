@@ -1510,9 +1510,37 @@ async function resolveViaGdelt(title, domain) {
 //   2. Otherwise (thin snippet) try to fetch the real article. Google News RSS
 //      links can't be followed to the publisher server-side, so resolve the real
 //      URL via DuckDuckGo/GDELT (serialized + cached) and extract the body.
-// Returns null if nothing usable — the caller then falls back to the headline.
+// Detect an anti-bot / bot-wall / "verify you are human" interstitial page.
+// These are returned (often with a 200, sometimes a 403/503) when a site blocks
+// automated access, and must NOT be treated as the article body.
+function looksLikeBotWall(text) {
+  const lc = (text || "").toLowerCase();
+  const markers = [
+    "enable javascript and cookies",
+    "verify you are human",
+    "checking your browser before",
+    "just a moment",
+    "are you a robot",
+    "are you a human",
+    "access denied",
+    "you are being rate limited",
+    "please verify you are a human",
+    "cloudflare",
+    "attention required",
+    "ddos protection",
+    "please stand by",
+    "automated access is disabled",
+    "this site requires javascript",
+    "unable to fetch this page",
+  ];
+  return markers.some(m => lc.includes(m));
+}
+
+// Returns { text, blocked }. `text` is a usable lead excerpt, or null. `blocked`
+// is true when the source blocked automated access (bot-wall / anti-scrape), so
+// the caller can flag the proposal for manual review instead of caching garbage.
 async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, domain } = {}) {
-  if (!item) return null;
+  if (!item) return { text: null, blocked: false };
   const snippetText = stripHtml(item.snippet || item.description || "").replace(/\s+/g, " ").trim();
   const titleText = String(item.title || "").toLowerCase();
   // A snippet is only usable if it carries real information BEYOND the headline
@@ -1531,14 +1559,14 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
     const sentences = snippetText.match(/[^.!?]+[.!?]+/g) || [snippetText];
     let lead = sentences.slice(0, 3).join(" ").trim();
     if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
-    return lead;
+    return { text: lead, blocked: false };
   }
 
-  if (!item.url) return null;
+  if (!item.url) return { text: null, blocked: false };
   let articleUrl = item.url;
   if (/news\.google\.com/i.test(articleUrl)) {
     const real = await resolveGoogleNewsUrl(item.url, item.title, domain);
-    if (!real) return null;
+    if (!real) return { text: null, blocked: false };
     articleUrl = real;
   }
   try {
@@ -1549,13 +1577,19 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
       const resource = await fetchTextResource(articleUrl, "text/html,application/xhtml+xml,text/plain", timeoutMs);
       body = extractText(resource.text).replace(/\s+/g, " ").trim();
     }
-    if (body.length < 140) return null;
+    if (body.length < 140) return { text: null, blocked: false };
+    if (looksLikeBotWall(body)) return { text: null, blocked: true };
     const sentences = body.match(/[^.!?]+[.!?]+/g) || [body];
     let lead = sentences.slice(0, 4).join(" ").trim();
     if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
-    return lead;
-  } catch {
-    return null;
+    return { text: lead, blocked: false };
+  } catch (err) {
+    // Distinguish an access block (bot-wall / anti-scrape) from a transient
+    // network error so we flag the former for manual review rather than retry
+    // endlessly on something that will never succeed automatically.
+    const msg = (err && err.message ? err.message : "").toLowerCase();
+    const accessBlocked = /http (401|403|429|503)|forbidden|access denied|unable to fetch|are you a robot|verify you are human|cloudflare/i.test(msg);
+    return { text: null, blocked: accessBlocked };
   }
 }
 
@@ -1938,48 +1972,90 @@ async function runSourceScan({ force = false } = {}) {
       // If the model is already rate-limited we skip model calls for the WHOLE
       // batch and degrade to the heuristic reason, so a single 429 doesn't
       // trigger 20 more doomed calls that burn the rest of the daily quota.
-      const modelBlocked = isScanRateLimited();
-      if (modelBlocked) console.warn(`[source-scan] model rate-limited — ${toEnrich.length} proposals will use heuristic reason only this scan`);
+      // Per-proposal cooldown set when a scan call is rate-limited (2b): a short
+      // backoff so the NEXT scan retries this proposal in a few minutes instead
+      // of inheriting the engine's full cooldown and waiting ~20 min.
+      const PER_PROPOSAL_BACKOFF_MS = 3 * 60 * 1000;
       await mapWithConcurrency(toEnrich, 2, async (prop) => {
+        // (a) Fetch a real preview of the source article. A bot-wall / anti-scrape
+        // block is recorded as fetchStatus:"blocked" so the UI can ask for manual
+        // review instead of caching garbage (#3) or presenting raw scraped text.
         let preview = null;
-        try { preview = await fetchArticlePreview(prop, { domain: prop.sourceDomain }); } catch { /* best effort */ }
+        let blocked = false;
+        try {
+          const result = await fetchArticlePreview(prop, { domain: prop.sourceDomain });
+          preview = result.text;
+          blocked = !!result.blocked;
+        } catch { /* best effort */ }
         // Record the attempt even on failure so the cooldown guards against
         // re-hammering a URL that the resolver can't currently resolve.
         prop.lastPreviewAttempt = new Date().toISOString();
+
+        if (blocked) {
+          // Cache hygiene (#5): do NOT overwrite a previously good preview with
+          // the bot-wall page, and do not set a finished suggestion. Flag for
+          // manual review; keep any existing good styledSummary untouched.
+          prop.fetchStatus = "blocked";
+          return;
+        }
+        prop.fetchStatus = "ok";
+
         if (preview) {
+          // Cache hygiene (#5): only overwrite the preview when we have content.
           prop.preview = preview;
           if (prop.detectedAction === "new") {
             prop.targetCategory = detectKnowledgeCategory(`${prop.title} ${preview}`, prop.category);
           }
         }
-        // Combined enrichment: model-based "why suggested" category + reason +
-        // a house-style rewrite of the source excerpt. Falls back to the
-        // deterministic heuristic when the model is unavailable or rate-limited.
+
+        // (b) Combined enrichment: model-based rewrite + reason. We NEVER present
+        // the raw source excerpt (baseText) as the finished suggestion (#4). When
+        // the model can't produce a styled summary we mark the proposal as
+        // pending / rate-limited so the UI shows an honest notice and the next
+        // scan retries it (with the short per-proposal backoff) instead of dumping
+        // raw scraped text into the review panel.
         const baseText = preview || stripHtml(prop.snippet || prop.description || "");
+        if (!baseText) return; // truly nothing to work with
+
         let enriched = null;
-        if (baseText && !modelBlocked && !isScanRateLimited()) {
+        // Respect the engine's in-scan guard so a single 429 doesn't trigger a
+        // burst of doomed calls; each proposal still retries independently on
+        // later scans (2b).
+        if (!isScanRateLimited()) {
           try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
         }
+
         if (enriched && enriched.rateLimited) {
-          // Model hit a rate limit on this call — record a cooldown so this
-          // proposal (and the rest of the batch, via modelBlocked) falls back to
-          // heuristic until the quota recovers, instead of re-calling each scan.
-          prop.enrichCooldownUntil = getScanRateLimitedUntil();
-          enriched = heuristicReason(prop);
+          // Model hit a rate limit on this call. Set a SHORT per-proposal backoff
+          // (2-3 min) rather than inheriting the engine's full cooldown, so the
+          // next scan retries this proposal much sooner instead of waiting 20 min.
+          prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
+          prop.enrichStatus = "rate-limited";
+          // Cache hygiene (#5): keep any previously-good styled summary; do not
+          // rewrite with raw text.
+          return;
         }
+
         if (!enriched) {
-          // Don't clobber a previously enriched proposal if the model just
-          // hiccuped — keep its existing styled summary. But if it still lacks a
-          // styled summary (only a heuristic category from an earlier failed
-          // model call), do NOT skip: let the model path above retry, or fall
-          // back to the heuristic reason so the proposal can be completed.
-          if (prop.styledSummary) return;
-          enriched = heuristicReason(prop);
+          // Don't clobber a prior good AI summary if the model just hiccuped.
+          if (prop.styledSummary) {
+            prop.enrichStatus = "done";
+            return;
+          }
+          // No styled summary and model unavailable → honest pending state. The
+          // UI shows "AI rewrite temporarily unavailable (quota); will auto-enrich
+          // when capacity recovers." The next scan (past the short cooldown) retries.
+          prop.enrichStatus = "rate-limited";
+          prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
+          return;
         }
+
+        // Success: persist the model output and mark done.
         prop.updateCategory = enriched.updateCategory;
         prop.updateReason = enriched.updateReason;
         prop.styledSummary = enriched.styledSummary || null;
-        const styled = enriched.styledSummary || baseText;
+        prop.enrichStatus = "done";
+        const styled = enriched.styledSummary;
         prop.suggestedEdit = prop.detectedAction === "new"
           ? draftNewRecord(prop, prop.publisher, prop.publishedLabel, prop.targetCategory, styled)
           : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, styled);

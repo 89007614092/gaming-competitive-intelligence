@@ -3189,22 +3189,44 @@ async function renderReviewPanel() {
     // when the user clicks "Edit summary", so the default view prioritises the
     // AI summary without an always-on editable box. The hidden box is kept in
     // the DOM so the existing Integrate handler reads the (edited) summary.
-    const summaryText = (p) => p.styledSummary || p.preview || p.suggestedEdit || "";
     const previewHtml = (p) => {
-      const summary = summaryText(p);
-      if (!summary) {
-        return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
+      // Manual review required: the source blocked automated access (#3). Never
+      // present the bot-wall page; ask a human to review the original article.
+      if (p.fetchStatus === "blocked") {
+        return `<div class="proposal-blocked-notice">
+          <strong>Manual review required.</strong> This site was detected as potentially containing new information, but due to restrictions on automated / non-human access, we couldn't retrieve it automatically.
+          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
+        </div>`;
       }
-      return `
+      // Honest pending state (#4): the model couldn't rewrite yet (quota / offline).
+      // Evaluated BEFORE the styled-summary check so a rate-limited proposal that
+      // already has an extracted preview still shows this notice (and NOT the raw
+      // extracted text under the "AI-generated" label). The next scan retries it
+      // after the short per-proposal backoff and auto-enriches when capacity recovers.
+      if (p.enrichStatus === "rate-limited" || p.enrichStatus === "pending") {
+        return `<div class="proposal-pending-notice">
+          AI rewrite temporarily unavailable (quota); will auto-enrich when capacity recovers.
+          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
+        </div>`;
+      }
+      // Primary preview: the AI-styled, app-style summary is the real suggestion.
+      // We render it ONLY when it actually exists — we never fall back to raw or
+      // extracted text as the "finished" suggestion (#4).
+      if (p.styledSummary) {
+        return `
         <div class="proposal-summary-block">
           <div class="proposal-preview-label">Proposed entry (AI-generated, in app style):</div>
-          <div class="proposal-preview proposal-summary-text">${escapeHtml(summary)}</div>
+          <div class="proposal-preview proposal-summary-text">${escapeHtml(p.styledSummary)}</div>
           <div class="proposal-edit-row">
             <button class="btn btn-sm proposal-edit-toggle" data-edit-toggle type="button">Edit summary</button>
           </div>
-          <textarea class="proposal-edit-box text-input" rows="4" style="display:none">${escapeHtml(summary)}</textarea>
+          <textarea class="proposal-edit-box text-input" rows="4" style="display:none">${escapeHtml(p.styledSummary)}</textarea>
           ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         </div>`;
+      }
+      // No AI-generated summary and not a transient rate-limit: there is genuinely
+      // nothing safe to present as a suggestion. Point the reviewer to the source.
+      return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
     };
     const cardHtml = (p) => {
       const targetDefault = p.targetDataset
