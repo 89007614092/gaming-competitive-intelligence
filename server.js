@@ -252,9 +252,13 @@ function validateSourceUrl(input) {
   if (["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(parsed.hostname.toLowerCase())) {
     throw new Error("Local network URLs cannot be scraped");
   }
-  // Reject IP-literal private/reserved hosts (the DNS path below catches
-  // hostname-based ones at fetch time).
-  if (isPrivateOrReservedIp(parsed.hostname)) {
+  // Only IP-literal hosts can be evaluated statically here. Hostname-based
+  // private addresses (e.g. intranet names) are caught by assertPublicHost via
+  // DNS at fetch time. Evaluating isPrivateOrReservedIp on a domain name like
+  // "news.google.com" is a false positive (it isn't 4 numeric octets) and would
+  // wrongly block every normal URL.
+  const isIpLiteral = /^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname) || parsed.hostname.includes(":");
+  if (isIpLiteral && isPrivateOrReservedIp(parsed.hostname)) {
     throw new Error("Local/private network URLs cannot be scraped");
   }
   return parsed.toString();
