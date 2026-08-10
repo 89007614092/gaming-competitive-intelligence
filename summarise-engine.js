@@ -645,4 +645,6 @@ module.exports = {
   isModelReady,
   isScanModelReady,
   isScanRateLimited,
+  cooldownFrom429,
+  msUntilNextWallClockInZone,
 };
