@@ -950,12 +950,31 @@ try {
   newsCompetitorCatalog = networkData.competitors || [];
 } catch (_) { /* News still works with broad topic searches. */ }
 
+// --- User-added custom competitors (server-persisted, shared across users) ---
+// On Render's free tier the disk is ephemeral (wiped on cold start), so this is
+// durable only while the instance stays warm. The keep-alive cron keeps it up,
+// which makes this behave the same as the existing daily-budget persistence.
+// The file is gitignored so per-deployment user data is never committed.
+const CUSTOM_COMPETITORS_FILE = path.join(__dirname, "data", "custom-competitors.json");
+let customCompetitors = [];
+try {
+  const parsed = JSON.parse(fs.readFileSync(CUSTOM_COMPETITORS_FILE, "utf8"));
+  if (Array.isArray(parsed)) customCompetitors = parsed;
+} catch (_) { /* starts empty until a user adds one */ }
+
+function saveCustomCompetitors() {
+  try {
+    fs.writeFileSync(CUSTOM_COMPETITORS_FILE, JSON.stringify(customCompetitors, null, 2));
+  } catch (_) { /* non-fatal: the in-memory list still serves this process */ }
+}
+
 function resolveNewsCompetitors(value = "") {
   const requested = String(value).split(",").map(id => id.trim()).filter(Boolean);
   const ids = requested.length ? requested : DEFAULT_NEWS_COMPETITOR_IDS;
   const allowed = new Map(newsCompetitorCatalog.map(company => [company.id, company]));
+  const customs = new Map(customCompetitors.map(company => [company.id, company]));
   return [...new Set(ids)].map(id => {
-    const known = allowed.get(id);
+    const known = allowed.get(id) || customs.get(id);
     if (known) return known;
     // Unknown id => a user-added custom competitor (the id is the name the user
     // typed on the client). Synthesize a catalog entry so it still drives a
@@ -1182,6 +1201,47 @@ app.get("/api/news", async (req, res) => {
     }
     return res.status(500).json({ error: err.message });
   }
+});
+
+// --- Custom competitor definitions (server-persisted) ---
+app.get("/api/news/custom-competitors", (req, res) => {
+  res.json({ customCompetitors: customCompetitors.slice() });
+});
+
+app.post("/api/news/custom-competitors", (req, res) => {
+  const raw = (req.body && req.body.name) || "";
+  const name = String(raw).trim().replace(/\s+/g, " ").replace(/,/g, " ").trim();
+  if (!name) return res.status(400).json({ error: "name is required" });
+  if (name.length > 40) return res.status(400).json({ error: "name must be 40 characters or fewer" });
+
+  // If it already matches a built-in catalog company (by name or alias),
+  // don't create a duplicate custom entry -- hand back the real catalog entry.
+  const lower = name.toLowerCase();
+  const catalogMatch = newsCompetitorCatalog.find(company =>
+    company.name.toLowerCase() === lower ||
+    newsCompetitorAliases(company).some(a => a.toLowerCase() === lower)
+  );
+  if (catalogMatch) {
+    return res.json({ custom: false, competitor: { id: catalogMatch.id, name: catalogMatch.name } });
+  }
+
+  const existing = customCompetitors.find(c => c.name.toLowerCase() === lower);
+  if (existing) {
+    return res.json({ custom: true, competitor: existing, customCompetitors: customCompetitors.slice() });
+  }
+
+  const entry = { id: name, name, custom: true };
+  customCompetitors.push(entry);
+  saveCustomCompetitors();
+  res.json({ custom: true, competitor: entry, customCompetitors: customCompetitors.slice() });
+});
+
+app.delete("/api/news/custom-competitors/:id", (req, res) => {
+  const id = req.params.id;
+  const before = customCompetitors.length;
+  customCompetitors = customCompetitors.filter(c => c.id !== id);
+  if (customCompetitors.length !== before) saveCustomCompetitors();
+  res.json({ ok: true, customCompetitors: customCompetitors.slice() });
 });
 
 // ============================================================================
