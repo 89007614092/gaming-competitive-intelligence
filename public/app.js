@@ -180,8 +180,6 @@ function setupQA() {
           `This feature uses ${qaModel} for answering your questions and ${scanModel} for generating suggested updates in the background. ` +
           `Be aware responses are AI generated to an extent, and so the accuracy of information cannot be assured.`;
       }
-      // Warm the Q&A model once on load so the first answer is snappy.
-      fetch(`${API_BASE}/summarise/warm`, { method: "POST" }).catch(() => { /* best-effort */ });
     })
     .catch(() => { /* best-effort; static fallback disclaimer text remains visible */ });
 }
@@ -2169,18 +2167,6 @@ function loadTencentMapSDK() {
 function truncateText(text, maxLen) {
   if (text.length <= maxLen) return text;
   return text.substring(0, maxLen) + "\n\n... [content truncated]";
-}
-
-function showToast(message) {
-  const existing = document.querySelector(".toast");
-  if (existing) existing.remove();
-
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = message;
-  document.body.appendChild(toast);
-
-  setTimeout(() => toast.remove(), 3000);
 }
 
 // ===== Tencent Products Spider-Web =====
