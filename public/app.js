@@ -1019,9 +1019,11 @@ function renderNewsCards(articles, filter, savedView = false) {
           <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
         </div>
         <div class="news-card-actions">
-          <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
           <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
         </div>
+      </div>
+      <div class="news-tag-row">
+        <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
       </div>
       <p class="news-source">${escapeHtml(sourceLine)}</p>
       <p class="news-description">${escapeHtml(trimDescription(a.description))}</p>

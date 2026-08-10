@@ -456,6 +456,14 @@ body {
   font-weight: 600;
   font-size: 0.95rem;
   line-height: 1.4;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Category sits on its own line, separate from the title, so a long
+   category label can't squeeze the headline into a narrow column. */
+.news-tag-row {
+  margin-bottom: 0.5rem;
 }
 
 .news-title a {
