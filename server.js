@@ -1158,7 +1158,67 @@ let sourceScanStartedAt = 0;
 // If a scan is somehow still "in flight" after this long, treat the lock as
 // stale and allow a new scan to supersede it (otherwise a single slow/hung
 // scan would block every subsequent trigger forever on the free tier).
-const SOURCE_SCAN_STALE_MS = 4 * 60 * 1000;
+// NOTE: enrichment now runs at concurrency 1 with a paced inter-call delay, so a
+// full scan legitimately takes longer than it used to (observed ~3.7 min at
+// concurrency 2). This MUST stay comfortably above a real scan duration or the
+// lock is declared stale mid-scan and a second scan starts alongside the first —
+// which would double the model call rate, the exact opposite of the intent.
+const SOURCE_SCAN_STALE_MS = 20 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Scan-lane request budget (free-tier survival)
+// ---------------------------------------------------------------------------
+// The scan lane runs on a free model tier with BOTH a per-minute and a per-day
+// request ceiling, and failed attempts still count against the daily quota. Two
+// independent guards keep us underneath it:
+//
+//   1. SCAN_MODEL_MIN_GAP_MS — a paced minimum gap between consecutive scan-lane
+//      model calls, so we can never trip the requests-per-minute ceiling.
+//   2. SCAN_CALLS_PER_RUN_CAP / SCAN_DAILY_CALL_BUDGET — hard ceilings on how
+//      many model calls a single scan, and a single UTC day, may spend.
+//
+// The per-RUN cap is the load-bearing one. Render's free tier has an ephemeral
+// filesystem, so the persisted daily counter resets whenever the container is
+// rebuilt; the per-run cap still holds because it is enforced in-process.
+const SCAN_MODEL_MIN_GAP_MS = Number(process.env.SCAN_MODEL_MIN_GAP_MS || 4000);
+const SCAN_CALLS_PER_RUN_CAP = Number(process.env.SCAN_CALLS_PER_RUN_CAP || 8);
+const SCAN_DAILY_CALL_BUDGET = Number(process.env.SCAN_DAILY_CALL_BUDGET || 35);
+
+// Reserve paced slots ATOMICALLY. The reservation is synchronous (no await
+// before scanModelSlot is advanced), so concurrent callers each get their own
+// slot instead of all waking at the same instant.
+let scanModelSlot = 0;
+async function paceScanModelCall() {
+  const now = Date.now();
+  const slot = Math.max(now, scanModelSlot);
+  scanModelSlot = slot + SCAN_MODEL_MIN_GAP_MS;
+  const wait = slot - now;
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+}
+
+function utcDayKey(d = new Date()) { return d.toISOString().slice(0, 10); }
+
+// Returns the live budget record, rolling it over at UTC midnight.
+function scanBudget() {
+  const today = utcDayKey();
+  if (!sourceState.scanBudget || sourceState.scanBudget.day !== today) {
+    sourceState.scanBudget = { day: today, used: 0 };
+  }
+  return sourceState.scanBudget;
+}
+
+function scanBudgetRemaining() {
+  return Math.max(0, SCAN_DAILY_CALL_BUDGET - scanBudget().used);
+}
+
+// Count the call BEFORE it is made: a 429 still consumes provider quota, so an
+// attempt must cost us budget even when it fails.
+function consumeScanBudget() {
+  const b = scanBudget();
+  b.used += 1;
+  saveSourceState(); // persist immediately so a crash/restart can't rewind it
+  return b.used;
+}
 
 // Cache of resolved real article URLs (Google News redirect -> publisher URL),
 // persisted via sourceState.resolvedUrls so we rarely re-query a search engine.
@@ -1942,7 +2002,11 @@ async function runSourceScan({ force = false } = {}) {
     // over time as the resolver succeeds, instead of being permanently blank.
     const toEnrich = [...newProps];
     const newIds = new Set(newProps.map(p => p.id));
-    const RETRY_CAP = 20;
+    // Retry budget per scan. Was 20, which let a single scan queue 20 model
+    // calls — 40% of a 50-request day — and guaranteed a burst that tripped the
+    // per-minute ceiling. Kept deliberately small; unfinished proposals simply
+    // roll forward to the next scan.
+    const RETRY_CAP = Number(process.env.SCAN_RETRY_CAP || 3);
     const RETRY_COOLDOWN_MS = 20 * 60 * 1000; // at most one retry / 20 min per proposal
     let retryAdded = 0;
     for (const prop of existing) {
@@ -1968,15 +2032,23 @@ async function runSourceScan({ force = false } = {}) {
       retryAdded++;
     }
 
+    // Model calls spent by THIS scan run — the in-process ceiling that still
+    // holds even when the persisted daily counter has been wiped by a restart.
+    let callsThisRun = 0;
+
     if (toEnrich.length) {
-      // If the model is already rate-limited we skip model calls for the WHOLE
-      // batch and degrade to the heuristic reason, so a single 429 doesn't
-      // trigger 20 more doomed calls that burn the rest of the daily quota.
-      // Per-proposal cooldown set when a scan call is rate-limited (2b): a short
-      // backoff so the NEXT scan retries this proposal in a few minutes instead
-      // of inheriting the engine's full cooldown and waiting ~20 min.
-      const PER_PROPOSAL_BACKOFF_MS = 3 * 60 * 1000;
-      await mapWithConcurrency(toEnrich, 2, async (prop) => {
+      // Per-proposal cooldown set when a scan call is rate-limited.
+      //
+      // This was 3 minutes, which caused a stampede: the engine's own cooldown
+      // holds every call for an hour, so by the time it lapsed EVERY parked
+      // proposal had been eligible again for ~57 minutes and they all fired at
+      // once, instantly re-tripping the limit. A backoff longer than the engine
+      // cooldown restores the stagger, so proposals come back a few at a time.
+      const PER_PROPOSAL_BACKOFF_MS = Number(process.env.SCAN_PROPOSAL_BACKOFF_MS || 45 * 60 * 1000);
+      // Concurrency 1: enrichment is now strictly serial. Combined with the
+      // paced gap between model calls this makes the per-minute ceiling
+      // structurally unreachable.
+      await mapWithConcurrency(toEnrich, 1, async (prop) => {
         // (a) Fetch a real preview of the source article. A bot-wall / anti-scrape
         // block is recorded as fetchStatus:"blocked" so the UI can ask for manual
         // review instead of caching garbage (#3) or presenting raw scraped text.
@@ -2018,11 +2090,27 @@ async function runSourceScan({ force = false } = {}) {
         if (!baseText) return; // truly nothing to work with
 
         let enriched = null;
-        // Respect the engine's in-scan guard so a single 429 doesn't trigger a
-        // burst of doomed calls; each proposal still retries independently on
-        // later scans (2b).
-        if (!isScanRateLimited()) {
+        // Three gates before we are allowed to spend a request:
+        //   - the engine's cooldown (a 429 already happened; don't pile on),
+        //   - this run's call cap, and
+        //   - the remaining daily budget.
+        // Anything blocked here is left in an honest "pending" state and picked
+        // up by a later scan, rather than being filled with raw scraped text.
+        const outOfRunBudget = callsThisRun >= SCAN_CALLS_PER_RUN_CAP;
+        const outOfDayBudget = scanBudgetRemaining() <= 0;
+        if (!isScanRateLimited() && !outOfRunBudget && !outOfDayBudget) {
+          // Pace the call so we can never exceed the provider's per-minute
+          // ceiling, and count it before it is issued (a failed attempt still
+          // consumes provider quota).
+          await paceScanModelCall();
+          callsThisRun++;
+          consumeScanBudget();
           try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
+        } else if (outOfRunBudget || outOfDayBudget) {
+          // Budget exhausted — do NOT set a cooldown. The proposal stays eligible
+          // so the next scan (or the next UTC day) can finish it.
+          if (!prop.styledSummary) prop.enrichStatus = "pending";
+          return;
         }
 
         if (enriched && enriched.rateLimited) {
@@ -2073,6 +2161,10 @@ async function runSourceScan({ force = false } = {}) {
       considered,
       proposed,
       counts,
+      // Request accounting — makes it obvious from the logs alone whether a scan
+      // was throttled by the run cap, the daily budget, or a provider 429.
+      modelCalls: callsThisRun,
+      dailyBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET },
       durationMs: Date.now() - startedAt,
     };
   } finally {
@@ -2098,6 +2190,19 @@ app.get("/api/regulatory-status", (req, res) => {
       name: DEFAULT_MODEL,
       baseUrl: (process.env.OPEN_MODEL_BASE_URL || "https://api.groq.com/openai/v1"),
     },
+  });
+});
+
+// Liveness probe. Deliberately side-effect free: the keep-alive cron hits THIS
+// endpoint, not /api/source-scan, so waking the container costs zero model
+// requests. Scans are driven by the internal scheduler instead.
+app.get("/healthz", (req, res) => {
+  res.json({
+    ok: true,
+    uptimeSeconds: Math.round(process.uptime()),
+    lastScanAt: sourceState.lastFullScan || null,
+    scanning: sourceScanInFlight,
+    scanBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET, day: scanBudget().day },
   });
 });
 
@@ -2155,11 +2260,29 @@ app.post("/api/proposed-changes/:id/dismiss", (req, res) => {
 });
 
 // Server-side scheduler: scan sources whose TTL has elapsed. The single-flight
-// lock prevents overlapping scans. Render's free tier sleeps when idle, so pair
-// this with the keep-alive cron in .github/workflows to stay live 24/7.
-const SOURCE_SCAN_TICK_MS = 5 * 60 * 1000;
+// lock prevents overlapping scans.
+//
+// Cadence is deliberately conservative. The theoretical ceiling on model calls
+// is (minutes_per_day / tick_minutes) x calls_per_scan, so a 5-minute tick was
+// budgeting for thousands of calls a day against a 50/day allowance. At 60
+// minutes, with the per-run cap, the scan lane cannot outrun its quota.
+const SOURCE_SCAN_TICK_MS = Number(process.env.SOURCE_SCAN_TICK_MS || 60 * 60 * 1000);
 setInterval(() => { runSourceScan({ force: false }).catch(() => {}); }, SOURCE_SCAN_TICK_MS);
-setTimeout(() => { runSourceScan({ force: false }).catch(() => {}); }, 30000);
+
+// Boot scan, guarded. Render's free tier spins the container down when idle, so
+// every wake-up is a fresh process — an unguarded boot scan meant one scan per
+// wake, no matter what the tick interval said. The guard consults the PERSISTED
+// last-scan timestamp so a restart shortly after a scan doesn't repeat it.
+const BOOT_SCAN_MIN_GAP_MS = Number(process.env.BOOT_SCAN_MIN_GAP_MS || 60 * 60 * 1000);
+setTimeout(() => {
+  const last = sourceState.lastFullScan ? new Date(sourceState.lastFullScan).getTime() : 0;
+  const since = Date.now() - last;
+  if (last && since < BOOT_SCAN_MIN_GAP_MS) {
+    console.log(`[source-scan] boot scan skipped — last scan ${Math.round(since / 60000)}m ago (min gap ${Math.round(BOOT_SCAN_MIN_GAP_MS / 60000)}m)`);
+    return;
+  }
+  runSourceScan({ force: false }).catch(() => {});
+}, 30000);
 
 // POST /api/scrape — extract readable website text or a public video transcript
 app.post("/api/scrape", async (req, res) => {

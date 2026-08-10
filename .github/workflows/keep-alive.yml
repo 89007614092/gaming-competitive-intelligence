@@ -1,25 +1,27 @@
-name: Keep Alive — Source Crawler
+name: Keep Alive — Render Warm Ping
 
-# Keeps the deployed app awake and the curated source crawler (Scope B) running
-# on its per-source TTL even when no one has the page open. Render's free tier
-# spins down when idle, so this cron pings the scan endpoint every 30 minutes.
+# Keeps the deployed app reachable on Render's free tier, which spins the
+# container down when idle.
+#
+# IMPORTANT: this pings a side-effect-free health endpoint (/healthz). It used
+# to POST /api/source-scan every 30 minutes, which meant the crawler ran ~48
+# times a day unattended and burned the scan lane's free-tier request quota
+# before anyone opened the app. Scans are now driven by the server's own
+# internal scheduler; this workflow only keeps the instance warm.
 #
 # REQUIRED: add a repository secret named RENDER_URL containing your deployed
 # URL, e.g. https://gaming-competitive-intelligence.onrender.com
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch: {}
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger source scan
+      - name: Warm the instance (no scan triggered)
         run: |
-          curl -fsS --max-time 60 -X POST \
-            -H "Content-Type: application/json" \
-            -d '{}' \
-            "${RENDER_URL}/api/source-scan" || echo "Ping failed (non-fatal)"
+          curl -fsS --max-time 60 "${RENDER_URL}/healthz" || echo "Ping failed (non-fatal)"
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
