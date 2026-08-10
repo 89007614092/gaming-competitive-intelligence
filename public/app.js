@@ -608,8 +608,14 @@ async function setupNewsCompetitors() {
   document.getElementById("closeCompetitorModal")?.addEventListener("click", closeCompetitorModal);
   document.getElementById("cancelCompetitorSelection")?.addEventListener("click", closeCompetitorModal);
   document.getElementById("applyCompetitorSelection")?.addEventListener("click", applyCompetitorSelection);
+  document.getElementById("addCustomCompetitorBtn")?.addEventListener("click", addCustomCompetitor);
+  document.getElementById("customCompetitorInput")?.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); addCustomCompetitor(); }
+  });
   document.getElementById("selectAllCompetitors")?.addEventListener("click", () => {
-    pendingNewsCompetitorIds = new Set(newsCompetitorCatalog.map(company => company.id));
+    const validIds = new Set(newsCompetitorCatalog.map(company => company.id));
+    const custom = [...pendingNewsCompetitorIds].filter(id => !validIds.has(id));
+    pendingNewsCompetitorIds = new Set([...newsCompetitorCatalog.map(company => company.id), ...custom]);
     renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
   });
   document.getElementById("clearAllCompetitors")?.addEventListener("click", () => {
@@ -631,8 +637,8 @@ async function setupNewsCompetitors() {
       throw new Error(result.error || "Competitor list is unavailable");
     }
     newsCompetitorCatalog = result.data.competitors;
-    const validIds = new Set(newsCompetitorCatalog.map(company => company.id));
-    selectedNewsCompetitorIds = selectedNewsCompetitorIds.filter(id => validIds.has(id));
+    // Keep catalog ids; preserve any user-added custom ids (absent from the
+    // catalog by design) so they are not silently dropped on every load.
     if (!selectedNewsCompetitorIds.length) selectedNewsCompetitorIds = [...DEFAULT_NEWS_COMPETITORS];
     pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
     localStorage.setItem(NEWS_COMPETITORS_KEY, JSON.stringify(selectedNewsCompetitorIds));
@@ -643,9 +649,12 @@ async function setupNewsCompetitors() {
 }
 
 function getSelectedNewsCompetitors() {
+  const catalogIds = new Set(newsCompetitorCatalog.map(company => company.id));
   return selectedNewsCompetitorIds.map(id => {
     const company = newsCompetitorCatalog.find(item => item.id === id);
-    return company || { id, name: id.replace(/-/g, " ").replace(/\b\w/g, char => char.toUpperCase()) };
+    if (company) return { id: company.id, name: company.name, custom: false };
+    // Id not in the catalog => a user-added custom competitor; keep it labelled.
+    return { id, name: id.replace(/-/g, " ").replace(/\b\w/g, char => char.toUpperCase()), custom: true };
   });
 }
 
@@ -656,7 +665,7 @@ function updateCompetitorMonitorCard() {
   if (count) count.textContent = selected.length;
   if (hoverList) {
     hoverList.innerHTML = selected.length
-      ? `<strong>Currently monitored</strong>${selected.map(company => escapeHtml(company.name)).join("<br>")}`
+      ? `<strong>Currently monitored</strong>${selected.map(company => escapeHtml(company.name) + (company.custom ? ' <span class="custom-badge">custom</span>' : "")).join("<br>")}`
       : "<strong>No competitors selected</strong>Use Add Competitors to build a focused list.";
   }
 }
@@ -676,7 +685,11 @@ function closeCompetitorModal() {
 function renderCompetitorPicker(searchQuery = "") {
   const container = document.getElementById("competitorPickerList");
   const query = searchQuery.trim().toLowerCase();
+  const catalogIds = new Set(newsCompetitorCatalog.map(company => company.id));
   const companies = newsCompetitorCatalog.filter(company => !query || company.name.toLowerCase().includes(query));
+  const customIds = [...pendingNewsCompetitorIds]
+    .filter(id => !catalogIds.has(id) && (!query || id.toLowerCase().includes(query)))
+    .sort((a, b) => a.localeCompare(b));
 
   if (!newsCompetitorCatalog.length) {
     container.innerHTML = '<div class="empty-state"><p>Competitor list is unavailable. Please try again.</p></div>';
@@ -684,12 +697,33 @@ function renderCompetitorPicker(searchQuery = "") {
     return;
   }
 
-  container.innerHTML = companies.length
-    ? companies.map(company => `
+  const parts = [];
+  if (customIds.length) {
+    parts.push('<div class="picker-group-label">Your custom competitors</div>');
+    customIds.forEach(id => {
+      parts.push(`
+      <div class="competitor-picker-option custom">
+        <label>
+          <input type="checkbox" value="${escapeHtml(id)}" ${pendingNewsCompetitorIds.has(id) ? "checked" : ""}>
+          <span>${escapeHtml(id)}</span>
+        </label>
+        <button type="button" class="custom-remove" data-remove-id="${escapeHtml(id)}" aria-label="Remove custom competitor">&times;</button>
+      </div>`);
+    });
+  }
+  if (companies.length) {
+    if (customIds.length) parts.push('<div class="picker-group-label">From the catalog</div>');
+    companies.forEach(company => {
+      parts.push(`
       <label class="competitor-picker-option">
         <input type="checkbox" value="${escapeHtml(company.id)}" ${pendingNewsCompetitorIds.has(company.id) ? "checked" : ""}>
         <span>${escapeHtml(company.name)}</span>
-      </label>`).join("")
+      </label>`);
+    });
+  }
+
+  container.innerHTML = parts.length
+    ? parts.join("")
     : '<div class="empty-state"><p>No competitors match that search.</p></div>';
 
   container.querySelectorAll('input[type="checkbox"]').forEach(input => {
@@ -699,7 +733,38 @@ function renderCompetitorPicker(searchQuery = "") {
       updateCompetitorSelectionSummary();
     });
   });
+  container.querySelectorAll('.custom-remove').forEach(btn => {
+    btn.addEventListener("click", () => {
+      pendingNewsCompetitorIds.delete(btn.dataset.removeId);
+      renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
+    });
+  });
   updateCompetitorSelectionSummary();
+}
+
+function addCustomCompetitor() {
+  const input = document.getElementById("customCompetitorInput");
+  if (!input) return;
+  const name = input.value.trim().replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  if (!name) return;
+  if (name.length > 40) { showToast("Keep competitor names under 40 characters."); return; }
+  const lower = name.toLowerCase();
+  // If the typed name matches a catalog company (by name or alias), reuse its
+  // real id instead of creating a duplicate custom entry.
+  const match = newsCompetitorCatalog.find(company => {
+    const aliases = (company.name || "").split(/\s*\/\s*|\s+x\s+/i).map(a => a.trim().toLowerCase()).filter(Boolean);
+    return company.name.toLowerCase() === lower || aliases.includes(lower);
+  });
+  const id = match ? match.id : name;
+  if (pendingNewsCompetitorIds.has(id)) {
+    showToast(match ? `${match.name} is already selected.` : "That competitor is already in your list.");
+    input.value = "";
+    return;
+  }
+  pendingNewsCompetitorIds.add(id);
+  input.value = "";
+  renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
+  showToast(match ? `Added ${match.name}` : `Added custom competitor: ${name}`);
 }
 
 function updateCompetitorSelectionSummary() {
@@ -898,13 +963,20 @@ function renderNewsCards(articles, filter, savedView = false) {
   feed.innerHTML = filtered
     .map((a, i) => {
       const safeUrl = /^https?:\/\//i.test(a.url || "") ? a.url : "#";
-      const sourceBits = [a.sourceName];
+      const sourceBits = [];
+      if (a.sourceName) {
+        sourceBits.push(a.sourceName);
+      } else if (safeUrl !== "#") {
+        // Fall back to the article's host, not the full URL (the title is the
+        // link already, so repeating the raw URL wastes space on the card).
+        try { sourceBits.push(new URL(a.url).hostname.replace(/^www\./i, "")); } catch (_) { /* no host */ }
+      }
       if (a.publishedAt) {
         sourceBits.push(new Date(a.publishedAt).toLocaleDateString(undefined, {
           year: "numeric", month: "short", day: "numeric"
         }));
       }
-      const sourceLine = sourceBits.filter(Boolean).join(" · ") || a.url || "";
+      const sourceLine = sourceBits.filter(Boolean).join(" · ");
       const saved = isNewsArticleSaved(a);
       const articleKey = encodeURIComponent(newsArticleKey(a));
 
@@ -920,10 +992,22 @@ function renderNewsCards(articles, filter, savedView = false) {
         </div>
       </div>
       <p class="news-source">${escapeHtml(sourceLine)}</p>
-      <p class="news-description">${escapeHtml(a.description || "")}</p>
+      <p class="news-description">${escapeHtml(trimDescription(a.description))}</p>
     </div>`;
     })
     .join("");
+}
+
+// Trims an article snippet to a short "hook" (first part) on a word boundary so
+// narrow news cards stay at-a-glance without vertical scrolling. CSS line-clamp
+// handles the final visual truncation; this caps the DOM size.
+function trimDescription(text, max = 200) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + "…";
 }
 
 function filterNews(keyword, tagEl) {

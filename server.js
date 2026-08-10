@@ -954,7 +954,14 @@ function resolveNewsCompetitors(value = "") {
   const requested = String(value).split(",").map(id => id.trim()).filter(Boolean);
   const ids = requested.length ? requested : DEFAULT_NEWS_COMPETITOR_IDS;
   const allowed = new Map(newsCompetitorCatalog.map(company => [company.id, company]));
-  return [...new Set(ids)].map(id => allowed.get(id)).filter(Boolean);
+  return [...new Set(ids)].map(id => {
+    const known = allowed.get(id);
+    if (known) return known;
+    // Unknown id => a user-added custom competitor (the id is the name the user
+    // typed on the client). Synthesize a catalog entry so it still drives a
+    // focused, phrase-based news query instead of being silently ignored.
+    return { id, name: id, custom: true };
+  });
 }
 
 let bundledNewsCache = null;
@@ -1134,7 +1141,7 @@ app.get("/api/news", async (req, res) => {
         count: liveArticles.length,
         articles: liveArticles,
         topics: NEWS_TOPICS.map(topic => topic.label),
-        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name })),
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
         searchedAt,
         live: true,
         cached: false,
@@ -1150,7 +1157,7 @@ app.get("/api/news", async (req, res) => {
         count: fallback.articles.length,
         articles: fallback.articles,
         topics: NEWS_TOPICS.map(topic => topic.label),
-        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name })),
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
         searchedAt: fallback.generatedAt,
         live: false,
         cached: true,
@@ -1167,7 +1174,7 @@ app.get("/api/news", async (req, res) => {
         count: fallback.articles.length,
         articles: fallback.articles,
         topics: NEWS_TOPICS.map(topic => topic.label),
-        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name })),
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
         searchedAt: fallback.generatedAt,
         live: false,
         cached: true,
