@@ -1194,6 +1194,13 @@ let sourcesCache = null;
 let sourceState = loadSourceState();
 let proposedChanges = loadProposed();
 let sourceScanInFlight = false;
+// Model calls made in the CURRENT scan run (reset at scan start, surfaced in
+// /healthz as callsThisRun). Module-scoped because /healthz runs outside the
+// scan closure.
+let scanModelCallsThisRun = 0;
+// Resolver health: how many article-URL resolutions we've attempted vs. how
+// many succeeded (real publisher URL found). Surfaced as resolverSuccessRate.
+const resolverStats = { attempts: 0, ok: 0 };
 let sourceScanStartedAt = 0;
 // If a scan is somehow still "in flight" after this long, treat the lock as
 // stale and allow a new scan to supersede it (otherwise a single slow/hung
@@ -1259,6 +1266,7 @@ function scanBudgetRemaining() {
 function consumeScanBudget() {
   const b = scanBudget();
   b.used += 1;
+  scanModelCallsThisRun += 1; // per-run counter for /healthz
   saveSourceState(); // persist immediately so a crash/restart can't rewind it
   return b.used;
 }
@@ -1375,7 +1383,10 @@ function sharedCount(a, b) {
 }
 // Ranges covering non-Latin scripts (CJK, Cyrillic, Greek, Arabic, Hebrew,
 // Devanagari, Thai, Kana) used to reject clearly non-English items.
-const NON_LATIN = /[㐀-鿿぀-ヿ\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u0590-\u05FF\u0900-\u097F\u0E00-\u0E7F]/;
+// NOTE: the /g flag is REQUIRED — String.prototype.match without it returns a
+// single match object (length 1), which silently made the ">6 glyphs" test below
+// dead code and let space-free CJK text pass as English.
+const NON_LATIN = /[㐀-鿿぀-ヿ\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u0590-\u05FF\u0900-\u097F\u0E00-\u0E7F]/g;
 function isLikelyEnglish(text) {
   // Permissive heuristic (not a real language detector): only bail on a solid
   // block of non-Latin glyphs (>6) and otherwise require a 60% Latin-token ratio,
@@ -1522,8 +1533,10 @@ function detectKnowledgeCategory(text, sourceCategory) {
 // GDELT DOC API if DuckDuckGo can't resolve the URL.
 async function resolveGoogleNewsUrl(googleUrl, title, domain) {
   if (resolvedUrlMap.has(googleUrl)) return resolvedUrlMap.get(googleUrl);
+  resolverStats.attempts++; // a real (non-cached) resolution is being attempted
   const cacheAndReturn = (real) => {
     if (!real) return null;
+    resolverStats.ok++; // a real publisher URL was successfully resolved
     resolvedUrlMap.set(googleUrl, real);
     if (!sourceState.resolvedUrls) sourceState.resolvedUrls = {};
     sourceState.resolvedUrls[googleUrl] = real;
@@ -2016,6 +2029,7 @@ async function runSourceScan({ force = false } = {}) {
   }
   sourceScanInFlight = true;
   sourceScanStartedAt = Date.now();
+  scanModelCallsThisRun = 0; // reset per-run call counter for /healthz
   console.log(`[source-scan] starting (force=${!!force})`);
   const startedAt = Date.now();
 
@@ -2310,12 +2324,20 @@ app.get("/api/regulatory-status", (req, res) => {
 // endpoint, not /api/source-scan, so waking the container costs zero model
 // requests. Scans are driven by the internal scheduler instead.
 app.get("/healthz", (req, res) => {
+  const stuckRateLimited = (proposedChanges.items || [])
+    .filter(i => i.status === "pending" && i.enrichStatus === "rate-limited").length;
+  const resolverSuccessRate = resolverStats.attempts > 0
+    ? Math.round((resolverStats.ok / resolverStats.attempts) * 100)
+    : null;
   res.json({
     ok: true,
     uptimeSeconds: Math.round(process.uptime()),
     lastScanAt: sourceState.lastFullScan || null,
     scanning: sourceScanInFlight,
     scanBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET, day: scanBudget().day },
+    callBudget: { used: scanModelCallsThisRun, limit: SCAN_CALLS_PER_RUN_CAP },
+    stuckRateLimitedProposals: stuckRateLimited,
+    resolver: { attempts: resolverStats.attempts, ok: resolverStats.ok, successRatePct: resolverSuccessRate },
   });
 });
 
