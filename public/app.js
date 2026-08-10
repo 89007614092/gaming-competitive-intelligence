@@ -593,6 +593,10 @@ const DEFAULT_NEWS_COMPETITORS = ["netease", "mihoyo", "sony", "microsoft"];
 let newsCompetitorCatalog = [];
 let selectedNewsCompetitorIds = loadSelectedNewsCompetitors();
 let pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
+// Server-persisted custom competitors (shared, survives browser clears). The
+// per-user *selection* still lives in localStorage; only the definitions move
+// to the server so they aren't localStorage-only.
+let serverCustomCompetitors = [];
 
 function loadSelectedNewsCompetitors() {
   try {
@@ -670,10 +674,11 @@ function updateCompetitorMonitorCard() {
   }
 }
 
-function openCompetitorModal() {
+async function openCompetitorModal() {
   pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
   const search = document.getElementById("competitorPickerSearch");
   if (search) search.value = "";
+  await fetchServerCustomCompetitors();
   renderCompetitorPicker();
   document.getElementById("competitorModal").style.display = "flex";
 }
@@ -687,9 +692,17 @@ function renderCompetitorPicker(searchQuery = "") {
   const query = searchQuery.trim().toLowerCase();
   const catalogIds = new Set(newsCompetitorCatalog.map(company => company.id));
   const companies = newsCompetitorCatalog.filter(company => !query || company.name.toLowerCase().includes(query));
-  const customIds = [...pendingNewsCompetitorIds]
-    .filter(id => !catalogIds.has(id) && (!query || id.toLowerCase().includes(query)))
-    .sort((a, b) => a.localeCompare(b));
+
+  // Customs = the server-persisted list, plus any custom id already in the
+  // pending selection that the server doesn't know about yet (e.g. right after
+  // a cold start wiped the disk). Both render under "Your custom competitors".
+  const pendingOnlyIds = [...pendingNewsCompetitorIds]
+    .filter(id => !catalogIds.has(id) && !serverCustomCompetitors.some(c => c.id === id));
+  const customEntries = [
+    ...serverCustomCompetitors,
+    ...pendingOnlyIds.map(id => ({ id, name: id, custom: true })),
+  ].filter(c => !query || c.name.toLowerCase().includes(query) || c.id.toLowerCase().includes(query))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   if (!newsCompetitorCatalog.length) {
     container.innerHTML = '<div class="empty-state"><p>Competitor list is unavailable. Please try again.</p></div>';
@@ -698,21 +711,21 @@ function renderCompetitorPicker(searchQuery = "") {
   }
 
   const parts = [];
-  if (customIds.length) {
-    parts.push('<div class="picker-group-label">Your custom competitors</div>');
-    customIds.forEach(id => {
+  if (customEntries.length) {
+    parts.push('<div class="picker-group-label">Your custom competitors (saved on server)</div>');
+    customEntries.forEach(entry => {
       parts.push(`
       <div class="competitor-picker-option custom">
         <label>
-          <input type="checkbox" value="${escapeHtml(id)}" ${pendingNewsCompetitorIds.has(id) ? "checked" : ""}>
-          <span>${escapeHtml(id)}</span>
+          <input type="checkbox" value="${escapeHtml(entry.id)}" ${pendingNewsCompetitorIds.has(entry.id) ? "checked" : ""}>
+          <span>${escapeHtml(entry.name)}</span>
         </label>
-        <button type="button" class="custom-remove" data-remove-id="${escapeHtml(id)}" aria-label="Remove custom competitor">&times;</button>
+        <button type="button" class="custom-remove" data-remove-id="${escapeHtml(entry.id)}" aria-label="Remove custom competitor">&times;</button>
       </div>`);
     });
   }
   if (companies.length) {
-    if (customIds.length) parts.push('<div class="picker-group-label">From the catalog</div>');
+    if (customEntries.length) parts.push('<div class="picker-group-label">From the catalog</div>');
     companies.forEach(company => {
       parts.push(`
       <label class="competitor-picker-option">
@@ -734,37 +747,56 @@ function renderCompetitorPicker(searchQuery = "") {
     });
   });
   container.querySelectorAll('.custom-remove').forEach(btn => {
-    btn.addEventListener("click", () => {
-      pendingNewsCompetitorIds.delete(btn.dataset.removeId);
-      renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
-    });
+    btn.addEventListener("click", () => removeCustomCompetitor(btn.dataset.removeId));
   });
   updateCompetitorSelectionSummary();
 }
 
-function addCustomCompetitor() {
+async function fetchServerCustomCompetitors() {
+  try {
+    const res = await fetch(`${API_BASE}/news/custom-competitors`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    serverCustomCompetitors = Array.isArray(data.customCompetitors) ? data.customCompetitors : [];
+  } catch (_) { /* keep whichever list we already had */ }
+}
+
+async function removeCustomCompetitor(id) {
+  try {
+    await fetch(`${API_BASE}/news/custom-competitors/${encodeURIComponent(id)}`, { method: "DELETE" });
+  } catch (_) { /* fall through to local cleanup regardless */ }
+  pendingNewsCompetitorIds.delete(id);
+  serverCustomCompetitors = serverCustomCompetitors.filter(c => c.id !== id);
+  renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
+}
+
+async function addCustomCompetitor() {
   const input = document.getElementById("customCompetitorInput");
   if (!input) return;
   const name = input.value.trim().replace(/,/g, " ").replace(/\s+/g, " ").trim();
   if (!name) return;
   if (name.length > 40) { showToast("Keep competitor names under 40 characters."); return; }
-  const lower = name.toLowerCase();
-  // If the typed name matches a catalog company (by name or alias), reuse its
-  // real id instead of creating a duplicate custom entry.
-  const match = newsCompetitorCatalog.find(company => {
-    const aliases = (company.name || "").split(/\s*\/\s*|\s+x\s+/i).map(a => a.trim().toLowerCase()).filter(Boolean);
-    return company.name.toLowerCase() === lower || aliases.includes(lower);
-  });
-  const id = match ? match.id : name;
-  if (pendingNewsCompetitorIds.has(id)) {
-    showToast(match ? `${match.name} is already selected.` : "That competitor is already in your list.");
-    input.value = "";
-    return;
-  }
-  pendingNewsCompetitorIds.add(id);
   input.value = "";
-  renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
-  showToast(match ? `Added ${match.name}` : `Added custom competitor: ${name}`);
+  // Server is the source of truth: it dedupes against the catalog and persists
+  // the custom definition so it survives across devices and browser clears.
+  try {
+    const res = await fetch(`${API_BASE}/news/custom-competitors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) { showToast("Could not add that competitor."); return; }
+    const data = await res.json();
+    const competitor = data.competitor;
+    if (!competitor) { showToast("Could not add that competitor."); return; }
+    pendingNewsCompetitorIds.add(competitor.id);
+    if (Array.isArray(data.customCompetitors)) serverCustomCompetitors = data.customCompetitors;
+    else await fetchServerCustomCompetitors();
+    renderCompetitorPicker(document.getElementById("competitorPickerSearch")?.value || "");
+    showToast(data.custom ? `Saved custom competitor: ${competitor.name}` : `Added ${competitor.name}`);
+  } catch (_) {
+    showToast("Could not add that competitor.");
+  }
 }
 
 function updateCompetitorSelectionSummary() {

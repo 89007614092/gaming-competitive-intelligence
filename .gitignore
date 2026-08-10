@@ -12,6 +12,8 @@ data/doc*.txt
 # Generated at runtime by the curated source monitor (Scope C)
 data/proposed-changes.json
 data/source-state.json
+# User-added custom news competitors (server-persisted, per-deployment)
+data/custom-competitors.json
 # Local model cache (Transformers.js)
 .model_cache/
 model-cache/
