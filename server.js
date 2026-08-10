@@ -24,6 +24,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const { execSync } = require("child_process");
+const dns = require("dns/promises");
 function resolvePython() {
   const candidates = [
     "/Users/mollybarlow/.workbuddy/binaries/python/envs/default/bin/python3",
@@ -192,6 +193,52 @@ function stripHtml(str = "") {
   return decodeHtmlEntities(str.replace(/<[^>]*>/g, "")).trim();
 }
 
+// Returns true for IP addresses that must never be fetched: loopback, private
+// RFC1918 ranges, link-local (incl. 169.254.169.254 cloud metadata), CGNAT,
+// and multicast/reserved. Used to block SSRF whether the host is given as a
+// literal IP or resolved via DNS.
+function isPrivateOrReservedIp(ip) {
+  if (!ip) return true;
+  const v = String(ip).trim().toLowerCase();
+  // IPv6
+  if (v.includes(":")) {
+    if (v === "::1" || v === "::" || v.startsWith("fe80") || v.startsWith("fc") || v.startsWith("fd")) return true;
+    if (v.startsWith("::ffff:")) return isPrivateOrReservedIp(v.slice(7)); // IPv4-mapped
+    return false;
+  }
+  // IPv4
+  const parts = v.split(".").map(Number);
+  if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return true;
+  const [a, b] = parts;
+  if (a === 10) return true;                                  // 10.0.0.0/8
+  if (a === 127) return true;                                 // loopback
+  if (a === 0) return true;                                   // 0.0.0.0/8
+  if (a === 169 && b === 254) return true;                    // 169.254.0.0/16 link-local
+  if (a === 172 && b >= 16 && b <= 31) return true;           // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;                    // 192.168.0.0/16
+  if (a === 100 && b >= 64 && b <= 127) return true;          // 100.64.0.0/10 CGNAT
+  if (a >= 224) return true;                                  // multicast + reserved
+  return false;
+}
+
+// Resolve a hostname and ensure the resolved address is public. Stops
+// DNS-rebinding and private-hostname SSRF. Rejects outright on resolve failure
+// (we do not silently proceed to a fetch of an unverifiable host).
+async function assertPublicHost(hostname) {
+  const literal = String(hostname).replace(/^\[|\]$/g, ""); // strip IPv6 brackets
+  if (literal.match(/^\d+\.\d+\.\d+\.\d+$/) || literal.includes(":")) {
+    if (isPrivateOrReservedIp(literal)) throw new Error("Blocked address range: " + hostname);
+  }
+  let address;
+  try {
+    ({ address } = await dns.lookup(literal, { all: false }));
+  } catch (e) {
+    if (/Blocked address range/.test(e.message)) throw e;
+    throw new Error("Could not resolve source host: " + hostname);
+  }
+  if (isPrivateOrReservedIp(address)) throw new Error("Blocked address range: " + hostname);
+}
+
 function validateSourceUrl(input) {
   let parsed;
   try {
@@ -205,19 +252,30 @@ function validateSourceUrl(input) {
   if (["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(parsed.hostname.toLowerCase())) {
     throw new Error("Local network URLs cannot be scraped");
   }
+  // Reject IP-literal private/reserved hosts (the DNS path below catches
+  // hostname-based ones at fetch time).
+  if (isPrivateOrReservedIp(parsed.hostname)) {
+    throw new Error("Local/private network URLs cannot be scraped");
+  }
   return parsed.toString();
 }
 
 async function fetchTextResource(url, accept = "text/html,application/xhtml+xml,text/plain", timeoutMs = 20000, userAgent = SCRAPE_USER_AGENT) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const validated = validateSourceUrl(url);
+  const parsedHost = new URL(validated).hostname;
+  await assertPublicHost(parsedHost); // resolve + reject private/loopback before fetching
   try {
-    const response = await fetch(validateSourceUrl(url), {
+    const response = await fetch(validated, {
       headers: { "User-Agent": userAgent, Accept: accept },
       redirect: "follow",
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Source returned HTTP ${response.status}`);
+    // The redirect chain may have landed on a private IP (redirect: "follow").
+    // Re-validate the FINAL url so a 302 to 169.254.169.254 etc. is blocked.
+    await assertPublicHost(new URL(response.url).hostname);
     return {
       text: await response.text(),
       url: response.url,
@@ -1385,6 +1443,17 @@ const CATEGORY_LABELS = {
   "tencent-products": "Tencent Product",
   "current-game-ai": "Current Game AI",
 };
+
+// Only allow category keys that exist in CATEGORY_LABELS. This blocks both
+// arbitrary keys (which would create stray top-level categories) and the
+// prototype-pollution keys "__proto__"/"constructor"/"prototype" — assigning
+// data.categories["__proto__"] would mutate Object.prototype. Returns the safe
+// key, or null if the supplied key is not a known category.
+function sanitizeCategoryKey(key) {
+  if (typeof key !== "string") return null;
+  if (Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, key)) return key;
+  return null;
+}
 const NAMED_MODEL = /\b(gpt-?[345]\b|claude|gemini|llama|kimi|qwen|mistral|grok|deepseek|ernie|yi-|phi-|mixtral|o[13]\b|gpt4|gpt5)\b/;
 
 // ---- Proposed-change "why suggested" taxonomy. This is intentionally SEPARATE
@@ -1853,8 +1922,8 @@ function integrateProposal(prop, edit, target, targetCategoryKey) {
         linkLabel: publisher,
       });
     } else if (target === "knowledge") {
-      const key = targetCategoryKey || prop.targetCategory || "regulations";
-      if (!data.categories[key]) data.categories[key] = { label: key, icon: "🟢", subsections: [] };
+      const key = sanitizeCategoryKey(targetCategoryKey) || sanitizeCategoryKey(prop.targetCategory) || "regulations";
+      if (!data.categories[key]) data.categories[key] = { label: CATEGORY_LABELS[key] || key, icon: "🟢", subsections: [] };
       data.categories[key].subsections = data.categories[key].subsections || [];
       data.categories[key].subsections.unshift({ title: prop.title, content: edit, sources: [{ label: publisher, url }] });
     } else if (target === "use-cases") {
@@ -2221,8 +2290,20 @@ app.get("/api/proposed-changes", (req, res) => {
   res.json({ success: true, pending: items, pendingCount: items.length });
 });
 
+// Optional shared-secret auth for state-changing endpoints. DISABLED by default
+// (ADMIN_API_KEY unset) so existing behaviour is preserved. When ADMIN_API_KEY
+// is set, mutating endpoints require the `X-Admin-Key` header to match, which
+// stops any visitor from rewriting curated datasets or burning the model budget.
+function requireAdmin(req, res, next) {
+  const key = process.env.ADMIN_API_KEY;
+  if (!key) return next();
+  const provided = req.get("x-admin-key") || (req.body && req.body.adminKey);
+  if (provided !== key) return res.status(401).json({ error: "Unauthorized" });
+  next();
+}
+
 // Integrate an approved proposal into the curated dataset (user-gated write).
-app.post("/api/proposed-changes/:id/integrate", (req, res) => {
+app.post("/api/proposed-changes/:id/integrate", requireAdmin, (req, res) => {
   try {
     const id = req.params.id;
     const prop = (proposedChanges.items || []).find(i => i.id === id);
@@ -2233,6 +2314,9 @@ app.post("/api/proposed-changes/:id/integrate", (req, res) => {
       (prop.matchedRecord && prop.matchedRecord.dataset) ||
       (prop.category === "use-case" ? "use-cases" : prop.category === "academic" ? "knowledge" : "timeline");
     const targetCategoryKey = req.body && req.body.targetCategoryKey;
+    if (targetCategoryKey && !Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, targetCategoryKey)) {
+      return res.status(400).json({ error: "Invalid targetCategoryKey" });
+    }
     integrateProposal(prop, edit, target, targetCategoryKey);
     prop.status = "integrated";
     (proposedChanges.integratedIds = proposedChanges.integratedIds || []).push(id);
@@ -2244,7 +2328,7 @@ app.post("/api/proposed-changes/:id/integrate", (req, res) => {
 });
 
 // Dismiss a proposal so it stops showing and isn't re-proposed.
-app.post("/api/proposed-changes/:id/dismiss", (req, res) => {
+app.post("/api/proposed-changes/:id/dismiss", requireAdmin, (req, res) => {
   const id = req.params.id;
   const prop = (proposedChanges.items || []).find(i => i.id === id);
   if (!prop) return res.status(404).json({ error: "Proposal not found" });
