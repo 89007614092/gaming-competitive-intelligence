@@ -155,6 +155,7 @@ function switchSearchReportsWorkspace(mode) {
   if (searchReportsMode === "reports") {
     renderUrlList();
     renderSavedReports();
+    renderSavedArticlesForReport();
   }
 }
 
@@ -900,6 +901,7 @@ function loadSavedNewsArticles() {
 function saveNewsArticles() {
   localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(savedNewsArticles));
   updateSavedArticleCount();
+  renderSavedArticlesForReport();
 }
 
 function newsArticleKey(article) {
@@ -974,6 +976,72 @@ function updateSavedArticleCount() {
 
 function renderSavedArticles() {
   renderNewsCards(savedNewsArticles, null, true);
+}
+
+// ===== Saved Articles -> Report bridge =====
+// Lists the user's starred articles inside the Reports workspace so they can be
+// pulled into the current report draft without leaving the tab.
+function renderSavedArticlesForReport() {
+  const container = document.getElementById("savedArticlesForReport");
+  if (!container) return;
+  if (!savedNewsArticles.length) {
+    container.innerHTML = '<p class="hint">No saved articles yet. Star articles in Recent News &amp; Updates to add them here.</p>';
+    return;
+  }
+  container.innerHTML = savedNewsArticles.map(article => {
+    const url = article.url || "";
+    let norm = null;
+    try { norm = new URL(url).toString(); } catch (_) { norm = null; }
+    const inReport = norm && reportUrls.some(s => s.url === norm);
+    const disabled = !norm || inReport;
+    const safeUrl = norm || "#";
+    const sourceBits = [];
+    if (article.sourceName) {
+      sourceBits.push(article.sourceName);
+    } else if (norm) {
+      try { sourceBits.push(new URL(url).hostname.replace(/^www\./i, "")); } catch (_) { /* no host */ }
+    }
+    if (article.publishedAt) {
+      sourceBits.push(new Date(article.publishedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }));
+    }
+    const sourceLine = sourceBits.filter(Boolean).join(" · ");
+    const label = inReport ? "Added" : (norm ? "Add" : "No URL");
+    return `
+      <div class="url-item report-source-item saved-article-item">
+        <div class="report-source-info">
+          <strong><a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(article.title || "Untitled")}</a></strong>
+          ${sourceLine ? `<span class="saved-article-meta">${escapeHtml(sourceLine)}</span>` : ""}
+        </div>
+        <button class="btn btn-sm saved-article-add" type="button" data-url="${escapeHtml(url)}" ${disabled ? "disabled" : ""}>${label}</button>
+      </div>`;
+  }).join("");
+
+  container.querySelectorAll(".saved-article-add:not([disabled])").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const article = savedNewsArticles.find(a => (a.url || "") === btn.dataset.url);
+      if (article) addSavedArticleToReport(article);
+    });
+  });
+}
+
+function addSavedArticleToReport(article) {
+  const url = article.url || "";
+  if (!/^https?:\/\//i.test(url)) {
+    showToast("This saved article has no valid URL to add");
+    return;
+  }
+  const snippet = typeof article.description === "string" ? article.description : "";
+  const extracted = snippet
+    ? {
+        content: snippet,
+        sourceType: "news-snippet",
+        extractionMethod: "saved-article",
+        wordCount: snippet.split(/\s+/).filter(Boolean).length,
+      }
+    : null;
+  if (addUrlToReport(url, article.title || url, extracted)) {
+    renderSavedArticlesForReport();
+  }
 }
 
 function renderNewsCards(articles, filter, savedView = false) {
@@ -1308,6 +1376,7 @@ async function generateReport() {
     // Clear report URLs
     reportUrls = [];
     renderUrlList();
+    renderSavedArticlesForReport();
   } catch (err) {
     findingsList.innerHTML = `<li>Error: ${err.message}</li>`;
   }

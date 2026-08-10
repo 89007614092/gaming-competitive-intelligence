@@ -1029,6 +1029,35 @@ body {
   font-size: 0.85rem;
 }
 
+/* Saved Articles -> Report picker (inside Reports workspace) */
+.saved-articles-for-report {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+}
+.builder-subhead {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.saved-articles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.saved-article-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.saved-article-add[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Report Result */
 .report-result {
   background: var(--surface);
