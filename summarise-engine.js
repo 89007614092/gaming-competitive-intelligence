@@ -225,10 +225,6 @@ function formatContext(evidence, question) {
   ).join("\n\n");
 }
 
-function evidenceHighlights(question, evidence, limit = 4) {
-  return evidence.slice(0, limit).map(item => `- ${relevantExcerpt(item, question, 1, 620, item.title)} [${item.id}]`).join("\n");
-}
-
 // ===== Open-source model via API (Groq / OpenRouter / any OpenAI-compatible) =====
 // The model is NOT loaded in-process (that exceeded Render's free-tier RAM and
 // caused cold-start "warming up" failures). Instead we call a hosted open-weight
@@ -240,7 +236,7 @@ function evidenceHighlights(question, evidence, limit = 4) {
 //   OPEN_MODEL_API_KEY   (required) API key for the Q&A (user-facing) lane
 //   OPEN_MODEL_BASE_URL  default https://api.groq.com/openai/v1
 //                        (OpenRouter: https://openrouter.ai/api/v1)
-//   OPEN_MODEL_NAME      default llama-3.3-70b-versatile
+//   OPEN_MODEL_NAME      default llama-3.1-8b-instant
 //                        (OpenRouter examples: meta-llama/llama-3.3-70b-instruct,
 //                         qwen/qwen2.5-72b-instruct, mistralai/mixtral-8x7b-instruct)
 //   OPEN_MODEL_API_KEY_SCAN  optional 2nd key for the background scan lane
@@ -253,6 +249,9 @@ function evidenceHighlights(question, evidence, limit = 4) {
 // Milliseconds from now until a target wall-clock time (hour:minute) in the
 // given IANA timezone. Used to compute "wait until the daily cap resets" so we
 // land on the correct absolute instant regardless of the host's local TZ.
+// NOTE: a DST transition can make a given calendar day 23h or 25h long; the +24h
+// rollover in the body handles the common case and is accurate to within one
+// reset cycle, which is sufficient for a rate-limit cooldown.
 function msUntilNextWallClockInZone(tz, hour, minute) {
   const now = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -438,13 +437,6 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
   return task;
 }
 
-// Pre-load hook. For an API-backed model there is nothing to preload, so this
-// simply reports whether the model is configured. Never throws.
-function warmUpModel() {
-  if (QA_MODEL_DISABLED) return Promise.resolve(false);
-  return Promise.resolve(true);
-}
-
 // True once the user-facing (Q&A) model API key is configured.
 function isModelReady() {
   return !QA_MODEL_DISABLED;
@@ -457,9 +449,6 @@ function isScanModelReady() {
 
 // Per-lane rate-limit tracking so callers can avoid re-hammering the API and
 // burning the daily token quota. Set when a lane's call sees HTTP 429.
-function getQaRateLimitedUntil() { return qaRateLimitedUntil; }
-function isQaRateLimited() { return Date.now() < qaRateLimitedUntil; }
-function getScanRateLimitedUntil() { return scanRateLimitedUntil; }
 function isScanRateLimited() { return Date.now() < scanRateLimitedUntil; }
 
 function truncate(text, n) {
@@ -653,11 +642,7 @@ module.exports = {
   runModelChat,
   buildExtractiveAnswer,
   webResultRelevance,
-  warmUpModel,
   isModelReady,
   isScanModelReady,
-  isQaRateLimited,
-  getQaRateLimitedUntil,
   isScanRateLimited,
-  getScanRateLimitedUntil,
 };

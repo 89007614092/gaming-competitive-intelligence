@@ -12,11 +12,9 @@ const {
   generateOpenSourceAnswer,
   runModelChat,
   buildExtractiveAnswer,
-  warmUpModel,
   isModelReady,
   isScanModelReady,
   isScanRateLimited,
-  getScanRateLimitedUntil,
 } = require("./summarise-engine");
 
 const app = express();
@@ -40,7 +38,6 @@ function resolvePython() {
   return null;
 }
 const PYTHON = resolvePython();
-const SEARCH_SCRIPT = path.join(__dirname, "search.py");
 const TRANSCRIPT_SCRIPT = path.join(__dirname, "transcript.py");
 
 // ===== Tavily Web Search (API key required) =====
@@ -695,34 +692,6 @@ function buildCohesiveReport(title, extractedSources, failedSources, totalSource
   };
 }
 
-// ===== Competitor keywords =====
-
-const COMPETITOR_KEYWORDS = [
-  "NetEase AI gaming technology investment acquisition",
-  "miHoYo HoYoverse AI technology new game",
-  "Sony PlayStation AI gaming technology",
-  "Microsoft Xbox AI gaming cloud technology",
-  "Epic Games AI Unreal Engine technology",
-  "Unity AI game engine technology",
-  "Roblox AI gaming platform generative",
-  "Electronic Arts AI gaming technology",
-  "Ubisoft AI gaming technology Ghostwriter",
-  "Take-Two Interactive AI gaming technology",
-  "Valve Steam AI gaming technology",
-  "ByteDance gaming AI technology",
-  "Nintendo AI gaming technology",
-  "Krafton PUBG AI technology",
-  "Netmarble AI gaming technology",
-  "NCSoft AI gaming technology",
-  "Nexon AI gaming technology",
-  "Sea Limited Garena AI gaming",
-  "Kakao Games AI technology",
-  "Infold Games AI technology",
-  "Google DeepMind Genie world model gaming",
-  "Meta AI gaming generative video",
-  "Mistral AI gaming technology",
-];
-
 // Domains to exclude from news results (encyclopedias, company homepages, etc.)
 const NEWS_EXCLUDED_DOMAINS = [
   "wikipedia.org",
@@ -748,8 +717,8 @@ app.post("/api/search", async (req, res) => {
   }
 });
 
-// GET /api/summarise/status — describe the local evidence and model setup.
-// The AI model is OPT-IN: the default answer mode is extractive-citation (Q&A).
+// GET /api/summarise/status — describe the evidence and model setup.
+// The AI model runs on every answer, with an extractive-citation fallback when unavailable.
 app.get("/api/summarise/status", (req, res) => {
   try {
     res.json({
@@ -767,16 +736,6 @@ app.get("/api/summarise/status", (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
-
-// POST /api/summarise/warm — preload the opt-in AI model in the background so the
-// first real useModel request is fast. Never blocks the caller.
-app.post("/api/summarise/warm", (req, res) => {
-  if (process.env.SUMMARY_DISABLE_MODEL === "1") {
-    return res.json({ success: true, warming: false, reason: "disabled" });
-  }
-  warmUpModel();
-  res.json({ success: true, warming: true });
 });
 
 // POST /api/summarise — answer questions from app data, synthesised by the
@@ -848,9 +807,6 @@ app.post("/api/summarise", async (req, res) => {
     let modelTimer;
 
     if (useModel) {
-      // Kick off a background warm-up so subsequent requests are fast; the first
-      // opt-in request may still finish loading within the timeout window.
-      warmUpModel();
       mode = "local-open-source-model";
       try {
         answer = await Promise.race([
@@ -1158,11 +1114,11 @@ let sourceScanStartedAt = 0;
 // If a scan is somehow still "in flight" after this long, treat the lock as
 // stale and allow a new scan to supersede it (otherwise a single slow/hung
 // scan would block every subsequent trigger forever on the free tier).
-// NOTE: enrichment now runs at concurrency 1 with a paced inter-call delay, so a
-// full scan legitimately takes longer than it used to (observed ~3.7 min at
-// concurrency 2). This MUST stay comfortably above a real scan duration or the
-// lock is declared stale mid-scan and a second scan starts alongside the first —
-// which would double the model call rate, the exact opposite of the intent.
+// NOTE: enrichment runs at concurrency 1 with a paced inter-call delay, so a
+// full scan legitimately takes longer than it used to. This MUST stay
+// comfortably above a real scan duration or the lock is declared stale mid-scan
+// and a second scan starts alongside the first — which would double the model
+// call rate, the exact opposite of the intent.
 const SOURCE_SCAN_STALE_MS = 20 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
@@ -1187,6 +1143,9 @@ const SCAN_DAILY_CALL_BUDGET = Number(process.env.SCAN_DAILY_CALL_BUDGET || 35);
 // Reserve paced slots ATOMICALLY. The reservation is synchronous (no await
 // before scanModelSlot is advanced), so concurrent callers each get their own
 // slot instead of all waking at the same instant.
+// Process-global pacing clock for the scan lane. Shared across every scan in this
+// process (including a scan that supersedes a stale one), so the spacing caps the
+// aggregate rate even when multiple scans think they are running.
 let scanModelSlot = 0;
 async function paceScanModelCall() {
   const now = Date.now();
@@ -1334,6 +1293,9 @@ function sharedCount(a, b) {
 // Devanagari, Thai, Kana) used to reject clearly non-English items.
 const NON_LATIN = /[㐀-鿿぀-ヿ\u0400-\u04FF\u0370-\u03FF\u0600-\u06FF\u0590-\u05FF\u0900-\u097F\u0E00-\u0E7F]/;
 function isLikelyEnglish(text) {
+  // Permissive heuristic (not a real language detector): only bail on a solid
+  // block of non-Latin glyphs (>6) and otherwise require a 60% Latin-token ratio,
+  // so accented/technical English still passes.
   const t = String(text || "").replace(/<[^>]+>/g, " ");
   const nonLatin = (t.match(NON_LATIN) || []).length;
   if (nonLatin > 6) return false; // a solid block of non-Latin -> not English
@@ -1387,6 +1349,12 @@ function buildExistingIndex() {
 }
 
 function bestMatch(itemTokens, itemStrong, index) {
+  // Best-matching existing record, or null. A record matches only if it shares a
+  // STRONG AI-regulation anchor term AND at least one other term (precise — stops
+  // trivial "ai"/"model" collisions), or has solid general overlap (Jaccard >= 0.12
+  // with >= 2 shared tokens). rank = 1 (strong-anchor bonus) + Jaccard score, and
+  // is what the UI surfaces as "match confidence" — it CAN exceed 1.0, so the UI
+  // must not render it as a percentage.
   let best = null;
   for (const rec of index) {
     const { shared, score } = overlap(itemTokens, rec.tokens);
@@ -1687,13 +1655,6 @@ function draftNewRecord(item, publisher, label, categoryKey, preview) {
   return `Add as new ${catLabel} — "${item.title}".\n\n${body}\n\n${cite} Verify details against the official source before relying on this entry.`;
 }
 
-// Strip ```json ... ``` fences the model sometimes wraps around JSON output.
-function stripFences(s) {
-  const t = String(s || "").trim();
-  if (t.startsWith("```")) return t.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
-  return t;
-}
-
 // Robust JSON extraction for model output. Tries, in order: the raw string, a
 // fenced block (``` or ```json ... ```), and finally the outermost {...} span so
 // that prose such as "Here is the JSON:" before/after the object does not break
@@ -1743,21 +1704,11 @@ function existingRecordContent(matched) {
   return "";
 }
 
-// Deterministic fallback when the model is unavailable: map the already-known
-// detectedAction / target category onto a "why suggested" bucket.
-function heuristicReason(prop) {
-  if (prop.detectedAction === "deadline") return { updateCategory: "new-deadline", updateReason: "Adds a new compliance deadline." };
-  if (prop.detectedAction === "correction") return { updateCategory: "information-outdated", updateReason: "Appears to correct or supersede an existing position." };
-  if (prop.detectedAction === "update") return { updateCategory: "additional-information", updateReason: "Adds detail to an existing entry." };
-  // detectedAction === "new"
-  if (prop.targetCategory === "case-studies") return { updateCategory: "new-case-study", updateReason: "New assessment or case study from a regulator/academic source." };
-  return { updateCategory: "new-development", updateReason: "New AI regulation or policy development." };
-}
-
 // Combined enrichment: ask the model to (a) classify why this is suggested and
 // (b) rewrite the raw source excerpt into the app's house style. For updates we
 // pass the existing entry so the rewrite reads as a delta. Returns null on any
-// failure so the caller falls back to heuristicReason + the raw excerpt.
+// failure so the caller keeps the heuristic category and a pending/rate-limited
+// status — the raw excerpt is NEVER presented as the finished suggestion.
 async function enrichWithModel(prop, excerpt) {
   const text = (excerpt || stripHtml(prop.snippet || prop.description || "")).trim();
   if (!text) return null;
@@ -1960,6 +1911,13 @@ async function runSourceScan({ force = false } = {}) {
     );
 
     const index = buildExistingIndex();
+    // Three independent guards stop the same item being proposed twice:
+    //   1. `seen`      — per-source URL set (above); persisted across scans in
+    //                   sourceState so a URL already scanned won't be re-fetched.
+    //   2. knownIds   — proposal id already present in the review queue.
+    //   3. pendingKeys— composite "record-title|action|url" so we don't re-propose
+    //                   the same underlying change (e.g. a 2nd deadline on a record
+    //                   we already have a pending proposal for).
     const knownIds = new Set((proposedChanges.items || []).map(i => i.id));
     const pendingKeys = new Set(
       (proposedChanges.items || [])
@@ -2017,9 +1975,9 @@ async function runSourceScan({ force = false } = {}) {
     const toEnrich = [...newProps];
     const newIds = new Set(newProps.map(p => p.id));
     // Retry budget per scan. Was 20, which let a single scan queue 20 model
-    // calls — 40% of a 50-request day — and guaranteed a burst that tripped the
-    // per-minute ceiling. Kept deliberately small; unfinished proposals simply
-    // roll forward to the next scan.
+    // calls — a large fraction of the 35-request free-tier day — and guaranteed
+    // a burst that tripped the per-minute ceiling. Kept deliberately small;
+    // unfinished proposals simply roll forward to the next scan.
     const RETRY_CAP = Number(process.env.SCAN_RETRY_CAP || 3);
     const RETRY_COOLDOWN_MS = 20 * 60 * 1000; // at most one retry / 20 min per proposal
     let retryAdded = 0;
@@ -2128,9 +2086,11 @@ async function runSourceScan({ force = false } = {}) {
         }
 
         if (enriched && enriched.rateLimited) {
-          // Model hit a rate limit on this call. Set a SHORT per-proposal backoff
-          // (2-3 min) rather than inheriting the engine's full cooldown, so the
-          // next scan retries this proposal much sooner instead of waiting 20 min.
+          // Model hit a rate limit on this call. Set a per-proposal backoff
+          // (default 45 min — deliberately LONGER than the engine's ~1h cooldown
+          // so parked proposals re-eligible a few at a time, never all at once)
+          // before retrying this proposal, rather than inheriting the engine's
+          // full cooldown.
           prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
           prop.enrichStatus = "rate-limited";
           // Cache hygiene (#5): keep any previously-good styled summary; do not
@@ -2161,7 +2121,7 @@ async function runSourceScan({ force = false } = {}) {
           }
           // No styled summary and model unavailable → honest pending state. The
           // UI shows "AI rewrite temporarily unavailable (quota); will auto-enrich
-          // when capacity recovers." The next scan (past the short cooldown) retries.
+          // when capacity recovers." The next scan (past the per-proposal backoff) retries.
           prop.enrichStatus = "rate-limited";
           prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
           return;
@@ -2298,8 +2258,8 @@ app.post("/api/proposed-changes/:id/dismiss", (req, res) => {
 //
 // Cadence is deliberately conservative. The theoretical ceiling on model calls
 // is (minutes_per_day / tick_minutes) x calls_per_scan, so a 5-minute tick was
-// budgeting for thousands of calls a day against a 50/day allowance. At 60
-// minutes, with the per-run cap, the scan lane cannot outrun its quota.
+// budgeting for thousands of calls a day against the 35/day free-tier allowance.
+// At 60 minutes, with the per-run cap, the scan lane cannot outrun its quota.
 const SOURCE_SCAN_TICK_MS = Number(process.env.SOURCE_SCAN_TICK_MS || 60 * 60 * 1000);
 setInterval(() => { runSourceScan({ force: false }).catch(() => {}); }, SOURCE_SCAN_TICK_MS);
 
@@ -2546,7 +2506,7 @@ app.get("/api/gaming-trends", (req, res) => {
   }
 });
 
-// POST /api/gaming-trends/search — live DuckDuckGo search for a trend
+// POST /api/gaming-trends/search — live web search (Tavily) for a trend
 app.post("/api/gaming-trends/search", async (req, res) => {
   try {
     const { keywords, limit = 5 } = req.body;
@@ -2724,7 +2684,6 @@ app.listen(PORT, () => {
   console.log(`  Server running at http://localhost:${PORT}`);
   console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
   console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
-  // The local AI model is opt-in (default answer mode is extractive-citation),
-  // so we do NOT preload it at startup. It is warmed in the background the first
-  // time the user enables the "Use AI model" toggle.
+  // The AI model runs on every answer (with an extractive-citation fallback when
+  // unavailable), so there is nothing to preload at startup.
 });
