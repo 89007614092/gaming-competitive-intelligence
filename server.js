@@ -16,6 +16,7 @@ const {
   isScanModelReady,
   isScanRateLimited,
 } = require("./summarise-engine");
+const config = require("./config");
 
 const app = express();
 app.use(cors());
@@ -48,7 +49,7 @@ const TRANSCRIPT_SCRIPT = path.join(__dirname, "transcript.py");
 
 function tavilySearch(query, limit = 10) {
   return new Promise((resolve, reject) => {
-    const apiKey = process.env.TAVILY_API_KEY;
+    const apiKey = config.TAVILY_API_KEY;
     if (!apiKey) {
       return reject(new Error("Search API key not configured (set TAVILY_API_KEY)"));
     }
@@ -100,12 +101,12 @@ function tavilySearch(query, limit = 10) {
 // bypassing the DDG/GDELT sandbox block.
 
 function activeSearchProvider() {
-  return (process.env.SEARCH_PROVIDER || "jina").toLowerCase().trim();
+  return config.SEARCH_PROVIDER;
 }
 
 function jinaHeaders() {
   const headers = { Accept: "text/markdown,text/plain" };
-  if (process.env.JINA_API_KEY) headers["Authorization"] = `Bearer ${process.env.JINA_API_KEY}`;
+  if (config.JINA_API_KEY) headers["Authorization"] = `Bearer ${config.JINA_API_KEY}`;
   return headers;
 }
 
@@ -1136,9 +1137,9 @@ const SOURCE_SCAN_STALE_MS = 20 * 60 * 1000;
 // The per-RUN cap is the load-bearing one. Render's free tier has an ephemeral
 // filesystem, so the persisted daily counter resets whenever the container is
 // rebuilt; the per-run cap still holds because it is enforced in-process.
-const SCAN_MODEL_MIN_GAP_MS = Number(process.env.SCAN_MODEL_MIN_GAP_MS || 4000);
-const SCAN_CALLS_PER_RUN_CAP = Number(process.env.SCAN_CALLS_PER_RUN_CAP || 8);
-const SCAN_DAILY_CALL_BUDGET = Number(process.env.SCAN_DAILY_CALL_BUDGET || 35);
+const SCAN_MODEL_MIN_GAP_MS = config.SCAN_MODEL_MIN_GAP_MS;
+const SCAN_CALLS_PER_RUN_CAP = config.SCAN_CALLS_PER_RUN_CAP;
+const SCAN_DAILY_CALL_BUDGET = config.SCAN_DAILY_CALL_BUDGET;
 
 // Reserve paced slots ATOMICALLY. The reservation is synchronous (no await
 // before scanModelSlot is advanced), so concurrent callers each get their own
@@ -1978,7 +1979,7 @@ async function runSourceScan({ force = false } = {}) {
     // calls — a large fraction of the 35-request free-tier day — and guaranteed
     // a burst that tripped the per-minute ceiling. Kept deliberately small;
     // unfinished proposals simply roll forward to the next scan.
-    const RETRY_CAP = Number(process.env.SCAN_RETRY_CAP || 3);
+    const RETRY_CAP = config.SCAN_RETRY_CAP;
     const RETRY_COOLDOWN_MS = 20 * 60 * 1000; // at most one retry / 20 min per proposal
     let retryAdded = 0;
     for (const prop of existing) {
@@ -2016,7 +2017,7 @@ async function runSourceScan({ force = false } = {}) {
       // proposal had been eligible again for ~57 minutes and they all fired at
       // once, instantly re-tripping the limit. A backoff longer than the engine
       // cooldown restores the stagger, so proposals come back a few at a time.
-      const PER_PROPOSAL_BACKOFF_MS = Number(process.env.SCAN_PROPOSAL_BACKOFF_MS || 45 * 60 * 1000);
+      const PER_PROPOSAL_BACKOFF_MS = config.SCAN_PROPOSAL_BACKOFF_MS;
       // Concurrency 1: enrichment is now strictly serial. Combined with the
       // paced gap between model calls this makes the per-minute ceiling
       // structurally unreachable.
@@ -2260,15 +2261,21 @@ app.post("/api/proposed-changes/:id/dismiss", (req, res) => {
 // is (minutes_per_day / tick_minutes) x calls_per_scan, so a 5-minute tick was
 // budgeting for thousands of calls a day against the 35/day free-tier allowance.
 // At 60 minutes, with the per-run cap, the scan lane cannot outrun its quota.
-const SOURCE_SCAN_TICK_MS = Number(process.env.SOURCE_SCAN_TICK_MS || 60 * 60 * 1000);
-setInterval(() => { runSourceScan({ force: false }).catch(() => {}); }, SOURCE_SCAN_TICK_MS);
+const SOURCE_SCAN_TICK_MS = config.SOURCE_SCAN_TICK_MS;
+// The block below is a module-load side effect: it must NOT run when this file
+// is required by a test harness. `require.main === module` is true only when the
+// file is executed directly (e.g. `node server.js`).
+if (require.main === module) {
+  setInterval(() => { runSourceScan({ force: false }).catch(() => {}); }, SOURCE_SCAN_TICK_MS);
+}
 
 // Boot scan, guarded. Render's free tier spins the container down when idle, so
 // every wake-up is a fresh process — an unguarded boot scan meant one scan per
 // wake, no matter what the tick interval said. The guard consults the PERSISTED
 // last-scan timestamp so a restart shortly after a scan doesn't repeat it.
-const BOOT_SCAN_MIN_GAP_MS = Number(process.env.BOOT_SCAN_MIN_GAP_MS || 60 * 60 * 1000);
-setTimeout(() => {
+const BOOT_SCAN_MIN_GAP_MS = config.BOOT_SCAN_MIN_GAP_MS;
+if (require.main === module) {
+  setTimeout(() => {
   const last = sourceState.lastFullScan ? new Date(sourceState.lastFullScan).getTime() : 0;
   const since = Date.now() - last;
   if (last && since < BOOT_SCAN_MIN_GAP_MS) {
@@ -2276,7 +2283,8 @@ setTimeout(() => {
     return;
   }
   runSourceScan({ force: false }).catch(() => {});
-}, 30000);
+  }, 30000);
+}
 
 // POST /api/scrape — extract readable website text or a public video transcript
 app.post("/api/scrape", async (req, res) => {
@@ -2678,12 +2686,46 @@ app.get("/api/company-locations", (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n  Insights Tool`);
-  console.log(`  Server running at http://localhost:${PORT}`);
-  console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
-  console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
-  // The AI model runs on every answer (with an extractive-citation fallback when
-  // unavailable), so there is nothing to preload at startup.
-});
+const PORT = config.PORT;
+// Only bind a port when executed directly. Guarded so a test harness can
+// `require("./server")` (registering routes on `app`) without opening a socket.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`\n  Insights Tool`);
+    console.log(`  Server running at http://localhost:${PORT}`);
+    console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
+    console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
+    // The AI model runs on every answer (with an extractive-citation fallback when
+    // unavailable), so there is nothing to preload at startup.
+  });
+}
+
+// =============================================================================
+// Test/integration exports
+// -----------------------------------------------------------------------------
+// Everything above is the production HTTP server. The block below is exported so
+// a test harness (node:test, Phase E) can unit-test the pure logic without
+// booting the server (see the `require.main === module` guards above). `app`
+// lets integration tests hit routes via supertest; the rest are pure functions.
+// =============================================================================
+module.exports = {
+  app,
+  config,
+
+  // Pure classification / matching helpers
+  isLikelyEnglish,
+  overlap,
+  bestMatch,
+  detectKnowledgeCategory,
+  classifyItem,
+  looksLikeJobPosting,
+  JOB_POSTING_RE,
+
+  // Scan quota / pacing
+  scanBudget,
+  scanBudgetRemaining,
+  paceScanModelCall,
+
+  // Model-output parsing
+  extractJson,
+};
