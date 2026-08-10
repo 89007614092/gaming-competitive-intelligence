@@ -508,12 +508,26 @@ function findHtmlCaptionTrack(html, pageUrl) {
   return null;
 }
 
-async function scrapeUrl(url) {
+async function scrapeUrl(url, opts = {}) {
   const sourceUrl = validateSourceUrl(url);
   const youtubeId = getYouTubeVideoId(sourceUrl);
   if (youtubeId) return extractYouTubeTranscript(sourceUrl, youtubeId);
 
-  const page = await fetchTextResource(sourceUrl);
+  // Saved articles and scanner proposals arrive as news.google.com/rss/articles/...
+  // redirect URLs that cannot be scraped directly (they return a bot-wall / dead
+  // interstitial). Resolve them to the real publisher URL first — the same
+  // resolver the background scanner uses — so the live article body is fetched
+  // and summarised instead of a useless redirect page. If resolution fails we
+  // fall through to the original URL and let fetchTextResource report the error.
+  let effectiveUrl = sourceUrl;
+  if (/news\.google\.com/i.test(sourceUrl)) {
+    try {
+      const real = await resolveGoogleNewsUrl(sourceUrl, opts.title || "", opts.domain || "");
+      if (real) effectiveUrl = real;
+    } catch (_) { /* keep the original URL */ }
+  }
+
+  const page = await fetchTextResource(effectiveUrl);
   if (!page.contentType.includes("html") && !page.contentType.includes("text")) {
     throw new Error(`Unsupported source content type: ${page.contentType || "unknown"}`);
   }
@@ -2263,7 +2277,15 @@ async function runSourceScan({ force = false } = {}) {
         // scan retries it (with the short per-proposal backoff) instead of dumping
         // raw scraped text into the review panel.
         const baseText = preview || stripHtml(prop.snippet || prop.description || "");
-        if (!baseText) return; // truly nothing to work with
+        if (!baseText) {
+          // Nothing to work with: the live preview fetch failed (e.g. the
+          // resolver couldn't reach the publisher) and there is no usable
+          // snippet. Leave the proposal in an honest "pending" state so the UI
+          // does not show the misleading "No extractable summary" copy, and the
+          // next scan retries it once the source becomes reachable.
+          prop.enrichStatus = "pending";
+          return;
+        }
 
         let enriched = null;
         // Three gates before we are allowed to spend a request:
@@ -2515,10 +2537,10 @@ if (require.main === module) {
 // POST /api/scrape — extract readable website text or a public video transcript
 app.post("/api/scrape", async (req, res) => {
   try {
-    const { url } = req.body;
+    const { url, title = "" } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
 
-    const result = await scrapeUrl(url);
+    const result = await scrapeUrl(url, { title });
     const wordCount = result.text.split(/\s+/).filter(Boolean).length;
     const summarySentences = rankSourceSentences(result.text, result.title, 4);
     res.json({
@@ -2572,7 +2594,7 @@ app.post("/api/report", async (req, res) => {
         };
       }
 
-      const result = await scrapeUrl(sourceUrl);
+      const result = await scrapeUrl(sourceUrl, { title: source.title, domain: source.domain || "" });
       const content = result.text.slice(0, 40000);
       return {
         url: result.url,

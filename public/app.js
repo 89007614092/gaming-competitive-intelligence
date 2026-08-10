@@ -1030,16 +1030,14 @@ function addSavedArticleToReport(article) {
     showToast("This saved article has no valid URL to add");
     return;
   }
-  const snippet = typeof article.description === "string" ? article.description : "";
-  const extracted = snippet
-    ? {
-        content: snippet,
-        sourceType: "news-snippet",
-        extractionMethod: "saved-article",
-        wordCount: snippet.split(/\s+/).filter(Boolean).length,
-      }
-    : null;
-  if (addUrlToReport(url, article.title || url, extracted)) {
+  // Add the saved article as a REAL source to be scraped live when the report
+  // is generated. Previously these were seeded with just the RSS snippet
+  // (sourceType: news-snippet); now they go through the same live extraction as
+  // any pasted URL — the server resolves news.google.com redirect URLs to the
+  // publisher and pulls the full article body. Passing no extracted content lets
+  // addUrlToReport mark it "Pending extraction" so the user knows it will be
+  // fetched on generation.
+  if (addUrlToReport(url, article.title || url)) {
     renderSavedArticlesForReport();
   }
 }
@@ -3422,8 +3420,21 @@ async function renderReviewPanel() {
           ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         </div>`;
       }
-      // No AI-generated summary and not a transient rate-limit: there is genuinely
-      // nothing safe to present as a suggestion. Point the reviewer to the source.
+      // No AI-generated summary and not a transient rate-limit. Two distinct
+      // situations end up here, and they must read differently:
+      //   (a) The proposal was created but the background scanner hasn't analysed
+      //       it yet (or it predates the live-enrichment schema and has no
+      //       fetchStatus/enrichStatus at all). This is NOT a failure — it's
+      //       simply queued. Show an honest "being analysed" state, NOT the
+      //       alarming "No extractable summary — open the original article" copy.
+      //   (b) The source was genuinely fetched and reviewed but yielded nothing
+      //       usable. Only then is the "No extractable summary" message correct.
+      if (!p.fetchStatus && !p.enrichStatus) {
+        return `<div class="proposal-pending-notice">
+          This update is still being analysed. A preview will appear automatically once the source has been reviewed.
+          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
+        </div>`;
+      }
       return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
     };
     const cardHtml = (p) => {
