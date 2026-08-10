@@ -1,0 +1,34 @@
+name: CI
+
+# Runs the node:test harness (npm test) so the Phase E pure-function suite
+# gates merges instead of only running on a dev machine.
+#
+# Triggers:
+#   - pull_request targeting main  -> the actual merge gate
+#   - push to main or the refactor branch -> early feedback before a PR exists
+#
+# Requires package-lock.json (present) so `npm ci` is reproducible.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, refactor/code-quality-pass]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
