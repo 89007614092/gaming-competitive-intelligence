@@ -4,6 +4,25 @@
 
 const API_BASE = "/api";
 
+// Wraps fetch for the state-changing endpoints. Sends the optional admin key
+// (from localStorage) in the X-Admin-Key header. If the server answers 401
+// (ADMIN_API_KEY is set there), prompts once for the key, remembers it, and
+// retries. When auth is disabled server-side this is a no-op (empty header).
+async function authedFetch(url, init = {}) {
+  const key = (typeof localStorage !== "undefined" && localStorage.getItem("adminKey")) || "";
+  init.headers = Object.assign({ "Content-Type": "application/json", "X-Admin-Key": key }, init.headers || {});
+  let res = await fetch(url, init);
+  if (res.status === 401) {
+    const entered = window.prompt("This server requires an admin key. Enter it to continue:");
+    if (entered) {
+      localStorage.setItem("adminKey", entered);
+      init.headers["X-Admin-Key"] = entered;
+      res = await fetch(url, init);
+    }
+  }
+  return res;
+}
+
 function escapeHtml(value = "") {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -11,6 +30,13 @@ function escapeHtml(value = "") {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// Only allow http/https hrefs. Anything else (javascript:, data:, etc.) collapses
+// to "#" so a crafted source URL cannot execute script when rendered as a link.
+function safeHref(url) {
+  const u = String(url || "");
+  return /^https?:\/\//i.test(u) ? u : "#";
 }
 
 let reportUrls = [];
@@ -277,7 +303,6 @@ async function runSummary() {
 // citation behaviour are preserved. Unknown headings become "other" sections.
 function parseAnswer(text, sources) {
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
-  const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const renderInline = (line) => {
     let html = escapeHtml(line);
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -1368,7 +1393,7 @@ function renderKBContent(searchQuery = null) {
       <div class="kb-section-body">`;
 
     for (const sub of subsections) {
-      let displayContent = sub.content;
+      let displayContent = escapeHtml(sub.content || "");
       if (searchQuery) {
         const regex = new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi");
         displayContent = displayContent.replace(regex, '<span class="highlight">$1</span>');
@@ -1378,13 +1403,13 @@ function renderKBContent(searchQuery = null) {
       if (sub.sources && sub.sources.length) {
         sourceLinks = `
         <div class="kb-sources">
-          ${sub.sources.map(s => `<a href="${s.url}" target="_blank" rel="noopener" class="kb-source-link">${s.label}</a>`).join("")}
+          ${sub.sources.map(s => `<a href="${safeHref(s.url)}" target="_blank" rel="noopener" class="kb-source-link">${escapeHtml(s.label || s.url || "")}</a>`).join("")}
         </div>`;
       }
 
       html += `
         <div class="kb-card">
-          <div class="kb-card-title">${sub.title}</div>
+          <div class="kb-card-title">${escapeHtml(sub.title || "")}</div>
           <div class="kb-card-content">${displayContent}</div>
           ${sourceLinks}
         </div>`;
@@ -3101,7 +3126,7 @@ function setupReviewPanel() {
     }
     if (dismissBtn) {
       const id = dismissBtn.dataset.dismiss;
-      await fetch(`${API_BASE}/proposed-changes/${id}/dismiss`, { method: "POST" }).catch(() => {});
+      await authedFetch(`${API_BASE}/proposed-changes/${id}/dismiss`, { method: "POST" }).catch(() => {});
       const card = dismissBtn.closest(".proposal-card");
       if (card) card.remove();
       await updateSuggestedUpdatesBadge();
@@ -3119,8 +3144,8 @@ function setupReviewPanel() {
       if (catKey && catKey.value) body.targetCategoryKey = catKey.value;
       integrateBtn.disabled = true;
       try {
-        const res = await fetch(`${API_BASE}/proposed-changes/${id}/integrate`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        const res = await authedFetch(`${API_BASE}/proposed-changes/${id}/integrate`, {
+          method: "POST", body: JSON.stringify(body),
         });
         if (res.ok) {
           card.remove();
