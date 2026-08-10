@@ -1,4 +1,4 @@
-name: Keep Alive — Render Warm Ping
+name: Keep Alive — Render Warm Ping + Health Assertions
 
 # Keeps the deployed app reachable on Render's free tier, which spins the
 # container down when idle.
@@ -13,19 +13,61 @@ name: Keep Alive — Render Warm Ping
 # down after ~15 minutes idle, so a ping every 10 minutes keeps it awake without
 # ever triggering a scan (no model requests are spent on the warm-up itself).
 #
+# NEW in this revision: after warming the instance, the workflow parses the
+# /healthz JSON and asserts on the diagnostics added in Phase E
+# (stuckRateLimitedProposals, resolver.successRatePct, scanBudget). A single bad
+# reading mid-scan is normal, so the assertion script only escalates after
+# STREAK_THRESHOLD (default 3) CONSECUTIVE pings show a problem. The streak is
+# carried across scheduled runs via actions/cache, so a backlog that forms
+# between pings is still caught. Optionally, set the HEALTH_WEBHOOK_URL repo
+# secret (a Slack or Discord inbound webhook) and a persistent problem is pushed
+# there instead of only sitting in the Actions log. Read-only: it never triggers
+# a scan, so the free-tier quota is never spent.
+#
 # REQUIRED: add a repository secret named RENDER_URL containing your deployed
 # URL, e.g. https://gaming-competitive-intelligence.onrender.com
+# OPTIONAL: add a repository secret named HEALTH_WEBHOOK_URL (Slack/Discord
+# inbound webhook) to receive alerts on persistent problems.
+
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Warm the instance (no scan triggered)
-        run: |
-          curl -fsS --max-time 60 "${RENDER_URL}/healthz" || echo "Ping failed (non-fatal)"
+      - name: Checkout (workflow scripts)
+        uses: actions/checkout@v4
+
+      - name: Restore health streak state
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/health-streak.json
+          # Unique per run so the updated streak is always saved; restore-keys
+          # falls back to the most recent previous run's state.
+          key: health-streak-${{ github.run_id }}
+          restore-keys: |
+            health-streak-
+
+      - name: Warm instance + assert health diagnostics
         env:
           RENDER_URL: ${{ secrets.RENDER_URL }}
+          HEALTH_WEBHOOK_URL: ${{ secrets.HEALTH_WEBHOOK_URL }}
+          STREAK_THRESHOLD: "3"
+        run: |
+          BODY="${{ github.workspace }}/healthz-body.json"
+          if ! curl -fsS --max-time 60 "${RENDER_URL}/healthz" -o "$BODY"; then
+            echo "::error::/healthz ping failed - instance may be down"
+            if [ -n "${HEALTH_WEBHOOK_URL:-}" ]; then
+              curl -fsS --max-time 20 -X POST "${HEALTH_WEBHOOK_URL}" \
+                -H 'content-type: application/json' \
+                -d '{"text":"⚠️ Keep-alive ping to /healthz failed - the app instance may be down.","content":"⚠️ Keep-alive ping to /healthz failed - the app instance may be down."}' || true
+            fi
+            exit 0
+          fi
+          node "${{ github.workspace }}/.github/scripts/assert-health.cjs"
