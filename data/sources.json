@@ -10,7 +10,8 @@
       "jurisdiction": "EU",
       "terms": "AI Act regulation directive amendment corrigendum",
       "ttlMinutes": 180,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "ec-digital-strategy",
@@ -21,7 +22,8 @@
       "jurisdiction": "EU",
       "terms": "AI Act implementation guidance AI regulation",
       "ttlMinutes": 15,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "ec-ai-office",
@@ -32,7 +34,8 @@
       "jurisdiction": "EU",
       "terms": "AI Office GPAI general-purpose AI oversight",
       "ttlMinutes": 30,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "ai-act-service-desk",
@@ -43,7 +46,8 @@
       "jurisdiction": "EU",
       "terms": "AI Act article guidance FAQ",
       "ttlMinutes": 30,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "single-market-economy",
@@ -54,7 +58,8 @@
       "jurisdiction": "EU",
       "terms": "AI liability product safety AI Act",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "ec-presscorner",
@@ -65,7 +70,8 @@
       "jurisdiction": "EU",
       "terms": "AI regulation press release statement",
       "ttlMinutes": 30,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "artificialintelligenceact-eu",
@@ -76,7 +82,8 @@
       "jurisdiction": "EU",
       "terms": "AI Act article update analysis",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "regulation-ai-eu",
@@ -87,7 +94,8 @@
       "jurisdiction": "EU",
       "terms": "AI Act annex regulation",
       "ttlMinutes": 120,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "digital-markets-act",
@@ -98,7 +106,8 @@
       "jurisdiction": "EU",
       "terms": "DMA AI digital markets gatekeeper",
       "ttlMinutes": 120,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "european-parliament",
@@ -109,7 +118,8 @@
       "jurisdiction": "EU",
       "terms": "AI Act parliament vote committee",
       "ttlMinutes": 60,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "edpb",
@@ -120,7 +130,8 @@
       "jurisdiction": "EU",
       "terms": "AI data protection guidelines GDPR",
       "ttlMinutes": 120,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "ico",
@@ -131,7 +142,8 @@
       "jurisdiction": "UK",
       "terms": "AI data protection automated decision-making news",
       "ttlMinutes": 30,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "gov-uk",
@@ -142,7 +154,8 @@
       "jurisdiction": "UK",
       "terms": "AI regulation policy copyright Office for AI DSIT",
       "ttlMinutes": 60,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "dsit",
@@ -153,7 +166,8 @@
       "jurisdiction": "UK",
       "terms": "Department for Science Innovation Technology AI policy",
       "ttlMinutes": 60,
-      "freshness": "7d"
+      "freshness": "7d",
+      "language": "en"
     },
     {
       "id": "legislation-gov-uk",
@@ -164,7 +178,8 @@
       "jurisdiction": "UK",
       "terms": "AI data protection act regulation",
       "ttlMinutes": 180,
-      "freshness": "30d"
+      "freshness": "30d",
+      "language": "en"
     },
     {
       "id": "commons-library",
@@ -175,7 +190,8 @@
       "jurisdiction": "UK",
       "terms": "AI regulation briefing research",
       "ttlMinutes": 120,
-      "freshness": "30d"
+      "freshness": "30d",
+      "language": "en"
     },
     {
       "id": "ofcom",
@@ -186,7 +202,8 @@
       "jurisdiction": "UK",
       "terms": "AI online safety media generative",
       "ttlMinutes": 120,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "aisi",
@@ -197,7 +214,8 @@
       "jurisdiction": "UK",
       "terms": "AI safety evaluation research",
       "ttlMinutes": 120,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "oecd-ai",
@@ -208,7 +226,8 @@
       "jurisdiction": "Global",
       "terms": "AI policy measurement governance",
       "ttlMinutes": 180,
-      "freshness": "30d"
+      "freshness": "30d",
+      "language": "en"
     },
     {
       "id": "coe-ai",
@@ -219,7 +238,8 @@
       "jurisdiction": "Global",
       "terms": "AI convention framework treaty",
       "ttlMinutes": 180,
-      "freshness": "30d"
+      "freshness": "30d",
+      "language": "en"
     },
     {
       "id": "arxiv",
@@ -232,7 +252,8 @@
       "ttlMinutes": 360,
       "freshness": "30d",
       "kbCategory": "research",
-      "kbCategoryLabel": "Research & Standards"
+      "kbCategoryLabel": "Research & Standards",
+      "language": "en"
     },
     {
       "id": "tencent-giinex",
@@ -243,7 +264,8 @@
       "jurisdiction": "Global",
       "terms": "game AI Tencent GiiNEX development",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "tencent-hunyuan",
@@ -254,7 +276,8 @@
       "jurisdiction": "Global",
       "terms": "Tencent Hunyuan AI model game",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "openai",
@@ -265,7 +288,8 @@
       "jurisdiction": "Global",
       "terms": "game AI model research",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "google-deepmind",
@@ -276,7 +300,8 @@
       "jurisdiction": "Global",
       "terms": "game AI Gemini research",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "anthropic",
@@ -287,7 +312,8 @@
       "jurisdiction": "Global",
       "terms": "AI Claude game assistant",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "nvidia",
@@ -298,7 +324,8 @@
       "jurisdiction": "Global",
       "terms": "game AI Omniverse ACE",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "microsoft",
@@ -309,7 +336,8 @@
       "jurisdiction": "Global",
       "terms": "game AI Xbox research",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "meta",
@@ -320,7 +348,8 @@
       "jurisdiction": "Global",
       "terms": "AI game meta research",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "unity",
@@ -331,7 +360,8 @@
       "jurisdiction": "Global",
       "terms": "game AI machine learning toolkit",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "epic-games",
@@ -342,7 +372,8 @@
       "jurisdiction": "Global",
       "terms": "Unreal Engine AI tool",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "roblox",
@@ -353,7 +384,8 @@
       "jurisdiction": "Global",
       "terms": "AI creation Roblox generative",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "ea",
@@ -364,7 +396,8 @@
       "jurisdiction": "Global",
       "terms": "AI EA sports game",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     },
     {
       "id": "netease",
@@ -375,7 +408,8 @@
       "jurisdiction": "Global",
       "terms": "AI NetEase game",
       "ttlMinutes": 60,
-      "freshness": "14d"
+      "freshness": "14d",
+      "language": "en"
     }
   ]
 }
