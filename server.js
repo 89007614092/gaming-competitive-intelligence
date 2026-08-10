@@ -1774,12 +1774,14 @@ Return ONLY valid JSON:
   "updateCategory": one of "information-outdated" | "additional-information" | "new-case-study" | "new-deadline" | "new-development",
   "updateReason": one short sentence (max 20 words) explaining why this is suggested,
   "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
+  "rejected": true ONLY if this is a job posting, a hiring/careers page, an event invitation, or otherwise not a substantive AI-regulation/policy development. If rejected, set styledSummary to "" and updateCategory to null.
 }`;
   const raw = await runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
   if (raw && raw.rateLimited) return { rateLimited: true };
   if (!raw) return null;
   try {
     const obj = extractJson(raw);
+    if (obj && obj.rejected === true) return { rejected: true }; // Option B: model judged this non-substantive
     if (!obj || typeof obj.styledSummary !== "string" || !obj.styledSummary.trim()) return null;
     return {
       updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
@@ -1791,11 +1793,22 @@ Return ONLY valid JSON:
   }
 }
 
+// Drop obvious recruitment / non-substantive content before the scan model is
+// ever called. This keeps job postings, career pages, "we're hiring" blurbs and
+// internship listings out of the Suggested Updates queue (Option A of the
+// scan-noise fix) and also saves a scan model call on junk.
+const JOB_POSTING_RE = /\b(we'?re\s+hiring|now\s+hiring|apply\s+(now|today|here)|job\s+(opening|posting|listing|vacancy|opportunity)|(open|available)\s+(position|role|vacancy)|position(s)?\s+(available|open)|hiring\s+(for|now)|recruit(ing|ment)|talent\s+(acquisition|search)|careers?\s+(at|page|section)|join\s+(our|the|us)\s+team|\bintern(ship)?\b|\bvacanc(y|ies)\b|\bstaff\s+(opening|position)\b)/i;
+
+function looksLikeJobPosting(text) {
+  return JOB_POSTING_RE.test(text || "");
+}
+
 // Classify a fetched item: English-only, compared to existing content, and either
 // dropped (duplicate/non-English) or returned as a proposed change.
 function classifyItem(source, item, index) {
   const text = `${item.title} ${item.description || ""}`;
   if (!isLikelyEnglish(text)) return null; // (a) drop non-English
+  if (looksLikeJobPosting(text)) return null; // (a2) drop recruitment / non-substantive noise
   const itemTokens = new Set(tokenize(text));
   if (itemTokens.size < 2) return null;
   const itemStrong = strongTermsIn(text);
@@ -1953,7 +1966,7 @@ async function runSourceScan({ force = false } = {}) {
         .filter(i => i.status === "pending")
         .map(i => `${i.matchedRecord ? i.matchedRecord.title : ""}|${i.detectedAction}|${i.url}`)
     );
-    const existing = proposedChanges.items || [];
+    let existing = proposedChanges.items || [];
     const newProps = []; // proposals created in THIS scan that still need enrichment
     let scanned = 0, considered = 0, proposed = 0;
     const counts = { update: 0, deadline: 0, correction: 0, new: 0 };
@@ -1974,6 +1987,7 @@ async function runSourceScan({ force = false } = {}) {
           if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
           existing.push(prop);
           newProps.push(prop);
+          prop._newlyProposed = true;
           knownIds.add(prop.id);
           pendingKeys.add(dedupeKey);
           proposed++;
@@ -2124,6 +2138,21 @@ async function runSourceScan({ force = false } = {}) {
           return;
         }
 
+        if (enriched && enriched.rejected) {
+          // Option B: the model determined this is not a substantive
+          // AI-regulation/policy development (job posting, careers page, event
+          // invite, etc). Mark it and drop it from the queue so it never reaches
+          // the review panel. It was already added to the `seen` set, so it won't
+          // be re-scanned — and we saved the rest of the enrichment pipeline.
+          prop.rejectedByModel = true;
+          prop.status = "rejected";
+          if (prop._newlyProposed) {
+            proposed = Math.max(0, proposed - 1);
+            counts[prop.detectedAction] = Math.max(0, (counts[prop.detectedAction] || 1) - 1);
+          }
+          return;
+        }
+
         if (!enriched) {
           // Don't clobber a prior good AI summary if the model just hiccuped.
           if (prop.styledSummary) {
@@ -2149,6 +2178,11 @@ async function runSourceScan({ force = false } = {}) {
           : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, styled);
       });
     }
+
+    // Drop any proposals the model rejected as non-substantive (Option B: job
+    // postings, careers pages, event invites, etc). They were already added to
+    // the `seen` set so they won't be re-scanned on the next pass.
+    existing = existing.filter(p => !p.rejectedByModel);
 
     proposedChanges.items = existing.slice(-300);
     sourceState.lastFullScan = new Date().toISOString();
