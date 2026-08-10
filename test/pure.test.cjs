@@ -129,6 +129,41 @@ test("splitSentences preserves decimals and abbreviations across sentences", () 
   assert.ok(joined.includes("U.S."), `U.S. abbreviation must survive, got: ${joined}`);
 });
 
+test("classifyItem drops items from a non-English-declared source (B)", () => {
+  const enSource = { id: "s1", domain: "example.com", name: "Reuters", category: "regulation", language: "en" };
+  const frSource = { id: "s2", domain: "example.fr", name: "Le Monde", category: "regulation", language: "fr" };
+  const news = {
+    title: "EU AI Act updated with new compliance deadline",
+    description: "The European Commission fined a company under the AI Act for breaches.",
+    url: "https://example.com/news/1",
+    sourceName: "Reuters",
+    publishedAt: new Date().toISOString(),
+  };
+  const index = [{
+    dataset: "knowledge",
+    recordId: "eu-ai-act",
+    title: "EU AI Act",
+    tokens: new Set(["eu", "ai", "act", "compliance", "deadline", "european", "commission"]),
+    strong: new Set(["ai act"]),
+  }];
+  // English-declared source keeps the substantive news.
+  assert.ok(srv.classifyItem(enSource, news, index), "English source should be proposed");
+  // Non-English-declared source is dropped by the whitelist gate before any
+  // language heuristic on the text runs.
+  assert.strictEqual(srv.classifyItem(frSource, news, index), null, "non-English source must be dropped");
+});
+
+test("proposalLanguageOk purges non-English, keeps English (C)", () => {
+  const english = { title: "EU AI Act sets new compliance rules", snippet: "The European Commission published guidance on the AI Act." };
+  const cjk = { title: "人工智能监管新规出台", snippet: "这是关于人工智能监管的测试文本内容。" };
+  const cyrillic = { title: "Новый закон об искусственном интеллекте", snippet: "Это новый закон об искусственном интеллекте в Европейском союзе." };
+  const thin = { title: "AI", snippet: "" }; // too short to judge -> kept
+  assert.strictEqual(srv.proposalLanguageOk(english), true, "English proposal must be kept");
+  assert.strictEqual(srv.proposalLanguageOk(cjk), false, "CJK proposal must be purged");
+  assert.strictEqual(srv.proposalLanguageOk(cyrillic), false, "Cyrillic proposal must be purged");
+  assert.strictEqual(srv.proposalLanguageOk(thin), true, "thin-text proposal must be kept (judged on enrichment)");
+});
+
 test("scanBudget / scanBudgetRemaining report usage within the daily cap", () => {
   const b = srv.scanBudget();
   assert.strictEqual(typeof b.used, "number");

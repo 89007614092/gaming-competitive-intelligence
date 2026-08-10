@@ -1509,6 +1509,35 @@ function isLikelyEnglish(text) {
   }
   return latin / tokens.length >= 0.6;
 }
+
+// (B) Source-language whitelist. Each monitored source may declare a `language`
+// in data/sources.json (ISO-ish code). Only English-declared sources may feed
+// the proposal queue; any other language is dropped at the classify step so a
+// future non-English source can never silently leak into Suggested Updates.
+// A missing declaration is tolerated (treated as allowed) for backwards
+// compatibility with older source entries.
+const ALLOWED_SOURCE_LANGUAGES = new Set(["en", "eng", "english"]);
+function sourceLanguageAllowed(source) {
+  if (!source || !source.language) return true;
+  return ALLOWED_SOURCE_LANGUAGES.has(String(source.language).toLowerCase());
+}
+
+// (C) Persisted-proposal language guard. A proposal already sitting in the
+// queue is re-validated here so that non-English items — which could have
+// slipped past the original headline-only gate, or been carried forward across
+// many scans — are purged. Thin text (<40 chars) is kept and left for the
+// per-scan enrichment re-check (which sees the full article body), so we never
+// purge on an empty/short snippet alone.
+function proposalLanguageOk(p) {
+  const t = `${p.title || ""} ${p.snippet || ""} ${p.preview || ""}`.trim();
+  // A solid block of non-Latin glyphs is unambiguously non-English even when
+  // the text has no spaces or is short (so the token-ratio heuristic can't fire).
+  if ((t.match(NON_LATIN) || []).length > 6) return false;
+  // Genuinely thin text (<40 chars) can't be judged by the ratio test; keep it
+  // and let the per-scan enrichment re-check (full article body) decide.
+  if (t.length < 40) return true;
+  return isLikelyEnglish(t);
+}
 function overlap(aSet, bSet) {
   if (!aSet.size || !bSet.size) return { shared: 0, score: 0 };
   let shared = 0;
@@ -1997,6 +2026,7 @@ function looksLikeJobPosting(text) {
 // dropped (duplicate/non-English) or returned as a proposed change.
 function classifyItem(source, item, index) {
   const text = `${item.title} ${item.description || ""}`;
+  if (!sourceLanguageAllowed(source)) return null; // (B) drop non-English-declared source
   if (!isLikelyEnglish(text)) return null; // (a) drop non-English
   if (looksLikeJobPosting(text)) return null; // (a2) drop recruitment / non-substantive noise
   const itemTokens = new Set(tokenize(text));
@@ -2164,7 +2194,9 @@ async function runSourceScan({ force = false } = {}) {
         .filter(i => i.status === "pending")
         .map(i => `${i.matchedRecord ? i.matchedRecord.title : ""}|${i.detectedAction}|${i.url}`)
     );
-    let existing = proposedChanges.items || [];
+    let existing = (proposedChanges.items || []).filter(
+      p => !p.rejectedByModel && !p.rejectedByLanguage && proposalLanguageOk(p)
+    );
     const newProps = []; // proposals created in THIS scan that still need enrichment
     let scanned = 0, considered = 0, proposed = 0;
     const counts = { update: 0, deadline: 0, correction: 0, new: 0 };
@@ -2299,6 +2331,20 @@ async function runSourceScan({ force = false } = {}) {
         // scan retries it (with the short per-proposal backoff) instead of dumping
         // raw scraped text into the review panel.
         const baseText = preview || stripHtml(prop.snippet || prop.description || "");
+        // (C) Re-validate language on the REAL article text. The original gate
+        // only saw the RSS title/description, which Google News may auto-translate
+        // to English even when the source article is non-English. If the fetched
+        // body is non-English, reject the proposal so it never reaches the review
+        // panel (and is purged from the persisted queue).
+        if (baseText && !isLikelyEnglish(baseText)) {
+          prop.rejectedByLanguage = true;
+          prop.status = "rejected";
+          if (prop._newlyProposed) {
+            proposed = Math.max(0, proposed - 1);
+            counts[prop.detectedAction] = Math.max(0, (counts[prop.detectedAction] || 1) - 1);
+          }
+          return;
+        }
         if (!baseText) {
           // Nothing to work with: the live preview fetch failed (e.g. the
           // resolver couldn't reach the publisher) and there is no usable
@@ -2390,7 +2436,7 @@ async function runSourceScan({ force = false } = {}) {
     // Drop any proposals the model rejected as non-substantive (Option B: job
     // postings, careers pages, event invites, etc). They were already added to
     // the `seen` set so they won't be re-scanned on the next pass.
-    existing = existing.filter(p => !p.rejectedByModel);
+    existing = existing.filter(p => !p.rejectedByModel && !p.rejectedByLanguage);
 
     proposedChanges.items = existing.slice(-300);
     sourceState.lastFullScan = new Date().toISOString();
@@ -2984,6 +3030,8 @@ module.exports = {
 
   // Pure classification / matching helpers
   isLikelyEnglish,
+  sourceLanguageAllowed,
+  proposalLanguageOk,
   overlap,
   bestMatch,
   detectKnowledgeCategory,
