@@ -9,11 +9,15 @@ name: Keep Alive — Render Warm Ping
 # before anyone opened the app. Scans are now driven by the server's own
 # internal scheduler; this workflow only keeps the instance warm.
 #
+# The every-10-min cadence is deliberate: Render's free tier spins the container
+# down after ~15 minutes idle, so a ping every 10 minutes keeps it awake without
+# ever triggering a scan (no model requests are spent on the warm-up itself).
+#
 # REQUIRED: add a repository secret named RENDER_URL containing your deployed
 # URL, e.g. https://gaming-competitive-intelligence.onrender.com
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch: {}
 
 jobs:

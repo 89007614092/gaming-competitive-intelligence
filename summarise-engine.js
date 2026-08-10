@@ -250,18 +250,35 @@ function evidenceHighlights(question, evidence, limit = 4) {
 //   SUMMARY_DISABLE_MODEL=1  disables the Q&A model entirely (extractive-only)
 //   SUMMARY_DISABLE_SCAN=1   disables ONLY the background scan model
 
+// Milliseconds from now until a target wall-clock time (hour:minute) in the
+// given IANA timezone. Used to compute "wait until the daily cap resets" so we
+// land on the correct absolute instant regardless of the host's local TZ.
+function msUntilNextWallClockInZone(tz, hour, minute) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(now);
+  const m = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  if (m.hour === "24") m.hour = "00"; // some ICU builds emit 24 for midnight
+  // Express "now" as a UTC timestamp whose wall-clock equals the tz's wall-clock.
+  const nowInZone = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour, +m.minute, +m.second);
+  let next = Date.UTC(+m.year, +m.month - 1, +m.day, hour, minute, 0);
+  if (next <= nowInZone) next += 24 * 3600 * 1000; // already past today's reset
+  return next - nowInZone;
+}
+
 // Given a 429 response, compute how long to pause before retrying. Reads the
-// Retry-After header, or (for Groq free tier) waits until just after midnight PT
-// when the daily token cap resets. Shared by both lanes.
+// Retry-After header, or (for Groq/OpenRouter free tiers) waits until just after
+// midnight PT when the daily token cap resets. Shared by both lanes.
 function cooldownFrom429(resp, txt) {
   const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
   if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
-  if (/per day|TPD/i.test(txt || "")) {
-    const nowPt = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" }));
-    nowPt.setHours(24, 5, 0, 0);
-    let ms = nowPt.getTime() - Date.now();
-    if (ms < 0) ms += 24 * 3600 * 1000;
-    return ms;
+  if (/per day|TPD|free-models-per-day/i.test(txt || "")) {
+    // Free-tier daily caps (Groq tokens/day, OpenRouter free-models-per-day)
+    // reset at midnight PT; wait until just after.
+    return msUntilNextWallClockInZone("America/Los_Angeles", 0, 5);
   }
   return 60 * 60 * 1000;
 }
@@ -289,26 +306,46 @@ async function runApiModelGeneration(question, evidence) {
     },
   ];
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
-  try {
-    const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPEN_MODEL_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        messages,
-        max_tokens: 1800,
-        temperature: 0,
-      }),
-      signal: controller.signal,
-    });
+  // Retry-after-aware Q&A resilience: a short Groq/OpenRouter throttle (a 429
+  // carrying a small Retry-After) must NOT silently downgrade the answer to the
+  // extractive fallback. We wait out the brief throttle and retry inside this
+  // same request, so the user still gets a cited model synthesis. A long or
+  // daily-cap 429 (or exhausted retries) still pauses the lane and falls back to
+  // extractive exactly as before. Keep QA_RETRY_AFTER_CAP_MS small: the
+  // /api/summarise race budget in server.js is 70s, so firstFetch + sleeps +
+  // secondFetch must stay under it — real short throttles are only a few seconds.
+  const qaRetryMax = Math.max(0, Number(process.env.QA_RETRY_429_MAX || 2));
+  const qaRetryCapMs = Math.max(1000, Number(process.env.QA_RETRY_AFTER_CAP_MS || 20000));
+  for (let attempt = 0; attempt <= qaRetryMax; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+    try {
+      const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPEN_MODEL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: DEFAULT_MODEL,
+          messages,
+          max_tokens: 1800,
+          temperature: 0,
+        }),
+        signal: controller.signal,
+      });
   if (!resp.ok) {
     const txt = await resp.text().catch(() => "");
     if (resp.status === 429) {
+      const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
+      const isShortThrottle = Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter * 1000 <= qaRetryCapMs;
+      if (isShortThrottle && attempt < qaRetryMax) {
+        // Brief throttle: wait it out and retry within this request instead of
+        // forcing the extractive fallback. Costs no extra quota beyond the wait.
+        console.warn(`[model:qa] 429 short throttle (Retry-After ${retryAfter}s) — retrying in ${retryAfter}s (attempt ${attempt + 1}/${qaRetryMax})`);
+        await new Promise(r => setTimeout(r, retryAfter * 1000));
+        continue;
+      }
       const cooldownMs = cooldownFrom429(resp, txt);
       qaRateLimitedUntil = Date.now() + cooldownMs;
       console.warn(`[model:qa] rate limited (HTTP 429) — Q&A calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(qaRateLimitedUntil).toISOString()}`);
@@ -328,8 +365,9 @@ async function runApiModelGeneration(question, evidence) {
     // inline-cited response rather than a model answer with no sources.
     if (citationCount >= 2) return answer;
     return buildExtractiveAnswer(question, evidence);
-  } finally {
-    clearTimeout(timeout);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 
