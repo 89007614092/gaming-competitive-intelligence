@@ -100,6 +100,35 @@ test("extractJson parses raw, fenced, and prose-wrapped JSON", () => {
   assert.strictEqual(srv.extractJson("not json at all"), undefined);
 });
 
+test("splitSentences keeps decimal numbers intact (e.g. 22.3 not 3)", () => {
+  // Regression guard for the bug where "22.3 Trillion Won Investment" was split
+  // on the decimal point into a dropped "22" fragment and a "3 Trillion Won"
+  // sentence, silently halving/garbling the figure in report output.
+  const text =
+    "MiHoYo Declares Full-Stack AI Ambition With 22.3 Trillion Won Investment " +
+    "Chinese game giant aims to build self-optimizing AI system, co-founder says the move is strategic.";
+  const sentences = srv.splitSentences(text);
+  assert.ok(sentences.length >= 1, "expected at least one sentence");
+  const joined = sentences.join(" ");
+  assert.ok(joined.includes("22.3"), `decimal must survive, got: ${joined}`);
+  // A standalone "3 Trillion" (i.e. with the "22." dropped) must NOT appear.
+  // Strip the correctly-preserved "22.3" first so we don't trip on the ".3"
+  // boundary inside "22.3 Trillion".
+  const withoutPreserved = joined.replace(/22\.3/g, "");
+  assert.ok(!/3\s+Trillion/.test(withoutPreserved), `must not read as '3 Trillion', got: ${joined}`);
+});
+
+test("splitSentences preserves decimals and abbreviations across sentences", () => {
+  const text =
+    "The U.S. firm reported 1.5 billion in revenue. Growth was 0.9% vs. last year, e.g. stronger in Q3.";
+  const sentences = srv.splitSentences(text);
+  assert.ok(sentences.length >= 1, "expected at least one sentence");
+  const joined = sentences.join(" | ");
+  assert.ok(joined.includes("1.5 billion"), `1.5 billion must survive, got: ${joined}`);
+  assert.ok(joined.includes("0.9%"), `0.9% must survive, got: ${joined}`);
+  assert.ok(joined.includes("U.S."), `U.S. abbreviation must survive, got: ${joined}`);
+});
+
 test("scanBudget / scanBudgetRemaining report usage within the daily cap", () => {
   const b = srv.scanBudget();
   assert.strictEqual(typeof b.used, "number");

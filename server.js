@@ -571,11 +571,33 @@ const SUMMARY_STOP_WORDS = new Set([
   "was", "were", "what", "when", "where", "which", "while", "who", "will", "with", "would", "you", "your"
 ]);
 
+// Sentence splitting must not break on the decimal point inside numbers
+// (e.g. "22.3 trillion" must survive as "22.3", not collapse to "3") nor on the
+// period in common abbreviations ("U.S.", "Mr.", "e.g.", ...). We mask those
+// tokens before splitting and restore them afterwards. Control chars are used
+// as delimiters because they never appear in normal prose and survive the
+// [^.!?]+ split untouched.
+const SPLIT_MASK_OPEN = "\x01";
+const SPLIT_MASK_CLOSE = "\x02";
+const SPLIT_RESTORE_RE = new RegExp(`${SPLIT_MASK_OPEN}(\\d+)${SPLIT_MASK_CLOSE}`, "g");
+const DECIMAL_RE = /\d+\.\d+/g;
+const ABBREV_RE = /\b(?:U\.S\.A?|U\.K\.|Mr\.|Mrs\.|Ms\.|Dr\.|Prof\.|vs\.|e\.g\.|i\.e\.|Co\.|Inc\.|Ltd\.|St\.|Ave\.|Sr\.|Jr\.|No\.|vol\.|Fig\.|et al\.|approx\.|dept\.|Corp\.|Bros\.|Capt\.|Gen\.|Sgt\.|Col\.|Ph\.D\.|M\.D\.)(?![A-Za-z0-9])/g;
+
 function splitSentences(text) {
-  return (text || "")
+  const masks = [];
+  const mask = (token) => {
+    masks.push(token);
+    return `${SPLIT_MASK_OPEN}${masks.length - 1}${SPLIT_MASK_CLOSE}`;
+  };
+  let working = (text || "")
     .replace(/\s+/g, " ")
-    .match(/[^.!?]+(?:[.!?]+|$)/g)?.map(sentence => sentence.trim())
-    .filter(sentence => sentence.length >= 45 && sentence.length <= 500) || [];
+    .replace(DECIMAL_RE, mask)   // protect "22.3", "1.5 billion", IPs, etc.
+    .replace(ABBREV_RE, mask);    // protect "U.S.", "e.g.", "vs.", ...
+  const segments = working.match(/[^.!?]+(?:[.!?]+|$)/g);
+  if (!segments) return [];
+  return segments
+    .map(segment => segment.replace(SPLIT_RESTORE_RE, (_, i) => masks[Number(i)] ?? "").trim())
+    .filter(sentence => sentence.length >= 45 && sentence.length <= 500);
 }
 
 function meaningfulWords(text) {
@@ -2976,4 +2998,7 @@ module.exports = {
 
   // Model-output parsing
   extractJson,
+
+  // Text segmentation
+  splitSentences,
 };
