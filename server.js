@@ -321,14 +321,16 @@ function collectStructuredArticleBodies(html) {
   return bodies;
 }
 
+// Pre-compiled (these run inside loops over scraped docs / RSS articles, so
+// compiling per call would be a real cost on the hot path).
+const RE_ARTICLE = new RegExp(`<article\\b[^>]*>([\\s\\S]*?)<\\/article>`, "gi");
+const RE_MAIN = new RegExp(`<main\\b[^>]*>([\\s\\S]*?)<\\/main>`, "gi");
+const RE_ROLE_MAIN = /<([a-z0-9]+)\b[^>]*role=["']main["'][^>]*>([\s\S]*?)<\/\1>/gi;
 function extractMainHtml(html) {
   const candidates = [];
-  for (const tag of ["article", "main"]) {
-    const regex = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
-    for (const match of html.matchAll(regex)) candidates.push(match[1]);
-  }
-  const roleMain = /<([a-z0-9]+)\b[^>]*role=["']main["'][^>]*>([\s\S]*?)<\/\1>/gi;
-  for (const match of html.matchAll(roleMain)) candidates.push(match[2]);
+  for (const match of html.matchAll(RE_ARTICLE)) candidates.push(match[1]);
+  for (const match of html.matchAll(RE_MAIN)) candidates.push(match[1]);
+  for (const match of html.matchAll(RE_ROLE_MAIN)) candidates.push(match[2]);
   return candidates.sort((a, b) => stripHtml(b).length - stripHtml(a).length)[0] || html;
 }
 
@@ -957,6 +959,21 @@ function resolveNewsCompetitors(value = "") {
 
 let bundledNewsCache = null;
 const newsCacheBySelection = new Map();
+// Bound the per-selection news cache so it can't grow without limit, and expire
+// entries after a short TTL so a stale selection stops being served forever.
+const NEWS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const NEWS_CACHE_MAX = 50;
+function cacheNews(selectionKey, value) {
+  newsCacheBySelection.set(selectionKey, value);
+  if (newsCacheBySelection.size > NEWS_CACHE_MAX) {
+    let oldestKey = null, oldest = Infinity;
+    for (const [k, v] of newsCacheBySelection) {
+      const t = Date.parse(v.generatedAt || 0);
+      if (t < oldest) { oldest = t; oldestKey = k; }
+    }
+    if (oldestKey) newsCacheBySelection.delete(oldestKey);
+  }
+}
 try {
   bundledNewsCache = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "news-cache.json"), "utf8"));
 } catch (_) { /* no cache file yet */ }
@@ -974,7 +991,7 @@ function newsSelectionKey(competitors) {
 
 function getNewsFallback(competitors) {
   const exact = newsCacheBySelection.get(newsSelectionKey(competitors));
-  if (exact?.articles?.length) return exact;
+  if (exact?.articles?.length && Date.now() - Date.parse(exact.generatedAt || 0) < NEWS_CACHE_TTL_MS) return exact;
   if (!bundledNewsCache?.articles?.length) return null;
 
   const aliases = competitors.flatMap(newsCompetitorAliases).map(alias => alias.toLowerCase());
@@ -992,8 +1009,16 @@ function getNewsFallback(competitors) {
   };
 }
 
+// Cache compiled per-tag regexes (extractXmlTag runs 5x per RSS item and the
+// news endpoint fans out across many feeds, so per-call compilation adds up).
+const xmlTagRegexCache = new Map();
 function extractXmlTag(xml, tag) {
-  const match = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i").exec(xml);
+  let re = xmlTagRegexCache.get(tag);
+  if (!re) {
+    re = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i");
+    xmlTagRegexCache.set(tag, re);
+  }
+  const match = re.exec(xml);
   return match ? stripHtml(match[1].replace(/^<!\[CDATA\[|\]\]>$/g, "")) : "";
 }
 
@@ -1097,7 +1122,7 @@ app.get("/api/news", async (req, res) => {
 
     if (liveArticles.length > 0) {
       const searchedAt = new Date().toISOString();
-      newsCacheBySelection.set(newsSelectionKey(monitoredCompetitors), {
+      cacheNews(newsSelectionKey(monitoredCompetitors), {
         generatedAt: searchedAt,
         source: "Google News RSS",
         count: liveArticles.length,
@@ -1699,7 +1724,13 @@ async function mapWithConcurrency(items, limit, fn) {
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
       const i = cursor++;
-      results[i] = await fn(items[i], i);
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (err) {
+        // One item failing must not reject Promise.all and abandon the rest of
+        // the scan. Record the error and keep going.
+        results[i] = { error: String((err && err.message) || err) };
+      }
     }
   });
   await Promise.all(workers);
@@ -1750,27 +1781,45 @@ function extractJson(s) {
 
 // Look up the curated content of an existing matched record so the model can
 // frame a rewrite as a DELTA against what the app already says.
+// Per-dataset cache of the parsed curated data files. existingRecordContent runs
+// once per matched ("update"/"correction"/"deadline") proposal during a scan;
+// without this it re-read + re-parsed the full file for EVERY such proposal
+// (the N+1 read the scan used to do). Keyed by file mtime so a write that
+// changes the file (integrate) is picked up automatically on the next read.
+const contentCache = { timeline: null, knowledge: null, "use-cases": null };
+const CONTENT_FILE = { timeline: "regulatory-timeline.json", knowledge: "knowledge.json", "use-cases": "current-use-cases.json" };
+function loadContent(dataset) {
+  const file = CONTENT_FILE[dataset];
+  if (!file) return null;
+  const p = path.join(__dirname, "data", file);
+  try {
+    const st = fs.statSync(p);
+    const cached = contentCache[dataset];
+    if (cached && cached.mtime === st.mtimeMs) return cached.data;
+    const data = JSON.parse(fs.readFileSync(p, "utf8"));
+    contentCache[dataset] = { mtime: st.mtimeMs, data };
+    return data;
+  } catch { return null; }
+}
+
 function existingRecordContent(matched) {
   if (!matched || !matched.dataset) return "";
-  try {
-    if (matched.dataset === "timeline") {
-      const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8"));
-      const ev = (data.events || []).find(e => e.title === matched.title);
-      return ev ? ev.description || "" : "";
+  const data = loadContent(matched.dataset);
+  if (!data) return "";
+  if (matched.dataset === "timeline") {
+    const ev = (data.events || []).find(e => e.title === matched.title);
+    return ev ? ev.description || "" : "";
+  }
+  if (matched.dataset === "use-cases") {
+    const p = (data.patterns || []).find(p => p.title === matched.title);
+    return p ? p.content || "" : "";
+  }
+  if (matched.dataset === "knowledge") {
+    for (const cat of Object.values(data.categories || {})) {
+      const sub = (cat.subsections || []).find(s => s.title === matched.title);
+      if (sub) return sub.content || "";
     }
-    if (matched.dataset === "use-cases") {
-      const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8"));
-      const p = (data.patterns || []).find(p => p.title === matched.title);
-      return p ? p.content || "" : "";
-    }
-    if (matched.dataset === "knowledge") {
-      const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "knowledge.json"), "utf8"));
-      for (const cat of Object.values(data.categories || {})) {
-        const sub = (cat.subsections || []).find(s => s.title === matched.title);
-        if (sub) return sub.content || "";
-      }
-    }
-  } catch { /* best effort */ }
+  }
   return "";
 }
 
