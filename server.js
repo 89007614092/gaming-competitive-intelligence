@@ -190,7 +190,12 @@ function decodeHtmlEntities(str = "") {
 }
 
 function stripHtml(str = "") {
-  return decodeHtmlEntities(str.replace(/<[^>]*>/g, "")).trim();
+  // Decode HTML entities FIRST, then strip tags. Google News RSS delivers
+  // <description> with entity-encoded angle brackets (e.g. &lt;a href=…&gt;);
+  // if we strip before decoding there are no literal < > to match, so the
+  // markup survives into article text and renders as literal "<a…" in the UI.
+  const decoded = decodeHtmlEntities(str);
+  return decoded.replace(/<[^>]*>/g, "").trim();
 }
 
 // Returns true for IP addresses that must never be fetched: loopback, private
@@ -3049,4 +3054,7 @@ module.exports = {
 
   // Text segmentation
   splitSentences,
+
+  // HTML sanitising
+  stripHtml,
 };
