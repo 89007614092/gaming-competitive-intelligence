@@ -1214,16 +1214,22 @@ async function fetchArticleSubhead(article) {
 }
 
 // Bounded-concurrency enrichment of the first `limit` articles (default 6) so
-// the initial view shows subheads without fetching all 40 pages at once. The
-// rest are filled in lazily by the client as the user scrolls (see
-// /api/news/subhead below).
-async function enrichTopArticles(articles, limit = 6, concurrency = 5) {
+// the News tab can show real subheads for the top cards. Each fetch is capped
+// by `perArticleTimeoutMs` so a single slow resolution can never pile up, and
+// the caller may run this fire-and-forget (after responding) — see /api/news.
+// The rest of the cards are filled in lazily by the client as the user scrolls
+// (see /api/news/subhead below).
+async function enrichTopArticles(articles, limit = 6, concurrency = 5, perArticleTimeoutMs = 15000) {
   const top = articles.slice(0, limit);
+  const withTimeout = (p, ms) =>
+    Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error("enrich-timeout")), ms))]);
   for (let i = 0; i < top.length; i += concurrency) {
     const batch = top.slice(i, i + concurrency);
     await Promise.all(batch.map(async (a) => {
-      const sub = await fetchArticleSubhead(a);
-      if (sub) a.subhead = sub;
+      try {
+        const sub = await withTimeout(fetchArticleSubhead(a), perArticleTimeoutMs);
+        if (sub) a.subhead = sub;
+      } catch (_) { /* keep the RSS description on timeout/error */ }
     }));
   }
   return articles;
@@ -1255,9 +1261,9 @@ app.get("/api/news", async (req, res) => {
     const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
     const liveArticles = await getLiveNewsArticles(monitoredCompetitors);
 
-    // One response path for both live and cached fallback. Enrich the top
-    // cards with real subheads (bounded, concurrent); the rest are filled in
-    // lazily by the client as the user scrolls.
+    // Single response path for both live and cached fallback. The News tab
+    // responds immediately with RSS descriptions; subheads are filled in by the
+    // client on scroll (and warmed in the background for the next load).
     let articles = liveArticles;
     let live = true;
     let searchedAt = new Date().toISOString();
@@ -1282,9 +1288,12 @@ app.get("/api/news", async (req, res) => {
       return res.status(503).json({ error: "No live or cached news articles are available" });
     }
 
-    try { await enrichTopArticles(articles, 6, 5); } catch (_) { /* keep RSS descriptions */ }
-
-    return res.json({
+    // Respond immediately with RSS descriptions. Subheads are warmed in the
+    // background (below) so the next load within the cache window already has
+    // them, and the client fills cards in live as they scroll via the
+    // IntersectionObserver -> /api/news/subhead path. This keeps the News tab
+    // from ever waiting on article fetches.
+    const payload = {
       success: true,
       count: articles.length,
       articles,
@@ -1293,15 +1302,21 @@ app.get("/api/news", async (req, res) => {
       searchedAt,
       live,
       cached: !live,
-    });
+    };
+    res.json(payload);
+
+    // Fire-and-forget: enrich the top 6 in the background. Mutates the same
+    // article objects held by the cache, so the enrichment persists for
+    // subsequent loads. Bounded + timeout-capped so it can never stall.
+    enrichTopArticles(articles, 6, 5, 15000).catch(() => {});
+    return;
   } catch (err) {
     // Last-resort fallback if getLiveNewsArticles itself threw.
     try {
       const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
       const fallback = getNewsFallback(monitoredCompetitors);
       if (fallback?.articles?.length) {
-        try { await enrichTopArticles(fallback.articles, 6, 5); } catch (_) { /* ignore */ }
-        return res.json({
+        const payload = {
           success: true,
           count: fallback.articles.length,
           articles: fallback.articles,
@@ -1310,7 +1325,10 @@ app.get("/api/news", async (req, res) => {
           searchedAt: fallback.generatedAt,
           live: false,
           cached: true,
-        });
+        };
+        res.json(payload);
+        enrichTopArticles(fallback.articles, 6, 5, 15000).catch(() => {});
+        return;
       }
     } catch (_) { /* fall through */ }
     return res.status(500).json({ error: err.message });
@@ -3130,6 +3148,9 @@ module.exports = {
 
   // HTML sanitising
   stripHtml,
+
+  // News subhead enrichment (option 2: deferred, timeout-capped)
+  enrichTopArticles,
 
   // Resolver chains — exported so tests can assert the News-tab enrichment and
   // the background scanner use independent chains (no cross-contention).

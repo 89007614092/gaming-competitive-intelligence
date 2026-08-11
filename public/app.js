@@ -1103,10 +1103,12 @@ function renderNewsCards(articles, filter, savedView = false) {
 // Trims an article snippet to a short "hook" (first part) on a word boundary so
 // narrow news cards stay at-a-glance without vertical scrolling. CSS line-clamp
 // handles the final visual truncation; this caps the DOM size.
-// Lazy subhead enrichment: as news cards scroll into view, fetch a real
-// subhead/strapline for any card that doesn't already have one (the top 6 are
-// pre-enriched server-side). Updates the article object + the card's text so
-// re-renders keep the result. Only recent (non-saved) cards are enriched.
+// Lazy subhead enrichment: as news cards (including the top 6, which sit in
+// the initial viewport) scroll into view, fetch a real subhead/strapline for
+// any card that doesn't already have one. The server no longer blocks the
+// /api/news response on enrichment, so every card is filled in on demand here.
+// Updates the article object + the card's text so re-renders keep the result.
+// Only recent (non-saved) cards are enriched.
 let newsSubheadObserver = null;
 function setupNewsSubheadEnrichment(feedEl, articles) {
   if (!("IntersectionObserver" in window)) return;

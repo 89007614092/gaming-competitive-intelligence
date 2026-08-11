@@ -246,3 +246,26 @@ test("resolver chains: News enrichment and scanner use independent chains (no st
   // And the news chain itself advanced (it performed the resolution slot bookkeeping).
   assert.ok(typeof srv.newsChains.lastDdg === "number");
 });
+
+test("enrichTopArticles: returns same array, never throws/hangs on unresolvable articles", async () => {
+  // These articles have no real URL, so fetchArticleSubhead fails fast without
+  // any network dependency. The function must (a) return the SAME array
+  // reference (so background cache-warming mutates the cached objects), and
+  // (b) complete quickly without throwing — the timeout cap must not hang.
+  const arts = [
+    { title: "A", url: "not-a-real-url", description: "desc a" },
+    { title: "B", url: "also-not-real", description: "desc b" },
+  ];
+  const start = Date.now();
+  let threw = false;
+  let out;
+  try {
+    out = await srv.enrichTopArticles(arts, 6, 5, 2000);
+  } catch (e) {
+    threw = true;
+  }
+  assert.strictEqual(threw, false, "enrichTopArticles should never throw");
+  assert.strictEqual(out, arts, "returns the same array reference for cache warming");
+  assert.strictEqual(out[0].subhead, undefined, "no subhead set for unresolvable article");
+  assert.ok(Date.now() - start < 5000, "completes within the timeout cap");
+});
