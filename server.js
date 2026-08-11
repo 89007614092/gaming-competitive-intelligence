@@ -1187,27 +1187,104 @@ async function getLiveNewsArticles(selectedCompetitors = []) {
 // --- News subhead enrichment -------------------------------------------------
 // Google News RSS <description> only carries the headline + source name (no
 // summary), so News cards otherwise repeat the title plus the site. This pulls
-// a real subhead/strapline (or the article's lead line) by resolving the
-// article URL to the publisher and reading the page.
+// a real subhead/strapline (or the article's lead line).
+
+// When the Google-News resolver fails and we fall back to fetching the
+// news.google.com dispatcher URL, the page contains ONLY this generic line —
+// never the article. We must never surface it as a "lead", or every
+// un-resolvable card reads identically. The Tavily-first path below is what
+// makes this boilerplate rare in the first place.
+const GOOGLE_NEWS_BOILERPLATE = [
+  "Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.",
+];
+function isGoogleNewsBoilerplate(text) {
+  const t = String(text || "").trim();
+  return GOOGLE_NEWS_BOILERPLATE.some((b) => t === b || t.startsWith(b));
+}
+
+// Pick the first candidate that is a genuine lead: long enough and NOT the
+// Google News boilerplate. Falls back to null so the card keeps its RSS
+// description instead of a useless generic line.
+function pickSubheadCandidate(...candidates) {
+  for (const c of candidates) {
+    if (c && typeof c === "string" && c.trim().length >= 30 && !isGoogleNewsBoilerplate(c)) {
+      return c.trim();
+    }
+  }
+  return null;
+}
+
+// Cache Tavily results by normalized title so repeated cards for the same
+// headline hit the search API at most once per server process.
+const subheadTitleCache = new Map();
+async function tavilySubhead(title) {
+  const norm = String(title || "").trim().toLowerCase();
+  if (!norm) return null;
+  if (subheadTitleCache.has(norm)) return subheadTitleCache.get(norm);
+  const p = (async () => {
+    try {
+      const results = await tavilySearch(norm, 1);
+      const first = results && results[0];
+      if (!first) return null;
+      // Prefer the clean extracted text Tavily returns for the headline query.
+      if (first.description && !isGoogleNewsBoilerplate(first.description)) {
+        return first.description.trim();
+      }
+      // Some results only carry the article URL — fetch the page directly so
+      // we still get a real lead even from a bare link.
+      if (first.url) {
+        const page = await fetchTextResource(first.url);
+        const strap = extractMetaDescription(page.text);
+        if (strap && !isGoogleNewsBoilerplate(strap) && strap.trim().length >= 30) {
+          return strap.trim();
+        }
+        const body = extractText(page.text);
+        const lead = splitSentences(body).slice(0, 2).join(" ").trim();
+        return isGoogleNewsBoilerplate(lead) ? null : lead || null;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  })();
+  if (subheadTitleCache.size > 2000) subheadTitleCache.clear();
+  subheadTitleCache.set(norm, p);
+  return p;
+}
+
 async function fetchArticleSubhead(article) {
+  const title = article.title || "";
+  // Tavily-first: the web-search API returns clean extracted article text, so
+  // we skip the failing Google-News resolver + dispatcher entirely. This is the
+  // path that replaces the boilerplate with a real lead. When Tavily is
+  // unconfigured it returns null fast and we fall through to resolve+fetch.
   try {
-    // Option 3: News enrichment runs on its OWN resolver chain (newsChains) so
-    // it can never starve the background scanner's URL resolution. And it is
+    const tav = await tavilySubhead(title);
+    const picked = pickSubheadCandidate(tav);
+    if (picked) return picked;
+  } catch (_) { /* fall through to the resolve+fetch fallback */ }
+
+  // Fallback (Tavily unconfigured / failed): resolve the Google News redirect
+  // to the publisher and read the page. Keeps a real lead when Tavily is absent.
+  try {
+    // News enrichment runs on its OWN resolver chain (newsChains) so it can
+    // never starve the background scanner's URL resolution. And it is
     // cache-first: if this article (or the scanner) already resolved the real
     // URL, reuse it instead of hitting a search engine again.
     let target = article.url;
     if (/news\.google\.com/i.test(target)) {
       const cached = resolvedUrlMap.get(target) || (sourceState.resolvedUrls && sourceState.resolvedUrls[target]);
-      target = cached || await resolveGoogleNewsUrl(target, article.title || "", "", newsChains) || target;
+      target = cached || await resolveGoogleNewsUrl(target, title, "", newsChains) || target;
     }
     const page = await fetchTextResource(target);
     // Prefer the editor's strapline (meta description / og:description).
     const strapline = extractMetaDescription(page.text);
-    if (strapline && strapline.trim().length >= 30) return strapline.trim();
     // Fall back to the first 1-2 sentences of the article body.
     const body = extractText(page.text);
     const lead = splitSentences(body).slice(0, 2).join(" ").trim();
-    return lead || null;
+    // Reject the Google News boilerplate either way so we never show the
+    // generic "Comprehensive up-to-date news coverage…" line.
+    return pickSubheadCandidate(strapline, lead);
   } catch (_) {
     return null;
   }
@@ -3151,6 +3228,10 @@ module.exports = {
 
   // News subhead enrichment (option 2: deferred, timeout-capped)
   enrichTopArticles,
+  fetchArticleSubhead,
+  tavilySubhead,
+  isGoogleNewsBoilerplate,
+  pickSubheadCandidate,
 
   // Resolver chains — exported so tests can assert the News-tab enrichment and
   // the background scanner use independent chains (no cross-contention).

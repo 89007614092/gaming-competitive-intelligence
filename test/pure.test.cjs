@@ -269,3 +269,44 @@ test("enrichTopArticles: returns same array, never throws/hangs on unresolvable 
   assert.strictEqual(out[0].subhead, undefined, "no subhead set for unresolvable article");
   assert.ok(Date.now() - start < 5000, "completes within the timeout cap");
 });
+
+test("tavilySubhead returns clean text or null and never throws when unconfigured", async () => {
+  // With no TAVILY_API_KEY the search rejects; tavilySubhead must swallow it
+  // and return null (so the caller falls back to resolve+fetch) — never throw.
+  let threw = false;
+  let out;
+  try {
+    out = await srv.tavilySubhead("Tencent Cloud named a Leader in Omdia Market Radar");
+  } catch (e) {
+    threw = true;
+  }
+  assert.strictEqual(threw, false, "tavilySubhead must not throw when Tavily is unconfigured");
+  assert.ok(out === null || (typeof out === "string" && out.length >= 30), `expected null or clean text, got: ${out}`);
+  assert.ok(!srv.isGoogleNewsBoilerplate(out || ""), "must never surface the Google News boilerplate");
+});
+
+test("isGoogleNewsBoilerplate / pickSubheadCandidate reject the dispatcher boilerplate", () => {
+  const boilerplate =
+    "Comprehensive up-to-date news coverage, aggregated from sources all over the world by Google News.";
+  assert.strictEqual(srv.isGoogleNewsBoilerplate(boilerplate), true);
+  assert.strictEqual(srv.isGoogleNewsBoilerplate("  " + boilerplate + "  "), true);
+  assert.strictEqual(
+    srv.isGoogleNewsBoilerplate("Tencent Cloud has been named a Leader in the Omdia Market Radar"),
+    false
+  );
+
+  // pickSubheadCandidate must skip the boilerplate and prefer a real lead.
+  const real =
+    "Tencent Cloud, the cloud business of Tencent, has been named a Leader in the Omdia Market Radar.";
+  assert.strictEqual(srv.pickSubheadCandidate(boilerplate, real), real);
+  assert.strictEqual(srv.pickSubheadCandidate(boilerplate), null, "only-boilerplate input yields null");
+  assert.strictEqual(srv.pickSubheadCandidate(""), null, "empty input yields null");
+});
+
+test("fetchArticleSubhead never returns the Google News boilerplate", async () => {
+  // Tavily unconfigured + an unresolvable URL => the fallback path runs and must
+  // return null (not the boilerplate) rather than leaking the dispatcher line.
+  const out = await srv.fetchArticleSubhead({ title: "Some headline", url: "not-a-real-url" });
+  assert.ok(out === null || typeof out === "string", "returns null or a string");
+  assert.ok(!srv.isGoogleNewsBoilerplate(out || ""), "must never return the Google News boilerplate");
+});
