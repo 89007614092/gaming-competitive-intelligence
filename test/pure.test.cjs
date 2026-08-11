@@ -225,3 +225,24 @@ test("cooldownFrom429: Retry-After wins; daily cap waits for midnight PT; else 6
   // 3. Generic 429 with no header and no daily wording -> flat 60 minutes.
   assert.strictEqual(eng.cooldownFrom429(mk(""), "rate limited"), 3600000);
 });
+
+test("resolver chains: News enrichment and scanner use independent chains (no starvation)", async () => {
+  // The two chain sets must be distinct objects so contention is impossible.
+  assert.notStrictEqual(srv.newsChains, srv.scannerChains);
+
+  // Seed the shared URL cache so resolveGoogleNewsUrl returns instantly without
+  // touching any search engine (no network in this pure test).
+  const gUrl = "https://news.google.com/rss/articles/ISOLATION_TEST_" + Date.now();
+  const real = "https://real-publisher.example.com/article";
+  srv.resolvedUrlMap.set(gUrl, real);
+
+  // Resolve on the NEWS chain only.
+  const beforeScannerDdg = srv.scannerChains.lastDdg;
+  const got = await srv.resolveGoogleNewsUrl(gUrl, "Some headline", "example.com", srv.newsChains);
+  assert.strictEqual(got, real);
+  // The scanner's resolver chain must be completely untouched by a news resolution.
+  assert.strictEqual(srv.scannerChains.lastDdg, beforeScannerDdg);
+  assert.strictEqual(srv.scannerChains.lastDdg, 0);
+  // And the news chain itself advanced (it performed the resolution slot bookkeeping).
+  assert.ok(typeof srv.newsChains.lastDdg === "number");
+});

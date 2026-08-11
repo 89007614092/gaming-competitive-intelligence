@@ -1191,8 +1191,15 @@ async function getLiveNewsArticles(selectedCompetitors = []) {
 // article URL to the publisher and reading the page.
 async function fetchArticleSubhead(article) {
   try {
-    const real = await resolveGoogleNewsUrl(article.url, article.title || "", "");
-    const target = real || article.url;
+    // Option 3: News enrichment runs on its OWN resolver chain (newsChains) so
+    // it can never starve the background scanner's URL resolution. And it is
+    // cache-first: if this article (or the scanner) already resolved the real
+    // URL, reuse it instead of hitting a search engine again.
+    let target = article.url;
+    if (/news\.google\.com/i.test(target)) {
+      const cached = resolvedUrlMap.get(target) || (sourceState.resolvedUrls && sourceState.resolvedUrls[target]);
+      target = cached || await resolveGoogleNewsUrl(target, article.title || "", "", newsChains) || target;
+    }
     const page = await fetchTextResource(target);
     // Prefer the editor's strapline (meta description / og:description).
     const strapline = extractMetaDescription(page.text);
@@ -1448,15 +1455,19 @@ function consumeScanBudget() {
 // Cache of resolved real article URLs (Google News redirect -> publisher URL),
 // persisted via sourceState.resolvedUrls so we rarely re-query a search engine.
 const resolvedUrlMap = new Map();
-// Serialize DuckDuckGo URL resolutions so we never hit DDG in parallel (which
-// triggers rate limiting), and enforce a small minimum gap between calls.
-let ddgResolveChain = Promise.resolve();
-let lastDdgResolve = 0;
-// Secondary resolver: GDELT DOC API (returns real publisher URLs directly, no
-// HTML scraping). It is stricter on rate limits (≈1 req / 5s) so we serialize it
-// on its own slower chain, and only reach for it after DuckDuckGo fails.
-let gdeltResolveChain = Promise.resolve();
-let lastGdeltResolve = 0;
+// Serialize DuckDuckGo/GDELT URL resolutions so we never hit the engines in
+// parallel (which triggers rate limiting) and enforce a minimum gap between
+// calls. We keep TWO independent chain sets so a busy News tab can never starve
+// the background competitor-news scanner:
+//   - scannerChains: used by the scanner (and scrapeUrl) to resolve article URLs.
+//   - newsChains:    used only by the News-tab subhead enrichment.
+// They share the URL cache (resolvedUrlMap) but never contend for a resolution
+// slot, so News pre-fetching / scroll lookups cannot block proposal generation.
+function makeResolverChains() {
+  return { ddg: Promise.resolve(), gdelt: Promise.resolve(), lastDdg: 0, lastGdelt: 0 };
+}
+const scannerChains = makeResolverChains();
+const newsChains = makeResolverChains();
 // Rotate User-Agents across resolver requests. A single fixed UA is exactly what
 // search engines fingerprint and challenge, so cycling a small pool of realistic
 // desktop UAs measurably reduces the DuckDuckGo 202 bot-challenge in production.
@@ -1734,7 +1745,7 @@ function detectKnowledgeCategory(text, sourceCategory) {
 // we never hammer DDG in parallel (which triggers rate limiting). Cached so we
 // rarely re-query. Best-effort: returns null on any failure. Falls back to the
 // GDELT DOC API if DuckDuckGo can't resolve the URL.
-async function resolveGoogleNewsUrl(googleUrl, title, domain) {
+async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerChains) {
   if (resolvedUrlMap.has(googleUrl)) return resolvedUrlMap.get(googleUrl);
   resolverStats.attempts++; // a real (non-cached) resolution is being attempted
   const cacheAndReturn = (real) => {
@@ -1764,11 +1775,11 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
   // publisher URL or null. We try a few query variants (most specific first) to
   // maximise the chance of a hit despite DDG's occasional challenge page.
   const tryDdg = (queryTitle) => {
-    const task = ddgResolveChain.then(async () => {
+    const task = chains.ddg.then(async () => {
       const minGap = 700;
-      const wait = lastDdgResolve + minGap - Date.now();
+      const wait = chains.lastDdg + minGap - Date.now();
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
-      lastDdgResolve = Date.now();
+      chains.lastDdg = Date.now();
       if (!queryTitle) return null;
       const site = domain ? ` site:${domain}` : "";
       const q = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${queryTitle}${site}`)}`;
@@ -1783,8 +1794,8 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
       }
     });
     // Reassign so the next call (title-only fallback) chains AFTER this one,
-    // keeping DDG strictly serialised.
-    ddgResolveChain = task.catch(() => null);
+    // keeping DDG strictly serialised on this chain set.
+    chains.ddg = task.catch(() => null);
     return task;
   };
   // 1) DuckDuckGo (primary): title + site, then title alone (broader).
@@ -1793,7 +1804,7 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
   // 2) GDELT DOC API (secondary): real publisher URLs directly. Reached only when
   //    DDG fails, so rarely exercised — but it gives the scan a second (third)
   //    chance to fetch a real preview in production.
-  const gdeltUrl = await resolveViaGdelt(title, domain);
+  const gdeltUrl = await resolveViaGdelt(title, domain, chains);
   return cacheAndReturn(gdeltUrl);
 }
 
@@ -1801,7 +1812,7 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain) {
 // needs a slower pace (≈1 req / 5s) and a well-formed query, so we serialise it
 // on its own chain. We only accept a result whose domain actually matches the
 // source, so we never inject an unrelated article. Returns null on any failure.
-async function resolveViaGdelt(title, domain) {
+async function resolveViaGdelt(title, domain, chains = scannerChains) {
   if (!title || !domain) return null;
   // Try an exact quoted phrase first, then a looser keyword query, so a partial
   // title still has a chance of matching the article in GDELT's index.
@@ -1810,13 +1821,13 @@ async function resolveViaGdelt(title, domain) {
   queries.push(`domain:${domain} "${clean}"`);
   const kw = clean.split(/\s+/).filter(w => w.length > 3).slice(0, 6).join(" ");
   if (kw && kw !== clean) queries.push(`domain:${domain} ${kw}`);
-  const task = gdeltResolveChain.then(async () => {
+  const task = chains.gdelt.then(async () => {
     const dm = domain.replace(/^www\./i, "");
     for (const q of queries) {
       const minGap = 5500;
-      const wait = lastGdeltResolve + minGap - Date.now();
+      const wait = chains.lastGdelt + minGap - Date.now();
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
-      lastGdeltResolve = Date.now();
+      chains.lastGdelt = Date.now();
       const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q)}&mode=ArtList&maxrecords=10&format=json&sortby=datedesc`;
       try {
         const res = await fetchTextResource(url, "application/json,text/plain", 6000, nextResolverUa());
@@ -1836,7 +1847,7 @@ async function resolveViaGdelt(title, domain) {
     }
     return null;
   });
-  gdeltResolveChain = task.catch(() => null);
+  chains.gdelt = task.catch(() => null);
   return task;
 }
 
@@ -3119,4 +3130,11 @@ module.exports = {
 
   // HTML sanitising
   stripHtml,
+
+  // Resolver chains — exported so tests can assert the News-tab enrichment and
+  // the background scanner use independent chains (no cross-contention).
+  resolveGoogleNewsUrl,
+  newsChains,
+  scannerChains,
+  resolvedUrlMap,
 };
