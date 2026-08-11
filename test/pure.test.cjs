@@ -189,6 +189,21 @@ test("msUntilNextWallClockInZone lands in the future and within 24h", () => {
   assert.ok(ms < 24 * 3600 * 1000, "must be within 24h");
 });
 
+test("stripHtml removes markup even when angle brackets are HTML-entity-encoded", () => {
+  // Google News RSS delivers <description> with encoded markup like
+  // &lt;a href=…&gt;Headline&lt;/a&gt;. The previous implementation stripped
+  // tags *before* decoding entities, so the encoded brackets survived and
+  // leaked into the UI as literal "<a…". Now decode must run first.
+  const encoded = '&lt;a href="https://example.com/x" target="_blank"&gt;Headline text&lt;/a&gt;&nbsp;&lt;font color="#6f6f6f"&gt;Source&lt;/font&gt;';
+  const out = srv.stripHtml(encoded);
+  assert.ok(!out.includes("<"), `expected no literal tag in output, got: ${out}`);
+  assert.ok(!out.includes("href"), `expected link attributes removed, got: ${out}`);
+  assert.strictEqual(out, "Headline text Source");
+
+  // Raw (un-encoded) markup still stripped, and entities like &amp; resolve.
+  assert.strictEqual(srv.stripHtml("<b>AT&amp;T</b> wins"), "AT&T wins");
+});
+
 test("cooldownFrom429: Retry-After wins; daily cap waits for midnight PT; else 60m", () => {
   // NB: cooldownFrom429(resp, txt) reads the body from its SECOND argument --
   // resp.text() is never called -- so the body must be passed as `txt`.
