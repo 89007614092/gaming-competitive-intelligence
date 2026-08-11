@@ -1092,15 +1092,54 @@ function renderNewsCards(articles, filter, savedView = false) {
         <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
       </div>
       <p class="news-source">${escapeHtml(sourceLine)}</p>
-      <p class="news-description">${escapeHtml(trimDescription(a.description))}</p>
+      <p class="news-description">${escapeHtml(trimDescription(a.subhead || a.description))}</p>
     </div>`;
     })
     .join("");
+
+  if (!savedView) setupNewsSubheadEnrichment(feed, filtered);
 }
 
 // Trims an article snippet to a short "hook" (first part) on a word boundary so
 // narrow news cards stay at-a-glance without vertical scrolling. CSS line-clamp
 // handles the final visual truncation; this caps the DOM size.
+// Lazy subhead enrichment: as news cards scroll into view, fetch a real
+// subhead/strapline for any card that doesn't already have one (the top 6 are
+// pre-enriched server-side). Updates the article object + the card's text so
+// re-renders keep the result. Only recent (non-saved) cards are enriched.
+let newsSubheadObserver = null;
+function setupNewsSubheadEnrichment(feedEl, articles) {
+  if (!("IntersectionObserver" in window)) return;
+  if (newsSubheadObserver) newsSubheadObserver.disconnect();
+  newsSubheadObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const card = entry.target;
+      newsSubheadObserver.unobserve(card);
+      const a = articles[Number(card.dataset.index)];
+      if (!a || a.subhead || a.__subheadRequested) return;
+      a.__subheadRequested = true;
+      enrichCardSubhead(a, card);
+    });
+  }, { rootMargin: "300px" });
+  feedEl.querySelectorAll(".news-card").forEach((card) => newsSubheadObserver.observe(card));
+}
+
+async function enrichCardSubhead(article, card) {
+  try {
+    const resp = await fetch(
+      "/api/news/subhead?url=" + encodeURIComponent(article.url || "") +
+      "&title=" + encodeURIComponent(article.title || "")
+    );
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.subhead) return;
+    article.subhead = data.subhead;
+    const descEl = card.querySelector(".news-description");
+    if (descEl) descEl.textContent = trimDescription(data.subhead);
+  } catch (_) { /* keep the RSS description on failure */ }
+}
+
 function trimDescription(text, max = 200) {
   const t = String(text || "").replace(/\s+/g, " ").trim();
   if (!t) return "";

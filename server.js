@@ -1184,6 +1184,63 @@ async function getLiveNewsArticles(selectedCompetitors = []) {
   return articles.slice(0, 40);
 }
 
+// --- News subhead enrichment -------------------------------------------------
+// Google News RSS <description> only carries the headline + source name (no
+// summary), so News cards otherwise repeat the title plus the site. This pulls
+// a real subhead/strapline (or the article's lead line) by resolving the
+// article URL to the publisher and reading the page.
+async function fetchArticleSubhead(article) {
+  try {
+    const real = await resolveGoogleNewsUrl(article.url, article.title || "", "");
+    const target = real || article.url;
+    const page = await fetchTextResource(target);
+    // Prefer the editor's strapline (meta description / og:description).
+    const strapline = extractMetaDescription(page.text);
+    if (strapline && strapline.trim().length >= 30) return strapline.trim();
+    // Fall back to the first 1-2 sentences of the article body.
+    const body = extractText(page.text);
+    const lead = splitSentences(body).slice(0, 2).join(" ").trim();
+    return lead || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Bounded-concurrency enrichment of the first `limit` articles (default 6) so
+// the initial view shows subheads without fetching all 40 pages at once. The
+// rest are filled in lazily by the client as the user scrolls (see
+// /api/news/subhead below).
+async function enrichTopArticles(articles, limit = 6, concurrency = 5) {
+  const top = articles.slice(0, limit);
+  for (let i = 0; i < top.length; i += concurrency) {
+    const batch = top.slice(i, i + concurrency);
+    await Promise.all(batch.map(async (a) => {
+      const sub = await fetchArticleSubhead(a);
+      if (sub) a.subhead = sub;
+    }));
+  }
+  return articles;
+}
+
+// Scroll-driven single-article subhead lookup. Accepts any http(s) article URL
+// (live RSS links are news.google.com redirects; cached fallback entries are
+// already-resolved publisher URLs). SSRF safety is enforced by fetchTextResource
+// (validateSourceUrl + assertPublicHost on the final redirect target).
+app.get("/api/news/subhead", async (req, res) => {
+  const url = String(req.query.url || "");
+  const title = String(req.query.title || "");
+  if (!/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: "A valid http(s) article URL is required" });
+  }
+  try {
+    const sub = await fetchArticleSubhead({ url, title });
+    if (!sub) return res.status(404).json({ error: "No subhead available" });
+    return res.json({ subhead: sub });
+  } catch (e) {
+    return res.status(502).json({ error: e.message });
+  }
+});
+
 app.get("/api/news", async (req, res) => {
   res.set("Cache-Control", "no-store, max-age=0");
 
@@ -1191,59 +1248,64 @@ app.get("/api/news", async (req, res) => {
     const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
     const liveArticles = await getLiveNewsArticles(monitoredCompetitors);
 
-    if (liveArticles.length > 0) {
-      const searchedAt = new Date().toISOString();
+    // One response path for both live and cached fallback. Enrich the top
+    // cards with real subheads (bounded, concurrent); the rest are filled in
+    // lazily by the client as the user scrolls.
+    let articles = liveArticles;
+    let live = true;
+    let searchedAt = new Date().toISOString();
+
+    if (articles.length > 0) {
       cacheNews(newsSelectionKey(monitoredCompetitors), {
         generatedAt: searchedAt,
         source: "Google News RSS",
         count: liveArticles.length,
         articles: liveArticles,
       });
-
-      return res.json({
-        success: true,
-        count: liveArticles.length,
-        articles: liveArticles,
-        topics: NEWS_TOPICS.map(topic => topic.label),
-        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
-        searchedAt,
-        live: true,
-        cached: false,
-      });
+    } else {
+      const fallback = getNewsFallback(monitoredCompetitors);
+      if (fallback?.articles?.length) {
+        articles = fallback.articles;
+        live = false;
+        searchedAt = fallback.generatedAt;
+      }
     }
 
-    // Promise.allSettled does not throw when all searches fail, so an explicit
-    // empty-result fallback is required here (the previous implementation missed it).
-    const fallback = getNewsFallback(monitoredCompetitors);
-    if (fallback?.articles?.length) {
-      return res.json({
-        success: true,
-        count: fallback.articles.length,
-        articles: fallback.articles,
-        topics: NEWS_TOPICS.map(topic => topic.label),
-        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
-        searchedAt: fallback.generatedAt,
-        live: false,
-        cached: true,
-      });
+    if (!articles.length) {
+      return res.status(503).json({ error: "No live or cached news articles are available" });
     }
 
-    return res.status(503).json({ error: "No live or cached news articles are available" });
+    try { await enrichTopArticles(articles, 6, 5); } catch (_) { /* keep RSS descriptions */ }
+
+    return res.json({
+      success: true,
+      count: articles.length,
+      articles,
+      topics: NEWS_TOPICS.map(topic => topic.label),
+      monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
+      searchedAt,
+      live,
+      cached: !live,
+    });
   } catch (err) {
-    const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
-    const fallback = getNewsFallback(monitoredCompetitors);
-    if (fallback?.articles?.length) {
-      return res.json({
-        success: true,
-        count: fallback.articles.length,
-        articles: fallback.articles,
-        topics: NEWS_TOPICS.map(topic => topic.label),
-        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
-        searchedAt: fallback.generatedAt,
-        live: false,
-        cached: true,
-      });
-    }
+    // Last-resort fallback if getLiveNewsArticles itself threw.
+    try {
+      const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
+      const fallback = getNewsFallback(monitoredCompetitors);
+      if (fallback?.articles?.length) {
+        try { await enrichTopArticles(fallback.articles, 6, 5); } catch (_) { /* ignore */ }
+        return res.json({
+          success: true,
+          count: fallback.articles.length,
+          articles: fallback.articles,
+          topics: NEWS_TOPICS.map(topic => topic.label),
+          monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
+          searchedAt: fallback.generatedAt,
+          live: false,
+          cached: true,
+        });
+      }
+    } catch (_) { /* fall through */ }
     return res.status(500).json({ error: err.message });
   }
 });
