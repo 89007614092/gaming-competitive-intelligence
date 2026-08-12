@@ -94,6 +94,24 @@ function tavilySearch(query, limit = 10) {
   });
 }
 
+// Fetch the full article body for a source URL. Reuses scrapeUrl (which
+// resolves news.google.com redirect URLs to the real publisher and returns
+// { text }). We clean + cap to 4000 chars so enriched evidence stays bounded.
+// On ANY failure (timeout, bot-wall, unsupported content type, missing URL) we
+// return the provided fallbackText, so enrichment can never break an answer.
+async function fetchArticleBody(url, fallbackText, title = "") {
+  if (!url) return fallbackText;
+  try {
+    const result = await scrapeUrl(String(url).slice(0, 2000), { title });
+    const body = result && typeof result.text === "string" ? result.text : "";
+    const cleaned = body.replace(/\s+/g, " ").trim();
+    if (cleaned.length < 120) return fallbackText; // too thin to be useful
+    return cleaned.slice(0, 4000);
+  } catch (_) {
+    return fallbackText;
+  }
+}
+
 // ===== Jina Reader (keyless option for the proposed-changes resolver) =====
 // r.jina.ai/<url> returns the article body as clean text; s.jina.ai/<query>
 // returns search results already extracted as markdown. Used when
@@ -787,8 +805,43 @@ app.post("/api/summarise", async (req, res) => {
     } catch (err) {
       console.warn("[summarise] evidence retrieval failed:", err.message);
     }
+    // Phase 3a: user-supplied "My Sources" (saved News articles) attached from
+    // the Q&A tab. Each becomes an [S#] evidence item the model can cite. We
+    // enrich with the FULL article text (fetched from the saved URL) so the
+    // model integrates the real content, not just the RSS description, and we
+    // cap the count + sanitise so a malformed/massive payload can't blow up the
+    // context window. Missing text is fine (title-only sources still cite).
+    let userEvidence = [];
+    try {
+      const incoming = Array.isArray(req.body?.userSources) ? req.body.userSources : [];
+      const baseSources = incoming
+        .filter(s => s && (s.title || s.text))
+        .slice(0, 20)
+        .map((s, index) => ({
+          id: `S${index + 1}`,
+          sourceType: "user",
+          dataset: "My Sources",
+          title: String(s.title || "Untitled source").slice(0, 200),
+          section: "User-supplied context",
+          text: String(s.text || "").slice(0, 4000),
+          excerpt: String(s.text || s.title || "").slice(0, 360),
+          url: s.url ? String(s.url).slice(0, 2000) : undefined,
+        }));
+      // Fetch full article text where a URL exists (bounded concurrency).
+      // Failures fall back to the snippet, so enrichment never breaks the answer.
+      userEvidence = await mapWithConcurrency(baseSources, 4, async (src) => {
+        if (!src.url) return src;
+        const full = await fetchArticleBody(src.url, src.text, src.title);
+        if (full === src.text) return src;
+        return { ...src, text: full, excerpt: full.slice(0, 360) };
+      });
+    } catch (_) { /* ignore malformed userSources */ }
+
     let webEvidence = [];
     let webSearchError = "";
+    // When the user attached their own sources, cap the web results so the
+    // user's hand-picked context isn't drowned out by internet noise.
+    const webCap = userEvidence.length > 0 ? Math.max(2, 6 - userEvidence.length) : 5;
 
     if (useInternet) {
       try {
@@ -798,8 +851,9 @@ app.post("/api/summarise", async (req, res) => {
         // away from generic/definition pages toward substantive coverage.
         const webResults = await tavilySearch(`${question} analysis`, 8);
         const filtered = webResultRelevance(question, webResults, 5);
-        webEvidence = filtered
+        const kept = filtered
           .filter(item => item.url && (item.title || item.description))
+          .slice(0, webCap)
           .map((item, index) => ({
             id: `W${index + 1}`,
             sourceType: "internet",
@@ -810,6 +864,18 @@ app.post("/api/summarise", async (req, res) => {
             excerpt: String(item.description || item.title || "").slice(0, 360),
             url: item.url,
           }));
+        // Deep-fetch full text for the top 3 most-relevant web results so they are
+        // processed as fully as the user's [S#] sources (bounded concurrency;
+        // failures fall back to the Tavily snippet). The remaining results keep
+        // their 900-char snippet.
+        const topWeb = kept.slice(0, 3);
+        const restWeb = kept.slice(3);
+        const enrichedTop = await mapWithConcurrency(topWeb, 3, async (src) => {
+          const full = await fetchArticleBody(src.url, src.text, src.title);
+          if (full === src.text) return src;
+          return { ...src, text: full, excerpt: full.slice(0, 360) };
+        });
+        webEvidence = [...enrichedTop, ...restWeb];
       } catch (error) {
         webSearchError = error.message;
       }
@@ -827,28 +893,6 @@ app.post("/api/summarise", async (req, res) => {
       webEvidence = [];
       internetDropped = true;
     }
-
-    // Phase 3a: user-supplied "My Sources" (saved News articles) attached from
-    // the Q&A tab. Each becomes an [S#] evidence item the model can cite. We cap
-    // the count and sanitise so a malformed/massive payload can't blow up the
-    // context window. Missing text is fine (title-only sources still cite).
-    let userEvidence = [];
-    try {
-      const incoming = Array.isArray(req.body?.userSources) ? req.body.userSources : [];
-      userEvidence = incoming
-        .filter(s => s && (s.title || s.text))
-        .slice(0, 20)
-        .map((s, index) => ({
-          id: `S${index + 1}`,
-          sourceType: "user",
-          dataset: "My Sources",
-          title: String(s.title || "Untitled source").slice(0, 200),
-          section: "User-supplied context",
-          text: String(s.text || "").slice(0, 4000),
-          excerpt: String(s.text || s.title || "").slice(0, 360),
-          url: s.url ? String(s.url).slice(0, 2000) : undefined,
-        }));
-    } catch (_) { /* ignore malformed userSources */ }
 
     const evidence = [...appEvidence, ...userEvidence, ...webEvidence];
     let answer;
