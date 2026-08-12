@@ -48,6 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadKnowledgeBase();
   setupSubTabs();
   setupNewsFavorites();
+  setupFolderUI();
   setupNewsCompetitors();
   setupQA();
   setupTabDragDrop();
@@ -818,10 +819,14 @@ async function loadNews(forceRefresh = false) {
 }
 
 const SAVED_ARTICLES_KEY = "savedNewsArticles";
+const NEWS_FOLDERS_KEY = "newsFolders";
 let currentFilter = null;
 let allArticles = [];
 let newsViewMode = "recent";
 let savedNewsArticles = loadSavedNewsArticles();
+let newsFolders = loadNewsFolders();
+// null = "All Saved"; otherwise the id of the folder currently filtered in Saved Articles.
+let activeFolderFilter = null;
 
 function loadSavedNewsArticles() {
   try {
@@ -832,9 +837,22 @@ function loadSavedNewsArticles() {
   }
 }
 
+function loadNewsFolders() {
+  try {
+    const data = JSON.parse(localStorage.getItem(NEWS_FOLDERS_KEY) || "[]");
+    return Array.isArray(data) ? data : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 function saveNewsArticles() {
   localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(savedNewsArticles));
   updateSavedArticleCount();
+}
+
+function saveNewsFolders() {
+  localStorage.setItem(NEWS_FOLDERS_KEY, JSON.stringify(newsFolders));
 }
 
 function newsArticleKey(article) {
@@ -891,6 +909,8 @@ function setNewsViewMode(mode) {
   } else {
     renderNewsCards(allArticles, currentFilter);
   }
+  // Keep the folder sidebar in sync with the active sub-tab (hidden unless Saved).
+  renderFoldersSidebar();
 }
 
 function toggleNewsFavorite(article, container = document.getElementById("newsFeed")) {
@@ -919,8 +939,218 @@ function updateSavedArticleCount() {
   if (count) count.textContent = savedNewsArticles.length;
 }
 
+// ===== Folders for saved articles (localStorage) =====
+// Folders let a user group saved articles (e.g. "risks", "competitors"). An
+// article must be saved to belong to a folder; assigning to a folder saves it.
+function createFolder(name) {
+  const trimmed = (name || "").trim();
+  if (!trimmed) return null;
+  const folder = {
+    id: "fld_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name: trimmed,
+    createdAt: new Date().toISOString(),
+  };
+  newsFolders.push(folder);
+  saveNewsFolders();
+  return folder;
+}
+
+function listFolders() {
+  return newsFolders;
+}
+
+function getArticleFolders(article) {
+  const key = newsArticleKey(article);
+  const saved = savedNewsArticles.find(s => newsArticleKey(s) === key);
+  return saved ? (saved.folderIds || []) : [];
+}
+
+// Resolves the live article object (search results, saved, or feed) by key so
+// menu/folder actions operate on the right copy.
+function resolveArticleByKey(key) {
+  if (searchActive) {
+    const s = searchResultsData.find(x => newsArticleKey(x) === key);
+    if (s) return s;
+  }
+  const saved = savedNewsArticles.find(x => newsArticleKey(x) === key);
+  if (saved) return saved;
+  return allArticles.find(x => newsArticleKey(x) === key) || null;
+}
+
+// Adds or removes an article from a folder. Ensures the article is saved first
+// (so it shows in Saved Articles and can carry folderIds). Keeps the current
+// view, the folder sidebar, and the card's star/folder state in sync.
+function toggleArticleFolder(article, folderId) {
+  const key = newsArticleKey(article);
+  let saved = savedNewsArticles.find(s => newsArticleKey(s) === key);
+  const wasSaved = !!saved;
+  if (!saved) {
+    savedNewsArticles.unshift({ ...article, savedAt: new Date().toISOString(), folderIds: [] });
+    saved = savedNewsArticles[0];
+  }
+  saved.folderIds = saved.folderIds || [];
+  const idx = saved.folderIds.indexOf(folderId);
+  const folder = newsFolders.find(f => f.id === folderId);
+  const folderName = folder ? folder.name : "folder";
+  if (idx >= 0) {
+    saved.folderIds.splice(idx, 1);
+    showToast(`Removed from “${folderName}”.`);
+  } else {
+    saved.folderIds.push(folderId);
+    showToast(wasSaved ? `Added to “${folderName}”.` : `Saved to “${folderName}”.`);
+  }
+  saveNewsArticles();
+
+  if (searchActive) renderSearchResultsToFeed();
+  else if (newsViewMode === "saved") renderSavedArticles();
+  else renderNewsCards(allArticles, currentFilter);
+  renderFoldersSidebar();
+}
+
+// Sidebar of folder chips shown only on the Saved Articles sub-tab.
+function renderFoldersSidebar() {
+  const sidebar = document.getElementById("foldersSidebar");
+  if (!sidebar) return;
+  if (newsViewMode !== "saved") {
+    sidebar.style.display = "none";
+    return;
+  }
+  sidebar.style.display = "flex";
+  const folders = listFolders();
+  const chips = [];
+  chips.push(
+    `<button class="folder-chip${activeFolderFilter === null ? " active" : ""}" data-folder-id="">All Saved <span class="folder-count">${savedNewsArticles.length}</span></button>`
+  );
+  folders.forEach(f => {
+    const n = savedNewsArticles.filter(a => (a.folderIds || []).includes(f.id)).length;
+    chips.push(
+      `<button class="folder-chip${activeFolderFilter === f.id ? " active" : ""}" data-folder-id="${escapeHtml(f.id)}">${escapeHtml(f.name)} <span class="folder-count">${n}</span></button>`
+    );
+  });
+  chips.push(`<button class="folder-chip folder-new" id="newFolderChip" type="button">+ New folder</button>`);
+  sidebar.innerHTML = chips.join("");
+}
+
+function openFolderMenu(anchorBtn, articleKey) {
+  closeFolderMenu();
+  const article = resolveArticleByKey(articleKey);
+  const inFolders = getArticleFolders(article || {});
+  const folders = listFolders();
+  const items = folders.length
+    ? folders.map(f => {
+        const checked = inFolders.includes(f.id);
+        return `<label class="folder-menu-item">
+          <input type="checkbox" data-folder-id="${escapeHtml(f.id)}"${checked ? " checked" : ""}>
+          <span>${escapeHtml(f.name)}</span>
+        </label>`;
+      }).join("")
+    : `<div class="folder-menu-empty">No folders yet — create one below.</div>`;
+
+  const menu = document.createElement("div");
+  menu.id = "folderMenu";
+  menu.className = "folder-menu";
+  menu.dataset.articleKey = articleKey;
+  menu.innerHTML = `
+    <div class="folder-menu-title">Save to folder</div>
+    <div class="folder-menu-list">${items}</div>
+    <div class="folder-menu-new">
+      <input type="text" id="folderMenuNewInput" class="text-input" placeholder="New folder name" maxlength="40" />
+      <button class="btn btn-sm btn-primary" id="folderMenuNewBtn" type="button">Add</button>
+    </div>`;
+  document.body.appendChild(menu);
+
+  // Position below the anchor, clamped to the viewport.
+  const rect = anchorBtn.getBoundingClientRect();
+  const menuW = 230;
+  const vw = document.documentElement.clientWidth;
+  let left = window.scrollX + rect.left;
+  if (left + menuW > window.scrollX + vw - 8) {
+    left = window.scrollX + Math.max(8, vw - menuW - 8);
+  }
+  menu.style.left = left + "px";
+  menu.style.top = window.scrollY + rect.bottom + 4 + "px";
+  menu.style.width = menuW + "px";
+
+  menu.addEventListener("click", (e) => {
+    const cb = e.target.closest('input[type="checkbox"][data-folder-id]');
+    if (cb) {
+      const art = resolveArticleByKey(menu.dataset.articleKey);
+      if (art) toggleArticleFolder(art, cb.dataset.folderId);
+      return;
+    }
+    if (e.target.closest("#folderMenuNewBtn")) {
+      const input = menu.querySelector("#folderMenuNewInput");
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      const folder = createFolder(name);
+      if (folder) {
+        const art = resolveArticleByKey(menu.dataset.articleKey);
+        if (art) toggleArticleFolder(art, folder.id); // assign to the new folder
+        openFolderMenu(anchorBtn, menu.dataset.articleKey); // re-open with the new folder checked
+      }
+      return;
+    }
+    e.stopPropagation();
+  });
+
+  const input = menu.querySelector("#folderMenuNewInput");
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); menu.querySelector("#folderMenuNewBtn")?.click(); }
+    else if (e.key === "Escape") closeFolderMenu();
+  });
+}
+
+function closeFolderMenu() {
+  document.getElementById("folderMenu")?.remove();
+}
+
+// Wires the card "Save to folder" menu and the Saved-Articles folder sidebar.
+function setupFolderUI() {
+  const feed = document.getElementById("newsFeed");
+  feed?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".news-folder-btn");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const key = decodeURIComponent(btn.dataset.articleKey || "");
+    openFolderMenu(btn, key);
+  });
+
+  // Close the menu when clicking anywhere outside it (the feed handler stops
+  // propagation on open, so the opening click won't close it immediately).
+  document.addEventListener("click", (e) => {
+    const menu = document.getElementById("folderMenu");
+    if (!menu) return;
+    if (e.target.closest(".news-folder-btn")) return;
+    if (!menu.contains(e.target)) closeFolderMenu();
+  });
+
+  const sidebar = document.getElementById("foldersSidebar");
+  sidebar?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".folder-chip");
+    if (!chip) return;
+    if (chip.id === "newFolderChip") {
+      const name = window.prompt("New folder name:");
+      if (name && name.trim()) {
+        createFolder(name.trim());
+        renderFoldersSidebar();
+      }
+      return;
+    }
+    const id = chip.dataset.folderId || null;
+    activeFolderFilter = id === "" ? null : id;
+    renderFoldersSidebar();
+    renderSavedArticles();
+  });
+}
+
 function renderSavedArticles() {
-  renderNewsCards(savedNewsArticles, null, true);
+  let list = savedNewsArticles;
+  if (activeFolderFilter) {
+    list = list.filter(a => (a.folderIds || []).includes(activeFolderFilter));
+  }
+  renderNewsCards(list, null, true);
+  renderFoldersSidebar();
 }
 
 function hostOf(url) {
@@ -946,6 +1176,7 @@ function newsCardHtml(a, i, saved) {
   }
   const sourceLine = sourceBits.filter(Boolean).join(" · ");
   const articleKey = encodeURIComponent(newsArticleKey(a));
+  const inFolders = getArticleFolders(a).length > 0;
 
   return `
     <div class="news-card${saved ? " is-saved" : ""}" data-index="${i}">
@@ -954,6 +1185,7 @@ function newsCardHtml(a, i, saved) {
           <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
         </div>
         <div class="news-card-actions">
+          <button class="news-folder-btn${inFolders ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="Save to folder" title="Save to folder">&#128193;<span class="news-folder-caret">&#9662;</span></button>
           <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
         </div>
       </div>
@@ -975,9 +1207,13 @@ function renderNewsCards(articles, filter, savedView = false) {
     : articles;
 
   if (!filtered.length) {
-    feed.innerHTML = savedView
-      ? '<div class="empty-state"><div class="empty-icon">&#9734;</div><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates to keep it here for later.</p></div>'
-      : '<div class="empty-state"><p>No articles match this filter</p></div>';
+    if (savedView) {
+      feed.innerHTML = activeFolderFilter
+        ? '<div class="empty-state"><div class="empty-icon">&#128193;</div><p>This folder is empty.</p><p>Open an article’s “Save to folder” menu to add it here.</p></div>'
+        : '<div class="empty-state"><div class="empty-icon">&#9734;</div><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates — or use “Save to folder” — to keep it here for later.</p></div>';
+    } else {
+      feed.innerHTML = '<div class="empty-state"><p>No articles match this filter</p></div>';
+    }
     return;
   }
 

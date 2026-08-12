@@ -452,6 +452,135 @@ body {
   border-left: 3px solid #d69e2e;
 }
 
+/* "Save to folder" control on each article card */
+.news-folder-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.news-folder-btn .news-folder-caret {
+  font-size: 0.6rem;
+  margin-left: -2px;
+  transform: translateY(4px);
+}
+
+.news-folder-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.news-folder-btn.active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* Folder filter chips above the feed (Saved Articles only) */
+.folders-sidebar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.folder-chip {
+  padding: 0.3rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.folder-chip:hover { background: var(--primary-light); border-color: var(--primary); }
+.folder-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.folder-chip.active .folder-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
+.folder-new { font-style: italic; color: var(--text-muted); }
+
+.folder-count {
+  font-size: 0.7rem;
+  background: var(--border);
+  color: var(--text-muted);
+  border-radius: 10px;
+  padding: 0 0.4rem;
+  min-width: 1.2rem;
+  text-align: center;
+}
+
+/* Popover menu for assigning an article to folders */
+.folder-menu {
+  position: absolute;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.folder-menu-title {
+  font-weight: 600;
+  color: var(--text);
+  padding: 0.15rem 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.4rem;
+}
+
+.folder-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.folder-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.25rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.folder-menu-item:hover { background: var(--primary-light); }
+.folder-menu-item input[type="checkbox"] { accent-color: var(--primary); }
+
+.folder-menu-empty {
+  color: var(--text-muted);
+  padding: 0.35rem 0.25rem;
+  font-style: italic;
+}
+
+.folder-menu-new {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.folder-menu-new .text-input { flex: 1; min-width: 0; }
+
 .news-title {
   font-weight: 600;
   font-size: 0.95rem;
