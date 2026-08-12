@@ -649,6 +649,24 @@ body {
   min-width: 240px;
 }
 
+.search-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1.25rem;
+  padding: 0.65rem 0.9rem;
+  background: var(--primary-light);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-lg);
+  font-size: 0.9rem;
+}
+
+.search-banner-text {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .search-input {
   flex: 1;
   padding: 0.75rem 1rem;
