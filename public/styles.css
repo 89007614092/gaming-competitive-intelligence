@@ -1952,6 +1952,17 @@ body {
   line-height: 1.5;
 }
 
+.evidence-notice {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--warning, #d9a441);
+  background: var(--warning-bg, rgba(217, 164, 65, 0.1));
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-style: italic;
+  line-height: 1.45;
+}
+
 @media (max-width: 760px) {
   .summary-composer-footer,
   .summary-result-header {
