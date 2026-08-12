@@ -1860,6 +1860,7 @@ body {
 }
 .ans-cite:hover { text-decoration: underline; }
 .ans-cite-web { background: #dcfce7; color: #15803d; }
+.ans-cite-user { background: #fef9c3; color: #a16207; }
 
 .summary-warning {
   margin-bottom: 1rem;
