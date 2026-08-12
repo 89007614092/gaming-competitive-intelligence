@@ -273,6 +273,18 @@ body {
   background: var(--accent);
   color: #fff;
 }
+
+/* Reader action inside a proposal card — blue to match the "Open the original
+   article" link, but outlined (not filled) so it reads as a secondary,
+   article-scoped action distinct from the filled "Integrate" button. */
+.btn-reader {
+  background: #eff6ff;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  font-weight: 600;
+  margin-top: 0.4rem;
+}
+.btn-reader:hover { background: #dbeafe; color: var(--primary-hover); border-color: var(--primary-hover); }
 .btn-accent:hover { background: #047857; }
 
 .btn-sm {
