@@ -3365,8 +3365,16 @@ async function openReaderSplit(card, url) {
   split.style.display = "flex";
   if (statusEl) { statusEl.textContent = "Loading article…"; statusEl.style.display = "block"; }
 
+  // Pass the article title + publisher so the server can resolve news.google.com
+  // redirect URLs to the real publisher (the landing page has no article body).
+  const titleEl = card.querySelector(".proposal-title");
+  const sourceEl = card.querySelector(".proposal-source");
+  const title = titleEl ? titleEl.textContent.trim() : "";
+  const domain = sourceEl ? sourceEl.textContent.trim() : "";
+  const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}`;
+
   try {
-    const res = await fetch(`${API_BASE}/reader?url=${encodeURIComponent(url)}`);
+    const res = await fetch(`${API_BASE}/reader?${qs}`);
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
       if (statusEl) {
@@ -3460,7 +3468,6 @@ async function renderReviewPanel() {
       if (p.fetchStatus === "blocked") {
         return `<div class="proposal-blocked-notice">
           <strong>Manual review required.</strong> This site was detected as potentially containing new information, but due to restrictions on automated / non-human access, we couldn't retrieve it automatically.
-          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         </div>`;
       }
       // Honest pending state (#4): the model couldn't rewrite yet (quota / offline).
@@ -3471,7 +3478,6 @@ async function renderReviewPanel() {
       if (p.enrichStatus === "rate-limited" || p.enrichStatus === "pending") {
         return `<div class="proposal-pending-notice">
           AI rewrite temporarily unavailable (quota); will auto-enrich when capacity recovers.
-          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         </div>`;
       }
       // Primary preview: the AI-styled, app-style summary is the real suggestion.
@@ -3486,7 +3492,6 @@ async function renderReviewPanel() {
             <button class="btn btn-sm proposal-edit-toggle" data-edit-toggle type="button">Edit summary</button>
           </div>
           <textarea class="proposal-edit-box text-input" rows="4" style="display:none">${escapeHtml(p.styledSummary)}</textarea>
-          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         </div>`;
       }
       // No AI-generated summary and not a transient rate-limit. Two distinct
@@ -3501,10 +3506,9 @@ async function renderReviewPanel() {
       if (!p.fetchStatus && !p.enrichStatus) {
         return `<div class="proposal-pending-notice">
           This update is still being analysed. A preview will appear automatically once the source has been reviewed.
-          ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         </div>`;
       }
-      return `<div class="proposal-nopreview">No extractable summary was available from the source feed. <a href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Open the original article</a> to review the content before approving.</div>`;
+      return `<div class="proposal-nopreview">No extractable summary was available from the source feed. Open the original article (link above) to review the content before approving.</div>`;
     };
     const cardHtml = (p) => {
       const targetDefault = p.targetDataset
@@ -3523,9 +3527,11 @@ async function renderReviewPanel() {
           <span class="proposal-date">${escapeHtml(p.publishedLabel || "")}</span>
         </div>
         <div class="proposal-title">${escapeHtml(p.title)}</div>
+        ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}
         ${matchHtml(p)}
         ${p.updateReason ? `<div class="proposal-reason"><span class="proposal-reason-pill proposal-reason-${reasonKey}">${reasonLabels[reasonKey]}</span> ${escapeHtml(p.updateReason)}</div>` : ""}
         ${previewHtml(p)}
+        ${p.url ? `<button class="btn btn-sm btn-reader" data-read="${p.id}" type="button">Manually Read &amp; Write Summary</button>` : ""}
         <div class="proposal-controls">
           <label class="proposal-field">Add to:
             <select class="proposal-target text-input">
@@ -3538,7 +3544,6 @@ async function renderReviewPanel() {
         </div>
         <div class="proposal-actions">
           <button class="btn btn-sm btn-primary" data-integrate="${p.id}" type="button">Integrate</button>
-          ${p.url ? `<button class="btn btn-sm" data-read="${p.id}" type="button">Read &amp; write summary</button>` : ""}
           <button class="btn btn-sm" data-dismiss="${p.id}" type="button">Dismiss</button>
         </div>
       </div>`;

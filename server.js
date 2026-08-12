@@ -460,11 +460,23 @@ async function fetchReaderContent(url, opts = {}) {
   const maxRedirects = Number(opts.maxRedirects) || READER_MAX_REDIRECTS;
   if (!url || typeof url !== "string") throw new Error("A valid source URL is required");
 
-  const initial = validateSourceUrl(url.slice(0, 2000));
-  await assertPublicHost(new URL(initial).hostname);
+  let target = validateSourceUrl(url.slice(0, 2000));
+  // Suggested-Update proposal URLs arrive as news.google.com/rss/articles/...
+  // redirects that return only a generic Google News landing page ("Comprehensive
+  // up-to-date news coverage..."). Resolve them to the real publisher URL first
+  // (the same resolver scrapeUrl uses) so the reader fetches the actual article
+  // body instead of the aggregator interstitial. Falls back to the original URL
+  // if resolution fails; the redirect loop below still re-validates every hop.
+  if (/news\.google\.com/i.test(target)) {
+    try {
+      const real = await resolveGoogleNewsUrl(target, opts.title || "", opts.domain || "");
+      if (real) target = real;
+    } catch (_) { /* keep the original URL */ }
+  }
+  await assertPublicHost(new URL(target).hostname);
 
   const seen = new Set();
-  let current = initial;
+  let current = target;
   let response = null;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
@@ -536,7 +548,10 @@ app.get("/api/reader", async (req, res) => {
     if (!readerRateLimiter(ip)) {
       return res.status(429).json({ error: "Too many requests, please slow down" });
     }
-    const result = await fetchReaderContent(url);
+    const result = await fetchReaderContent(url, {
+      title: typeof req.query.title === "string" ? req.query.title : "",
+      domain: typeof req.query.domain === "string" ? req.query.domain : "",
+    });
     res.json(result);
   } catch (err) {
     // Generic error mapping — never leak internals (hosts, stack traces).
