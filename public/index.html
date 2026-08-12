@@ -30,6 +30,9 @@
         <button class="nav-btn" data-view="summarise-view" draggable="true">
           Q&amp;A
         </button>
+        <button class="nav-btn" data-view="reader-view" draggable="true">
+          Reader
+        </button>
         <button class="nav-btn" data-view="spider-web" draggable="true">
           Competitor Web
         </button>
@@ -211,6 +214,51 @@
           <div class="summary-evidence-section">
             <h3>Sources</h3>
             <div class="summary-evidence-grid" id="summaryEvidence"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== READER VIEW (Phase 4) ===== -->
+      <section class="view" id="reader-view">
+        <div class="summary-hero">
+          <div class="summary-spark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" role="img">
+              <path d="M24 2c1.8 12.1 5.9 16.2 18 18-12.1 1.8-16.2 5.9-18 18-1.8-12.1-5.9-16.2-18-18C18.1 18.2 22.2 14.1 24 2Z" />
+            </svg>
+          </div>
+          <h1>Reader</h1>
+          <p>Open any public article in a clean reader view, then ask the AI about it. The article is fetched server-side and returned as plain text — it never executes scripts in your browser.</p>
+        </div>
+
+        <div class="reader-composer">
+          <input id="readerUrl" type="url" placeholder="Paste an article URL (https://…)" />
+          <button class="btn btn-primary" id="readerOpenBtn" type="button">Open in reader</button>
+          <span class="reader-error" id="readerError"></span>
+        </div>
+
+        <div class="reader-split" id="readerSplit" style="display:none;">
+          <div class="reader-article">
+            <h2 id="readerArticleTitle"></h2>
+            <div class="reader-article-meta">
+              <a id="readerArticleLink" href="#" target="_blank" rel="noopener"></a>
+            </div>
+            <!-- Remote content is rendered as TEXT only (textContent), never innerHTML. -->
+            <article class="reader-article-body" id="readerArticleBody"></article>
+          </div>
+          <div class="reader-qa">
+            <textarea id="readerQuestion" maxlength="700" placeholder="Ask a question about this article…"></textarea>
+            <div class="reader-qa-footer">
+              <label class="summary-model-toggle">
+                <input type="checkbox" id="readerUseInternet" />
+                <span>Include Internet Sources</span>
+              </label>
+              <button class="btn btn-primary" id="readerAskBtn" type="button">Ask</button>
+            </div>
+            <div class="reader-answer" id="readerAnswer"></div>
+            <div class="summary-evidence-section">
+              <h3>Sources</h3>
+              <div class="summary-evidence-grid" id="readerEvidence"></div>
+            </div>
           </div>
         </div>
       </section>

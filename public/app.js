@@ -52,6 +52,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNewsCompetitors();
   setupMySources();
   setupQA();
+  setupReaderView();
   setupTabDragDrop();
   setupSourceMonitor();
   setupReviewPanel();
@@ -302,6 +303,122 @@ async function runSummary() {
     button.disabled = false;
     button.textContent = "Ask";
   }
+}
+
+// ===== Phase 4: Reader view (split-pane article + Q&A) =====
+let currentReaderArticle = null;
+
+function setupReaderView() {
+  const urlInput = document.getElementById("readerUrl");
+  const openBtn = document.getElementById("readerOpenBtn");
+  const errorEl = document.getElementById("readerError");
+  const split = document.getElementById("readerSplit");
+  const titleEl = document.getElementById("readerArticleTitle");
+  const linkEl = document.getElementById("readerArticleLink");
+  const bodyEl = document.getElementById("readerArticleBody");
+  const questionEl = document.getElementById("readerQuestion");
+  const askBtn = document.getElementById("readerAskBtn");
+  if (!openBtn) return;
+
+  const openArticle = async () => {
+    const url = (urlInput.value || "").trim();
+    errorEl.textContent = "";
+    if (!/^https?:\/\//i.test(url)) {
+      errorEl.textContent = "Enter a valid http(s) article URL.";
+      return;
+    }
+    openBtn.disabled = true;
+    openBtn.textContent = "Opening…";
+    try {
+      const resp = await fetch(`${API_BASE}/reader?url=${encodeURIComponent(url)}`);
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.text) {
+        errorEl.textContent = data.error || "Could not open that article.";
+        return;
+      }
+      currentReaderArticle = { title: data.title || url, url: data.url || url, text: data.text };
+      // Render remote content as TEXT only — never innerHTML — so no script in
+      // the fetched page can ever execute inside the user's browser.
+      titleEl.textContent = currentReaderArticle.title;
+      linkEl.textContent = currentReaderArticle.url;
+      linkEl.href = currentReaderArticle.url;
+      bodyEl.textContent = currentReaderArticle.text;
+      split.style.display = "grid";
+    } catch (e) {
+      errorEl.textContent = "Could not open that article.";
+    } finally {
+      openBtn.disabled = false;
+      openBtn.textContent = "Open in reader";
+    }
+  };
+
+  openBtn.addEventListener("click", openArticle);
+  urlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); openArticle(); } });
+  askBtn.addEventListener("click", runReaderSummary);
+  questionEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runReaderSummary(); }
+  });
+}
+
+async function runReaderSummary() {
+  const questionEl = document.getElementById("readerQuestion");
+  const answerEl = document.getElementById("readerAnswer");
+  const evidenceEl = document.getElementById("readerEvidence");
+  const askBtn = document.getElementById("readerAskBtn");
+  const useInternet = document.getElementById("readerUseInternet")?.checked === true;
+  const question = (questionEl.value || "").trim();
+  if (!question) { showToast("Enter a question about the article."); questionEl.focus(); return; }
+  if (!currentReaderArticle) { showToast("Open an article first."); return; }
+
+  askBtn.disabled = true;
+  answerEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Analysing the article…</p></div>`;
+  evidenceEl.innerHTML = "";
+  try {
+    const response = await fetch(`${API_BASE}/summarise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        useInternet,
+        useModel: true,
+        // The opened article is supplied as a user [S#] source so the answer
+        // cites it inline. Only the extracted text travels — never raw HTML.
+        userSources: [{ title: currentReaderArticle.title, url: currentReaderArticle.url, text: currentReaderArticle.text.slice(0, 4000) }],
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || "Answer generation failed");
+    answerEl.innerHTML = renderAnswerWithCitations(data.answer || "", data.sources || []);
+    renderReaderEvidence(data.sources || []);
+  } catch (error) {
+    answerEl.textContent = `Unable to generate an answer: ${error.message}`;
+  } finally {
+    askBtn.disabled = false;
+  }
+}
+
+function renderReaderEvidence(sources) {
+  const container = document.getElementById("readerEvidence");
+  if (!sources.length) {
+    container.innerHTML = '<p class="hint">No evidence sources were returned.</p>';
+    return;
+  }
+  container.innerHTML = sources.map(source => {
+    const validUrl = /^https?:\/\//i.test(source.url || "");
+    const title = escapeHtml(source.title || source.dataset || "Evidence source");
+    const titleMarkup = validUrl
+      ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">${title}</a>`
+      : `<strong>${title}</strong>`;
+    return `
+      <article class="summary-evidence-card">
+        <div class="summary-evidence-card-header">
+          <span class="summary-evidence-id">${escapeHtml(source.id)}</span>
+          <span class="summary-evidence-kind">${source.sourceType === "internet" ? "Internet" : escapeHtml(source.dataset || "Application")}</span>
+        </div>
+        ${titleMarkup}
+        <p>${escapeHtml(source.excerpt || "")}</p>
+      </article>`;
+  }).join("");
 }
 
 // Parse a Markdown answer into sections and render it to HTML.

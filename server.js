@@ -279,9 +279,11 @@ function validateSourceUrl(input) {
   // private addresses (e.g. intranet names) are caught by assertPublicHost via
   // DNS at fetch time. Evaluating isPrivateOrReservedIp on a domain name like
   // "news.google.com" is a false positive (it isn't 4 numeric octets) and would
-  // wrongly block every normal URL.
+  // wrongly block every normal URL. Strip IPv6 brackets so the private-range
+  // check sees the bare address (e.g. "[::1]" -> "::1").
   const isIpLiteral = /^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname) || parsed.hostname.includes(":");
-  if (isIpLiteral && isPrivateOrReservedIp(parsed.hostname)) {
+  const bareHost = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (isIpLiteral && isPrivateOrReservedIp(bareHost)) {
     throw new Error("Local/private network URLs cannot be scraped");
   }
   return parsed.toString();
@@ -586,6 +588,119 @@ async function scrapeUrl(url, opts = {}) {
   };
 }
 
+// =============================================================================
+// Phase 4: Split-reader proxy — server-side fetch of an arbitrary article.
+// SECURITY: this is a user-facing endpoint that makes the backend issue HTTP
+// requests on a user-supplied URL, so it is the classic SSRF surface. It MUST
+// reuse the existing guards (validateSourceUrl + assertPublicHost) and add the
+// controls below. Do NOT weaken any of these.
+// =============================================================================
+
+// Fixed-window per-key rate limiter. Returns true if the key is within budget,
+// false if it should be throttled. Used to stop the reader becoming an
+// open-proxy amplification tool.
+function createRateLimiter({ windowMs = 60000, max = 30 } = {}) {
+  const hits = new Map(); // key -> [timestamp, ...]
+  return {
+    limit(key) {
+      const now = Date.now();
+      const recent = (hits.get(key) || []).filter(t => now - t < windowMs);
+      if (recent.length >= max) {
+        hits.set(key, recent);
+        return false;
+      }
+      recent.push(now);
+      hits.set(key, recent);
+      return true;
+    },
+    _reset() { hits.clear(); },
+  };
+}
+
+const readerRateLimiter = createRateLimiter({
+  windowMs: Number(process.env.READER_RATE_WINDOW_MS || 60000),
+  max: Number(process.env.READER_RATE_MAX || 30),
+});
+
+const READER_MAX_BYTES = Number(process.env.READER_MAX_BYTES || 5_000_000);
+const READER_MAX_REDIRECTS = 5;
+const READER_TIMEOUT_MS = Number(process.env.READER_TIMEOUT_MS || 20000);
+const READER_ACCEPT = "text/html,application/xhtml+xml,text/plain";
+// Only these content types are worth turning into a reader view. Everything
+// else (binaries, images, media) is refused — we never proxy opaque bytes.
+const READER_SAFE_CT = /(?:text\/html|application\/xhtml\+xml|text\/plain|xml)/i;
+
+// Stream a response body into a string while enforcing a hard byte ceiling.
+// Extracted so the size-cap can be unit-tested without any network. Throws
+// "Response too large" if the body exceeds maxBytes (and cancels the stream).
+async function readStreamWithCap(resp, maxBytes) {
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.length;
+    if (received > maxBytes) {
+      try { await reader.cancel(); } catch (_) { /* already gone */ }
+      throw new Error("Response too large");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+// Fetch an article for the reader. Returns extracted TEXT only (never raw HTML),
+// so the client has no script-execution surface. Hardened against SSRF:
+//  - validateSourceUrl rejects non-http(s), localhost and private IP literals.
+//  - assertPublicHost resolves the host and blocks private/loopback/link-local
+//    (incl. 169.254.169.254); resolves at fetch time (DNS-rebinding defence).
+//  - Every redirect hop is re-validated (scheme + host) before following.
+//  - Response size is capped; content-type is allow-listed; a timeout aborts.
+async function fetchReaderContent(url, opts = {}) {
+  const maxBytes = opts.maxBytes ?? READER_MAX_BYTES;
+  const maxRedirects = opts.maxRedirects ?? READER_MAX_REDIRECTS;
+  const timeoutMs = opts.timeoutMs ?? READER_TIMEOUT_MS;
+  const validated = validateSourceUrl(url);
+  await assertPublicHost(new URL(validated).hostname);
+  let current = validated;
+  let finalUrl = validated;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(current, {
+        method: "GET",
+        redirect: "manual",
+        signal: controller.signal,
+        headers: { "User-Agent": SCRAPE_USER_AGENT, Accept: READER_ACCEPT },
+      });
+      if ([301, 302, 303, 307, 308].includes(resp.status) && hop < maxRedirects) {
+        const loc = resp.headers.get("location");
+        if (!loc) break;
+        let next;
+        try { next = new URL(loc, current).toString(); } catch { break; }
+        const nextValidated = validateSourceUrl(next);
+        await assertPublicHost(new URL(nextValidated).hostname);
+        current = nextValidated;
+        finalUrl = nextValidated;
+        continue;
+      }
+      if (resp.status < 200 || resp.status >= 300) throw new Error(`Source returned HTTP ${resp.status}`);
+      const ct = resp.headers.get("content-type") || "";
+      if (!READER_SAFE_CT.test(ct)) throw new Error("Unsupported content type");
+      const full = await readStreamWithCap(resp, maxBytes);
+      const title = extractTitle(full) || new URL(finalUrl).hostname;
+      const text = extractText(full);
+      if (text.length < 80) throw new Error("Page contained insufficient readable text");
+      return { title, text: text.slice(0, 4000), url: finalUrl, excerpt: text.slice(0, 360) };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error("Too many redirects");
+}
+
 const SUMMARY_STOP_WORDS = new Set([
   "about", "after", "again", "against", "also", "among", "and", "are", "because", "been", "before",
   "being", "between", "both", "but", "can", "could", "did", "does", "each", "for", "from", "had",
@@ -781,6 +896,42 @@ app.get("/api/summarise/status", (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/reader?url=<encoded> — Phase 4 split-reader. Fetches a public
+// article server-side and returns extracted TEXT (title/text/url/excerpt).
+// SECURITY gate: same-origin only (defence-in-depth against cross-site use of
+// our server as a proxy), rate-limited, and the actual fetch is performed by
+// fetchReaderContent() which enforces the full SSRF guard chain. Error
+// messages are deliberately generic so they never leak internal IPs/DNS state.
+app.get("/api/reader", async (req, res) => {
+  const origin = req.get("origin");
+  const selfOrigin = `${req.protocol}://${req.get("host")}`;
+  if (origin && origin !== selfOrigin) {
+    return res.status(403).json({ error: "Cross-origin requests are not permitted" });
+  }
+  const url = req.query.url;
+  if (typeof url !== "string" || !url || url.length > 2000) {
+    return res.status(400).json({ error: "A ?url= parameter (http/https) is required" });
+  }
+  const clientKey = req.ip || req.socket.remoteAddress || "unknown";
+  if (!readerRateLimiter.limit(clientKey)) {
+    return res.status(429).json({ error: "Too many requests, please slow down" });
+  }
+  try {
+    const article = await fetchReaderContent(url);
+    res.json(article);
+  } catch (err) {
+    const msg = String(err && err.message || "");
+    if (/too large/i.test(msg)) return res.status(413).json({ error: "That article is too large to load" });
+    if (/redirect/i.test(msg)) return res.status(502).json({ error: "Could not follow the article link" });
+    // Input/validation errors (bad URL, non-http(s), local/private host) are
+    // client mistakes -> 400. Everything else is a server-side fetch failure.
+    if (/source URL|network URLs|HTTP and HTTPS|valid source/i.test(msg)) {
+      return res.status(400).json({ error: "That URL is not a fetchable article link" });
+    }
+    return res.status(502).json({ error: "Could not retrieve that article" });
   }
 });
 
@@ -3159,4 +3310,13 @@ module.exports = {
   newsChains,
   scannerChains,
   resolvedUrlMap,
+
+  // Phase 4 split-reader: SSRF guard chain + safe fetch (exported for the
+  // security/abuse test suite).
+  validateSourceUrl,
+  assertPublicHost,
+  isPrivateOrReservedIp,
+  fetchReaderContent,
+  readStreamWithCap,
+  createRateLimiter,
 };
