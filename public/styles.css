@@ -638,10 +638,19 @@ body {
 /* Custom competitor entry in the picker + monitor card */
 .competitor-custom-add {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0 0.25rem;
+  padding: 0.7rem 1.25rem;
+  background: var(--primary-light);
+  border-top: 1px solid var(--border);
 }
-.competitor-custom-add .text-input { flex: 1; }
+.competitor-custom-add .text-input {
+  flex: 1;
+  min-width: 0;
+}
+.competitor-custom-add .btn {
+  flex-shrink: 0;
+}
 .picker-group-label {
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -792,8 +801,17 @@ body {
 }
 
 .search-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 600;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-banner .btn {
+  flex-shrink: 0;
 }
 
 .search-input {
