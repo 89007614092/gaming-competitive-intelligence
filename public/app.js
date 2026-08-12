@@ -313,9 +313,9 @@ function parseAnswer(text, sources) {
   const renderInline = (line) => {
     let html = escapeHtml(line);
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\[([AW]\d+)\]/g, (m, id) => {
+    html = html.replace(/\[([AWS]\d+)\]/g, (m, id) => {
       const src = sourceMap.get(id);
-      const cls = "ans-cite" + (src?.sourceType === "internet" ? " ans-cite-web" : "");
+      const cls = "ans-cite" + (src?.sourceType === "internet" ? " ans-cite-web" : src?.sourceType === "user" ? " ans-cite-user" : "");
       const inner = escapeHtml(id);
       if (src && /^https?:\/\//i.test(src.url || "")) {
         return `<a class="${cls}" href="${escapeHtml(src.url)}" target="_blank" rel="noopener" title="${escapeHtml(src.title || "")}">${inner}</a>`;
