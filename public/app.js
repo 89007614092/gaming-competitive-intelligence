@@ -91,6 +91,8 @@ function setupNavigation() {
   document.getElementById("searchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") doSearch();
   });
+  // Clear an active search and return to the live feed
+  document.getElementById("clearSearchBtn")?.addEventListener("click", clearSearch);
 }
 
 // ===== Smart Summary =====
@@ -748,6 +750,9 @@ function applyCompetitorSelection() {
 
 // ===== Load News =====
 async function loadNews(forceRefresh = false) {
+  // Refreshing the feed exits any active search and restores the live list.
+  searchActive = false;
+  hideSearchBanner();
   const feed = document.getElementById("newsFeed");
   feed.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Scanning competitor news...</p></div>';
 
@@ -851,7 +856,6 @@ function setupNewsFavorites() {
   });
 
   const newsFeedEl = document.getElementById("newsFeed");
-  const searchResultsEl = document.getElementById("searchResultsSection");
   const attachFavoriteHandler = (container, sourceListGetter) => {
     container?.addEventListener("click", event => {
       const button = event.target.closest(".news-favorite-btn");
@@ -864,12 +868,16 @@ function setupNewsFavorites() {
       if (article) toggleNewsFavorite(article, container);
     });
   };
-  attachFavoriteHandler(newsFeedEl, () => [...allArticles, ...savedNewsArticles]);
-  attachFavoriteHandler(searchResultsEl, () => searchResultsData);
+  // When a search is active the feed shows search results, so look them up there.
+  attachFavoriteHandler(newsFeedEl, () => searchActive ? searchResultsData : [...allArticles, ...savedNewsArticles]);
 }
 
 function setNewsViewMode(mode) {
   newsViewMode = mode === "saved" ? "saved" : "recent";
+  // Leaving a sub-tab always exits an active search and restores the live feed.
+  searchActive = false;
+  activeSearchQuery = "";
+  hideSearchBanner();
   const title = document.getElementById("newsSectionTitle");
   const filters = document.getElementById("filterTags");
   const searchResults = document.getElementById("searchResultsSection");
@@ -897,11 +905,12 @@ function toggleNewsFavorite(article, container = document.getElementById("newsFe
 
   saveNewsArticles();
   showToast(existingIndex >= 0 ? "Article removed from saved items." : "Article saved for later.");
-  if (container === document.getElementById("newsFeed")) {
-    if (newsViewMode === "saved") renderSavedArticles();
-    else renderNewsCards(allArticles, currentFilter);
+  if (searchActive) {
+    renderSearchResultsToFeed();
+  } else if (newsViewMode === "saved") {
+    renderSavedArticles();
   } else {
-    renderSearchCards(searchResultsData);
+    renderNewsCards(allArticles, currentFilter);
   }
 }
 
@@ -977,19 +986,6 @@ function renderNewsCards(articles, filter, savedView = false) {
   if (!savedView) setupNewsSubheadEnrichment(feed, filtered);
 }
 
-// Search results reuse the same card markup as the News feed so they can be
-// starred and saved just like any other article.
-function renderSearchCards(results) {
-  searchResultsData = results;
-  const container = document.getElementById("searchResultsSection");
-  if (!container) return;
-  if (!results.length) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F50E;</div><p>No results found. Try a different query.</p></div>';
-    return;
-  }
-  container.innerHTML = results.map((a, i) => newsCardHtml(a, i, isNewsArticleSaved(a))).join("");
-}
-
 // Trims an article snippet to a short "hook" (first part) on a word boundary so
 // narrow news cards stay at-a-glance without vertical scrolling. CSS line-clamp
 // handles the final visual truncation; this caps the DOM size.
@@ -1048,7 +1044,12 @@ function filterNews(keyword, tagEl) {
 }
 
 // ===== Search =====
+// Search results are rendered into the main article feed (newsFeed) so the
+// visible list the user is watching actually updates to match the query, with
+// a banner + "Clear search" affordance to return to the live feed.
 let searchResultsData = [];
+let searchActive = false;
+let activeSearchQuery = "";
 
 async function doSearch() {
   const input = document.getElementById("searchInput");
@@ -1056,10 +1057,12 @@ async function doSearch() {
   if (!query) return;
 
   const limit = parseInt(document.getElementById("searchLimit").value);
-  const resultsDiv = document.getElementById("searchResultsSection");
-  resultsDiv.style.display = "block";
+  const feed = document.getElementById("newsFeed");
 
-  resultsDiv.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Searching...</p></div>';
+  searchActive = true;
+  activeSearchQuery = query;
+  showSearchBanner(query);
+  feed.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Searching the web for “${escapeHtml(query)}”…</p></div>`;
 
   try {
     const res = await fetch(`${API_BASE}/search`, {
@@ -1071,7 +1074,8 @@ async function doSearch() {
     const data = await res.json();
 
     if (!data.success) {
-      resultsDiv.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>${data.error || "Search failed"}</p></div>`;
+      searchResultsData = [];
+      feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>${escapeHtml(data.error || "Search failed")}</p></div>`;
       return;
     }
 
@@ -1082,10 +1086,44 @@ async function doSearch() {
       sourceName: hostOf(result.url),
     }));
 
-    renderSearchCards(results);
+    searchResultsData = results;
+    renderSearchResultsToFeed();
   } catch (err) {
-    resultsDiv.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${err.message}</p></div>`;
+    searchResultsData = [];
+    feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${escapeHtml(err.message)}</p></div>`;
   }
+}
+
+function showSearchBanner(query) {
+  const banner = document.getElementById("searchBanner");
+  const text = document.getElementById("searchBannerText");
+  if (!banner || !text) return;
+  text.textContent = `Showing web results for “${query}”`;
+  banner.style.display = "flex";
+}
+
+function hideSearchBanner() {
+  const banner = document.getElementById("searchBanner");
+  if (banner) banner.style.display = "none";
+}
+
+function renderSearchResultsToFeed() {
+  const feed = document.getElementById("newsFeed");
+  if (!feed) return;
+  if (!searchResultsData.length) {
+    feed.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F50E;</div><p>No results found. Try a different query.</p></div>';
+    return;
+  }
+  feed.innerHTML = searchResultsData.map((a, i) => newsCardHtml(a, i, isNewsArticleSaved(a))).join("");
+}
+
+function clearSearch() {
+  searchActive = false;
+  activeSearchQuery = "";
+  searchResultsData = [];
+  hideSearchBanner();
+  if (newsViewMode === "saved") renderSavedArticles();
+  else renderNewsCards(allArticles, currentFilter);
 }
 
 
