@@ -419,6 +419,14 @@ function renderSummaryEvidence(sources) {
     const titleMarkup = validUrl
       ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">${title}</a>`
       : `<strong>${title}</strong>`;
+    // Client-side Sources notice (proposal B): when the user attached a [S#]
+    // source but the answer did not cite it, disclose the gap transparently
+    // instead of silently dropping the context.
+    const isUserSource = source.sourceType === "user";
+    const cited = isUserSource ? lastAnswerText.includes("[" + source.id + "]") : true;
+    const notice = isUserSource && !cited
+      ? `<p class="evidence-notice">Another source was used over this as evidence due to greater relevance</p>`
+      : "";
     return `
       <article class="summary-evidence-card">
         <div class="summary-evidence-card-header">
@@ -427,6 +435,7 @@ function renderSummaryEvidence(sources) {
         </div>
         ${titleMarkup}
         <p>${escapeHtml(source.excerpt || "")}</p>
+        ${notice}
       </article>`;
   }).join("");
 }

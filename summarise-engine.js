@@ -290,6 +290,58 @@ function cooldownFrom429(resp, txt) {
   return 60 * 60 * 1000;
 }
 
+// One-shot recovery nudge (proposal A): if the user attached [S#] sources but
+// the model omitted them, ask once more — permitting co-citation — and accept
+// the nudged answer only if it actually recovers at least one [S#]. Capped at a
+// single call (no loop). Best-effort: on any failure, returns the original answer.
+async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEvidenceIds) {
+  const nudgeMessages = [
+    ...baseMessages,
+    {
+      role: "user",
+      content:
+        "Ensure every [S#] source the user attached is reflected in your answer — you may cite it " +
+        "alongside another source to prove the same claim or chain of reasoning. Do not drop [S#] sources.",
+    },
+  ];
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPEN_MODEL_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: DEFAULT_MODEL, messages: nudgeMessages, max_tokens: 1800, temperature: 0 }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) return currentAnswer;
+    const json = await resp.json();
+    const nudged = json?.choices?.[0]?.message?.content?.trim() || "";
+    if (nudged.trim().length < 80) return currentAnswer;
+    const validIds = new Set(evidence.map(item => item.id));
+    const candidate = nudged.replace(/\[([AWS]\d+)\]/g, (m, id) => (validIds.has(id) ? m : ""));
+    if (/^(?:\s*\[[AWS]\d+\]\s*){3,}$/.test(candidate.trim())) return currentAnswer;
+    // Only accept the nudge if it actually recovered an attached [S#];
+    // otherwise keep the original reasoned answer (the client notice discloses
+    // the residual gap).
+    const recovered = userEvidenceIds.some(id => candidate.includes(`[${id}]`));
+    return recovered ? candidate : currentAnswer;
+  } catch (_) {
+    return currentAnswer;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Pure citation gate used by runApiModelGeneration and unit-tested directly.
+// Accepts a reasoned model answer when it cites at least one source; the
+// extractive fallback is reserved for a wholly uncited answer.
+function evaluateCitationGate(answer, evidence) {
+  const userEvidenceIds = evidence.filter(item => item.sourceType === "user").map(item => item.id);
+  const citedUser = userEvidenceIds.some(id => answer.includes(`[${id}]`));
+  const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
+  return { pass: citationCount >= 1, citedUser, citationCount };
+}
+
 async function runApiModelGeneration(question, evidence) {
   if (QA_MODEL_DISABLED) {
     throw new Error(
@@ -305,11 +357,11 @@ async function runApiModelGeneration(question, evidence) {
   const messages = [
     {
       role: "system",
-      content: "You are a senior evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n- User-supplied items with IDs like [S1], [S2] ... (sources the user attached from their saved articles; treat them EXACTLY like web-sourced [W#] items — they are first-class, citable evidence. Cite them with [S#] whenever they bear on the answer, and distinguish them in your wording (e.g. \"Per the saved article [S2]…\"). Weigh them as authoritative context the user provided). Any evidence supplied via \"My Sources\" (the [S#] items) MUST be included in your final response: you are REQUIRED to cite every [S#] source that bears on the answer, in addition to application [A#] and internet [W#] sources. Evidence that comes from \"Include Internet Sources\" and \"My Sources\" should BOTH be included in the final response; do not let one source type crowd out the other.\n\n\n\nGround every claim in the supplied evidence and cite it inline. You MAY draw reasoned inferences and practical implications FROM that evidence — connecting the dots is analysis, not invention — but you must NEVER introduce facts, figures, dates, events, or sources that are not present in the evidence. When you state an inference that goes beyond a single literal excerpt, mark it as derived from its citations (e.g. \"Taken together, this implies… [A3][A1]\").\n\nWhen the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite them.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nUser-supplied [S#] sources are handled IDENTICALLY to web [W#] sources above: draw on them, cite them inline with their [S#] ID whenever they bear on the answer, and keep them distinguishable in your wording (e.g. \"Per the saved article [S2]…\"). They are first-class evidence the user attached specifically for this question — do not treat them as lesser than [A#] or [W#]. Because the user deliberately saved them for this work, weight [S#] as primary, authoritative evidence. If no [S#] sources are present, ignore this.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer built as a clear chain of reasoning, not a flat list of facts. For each substantive point:\n- State the claim.\n- Cite the supporting evidence INLINE with its exact ID in square brackets (e.g. [A1] or [W2]), placed immediately after the claim it supports.\n- Show the reasoning: connect the cited evidence to the claim with explicit logic (e.g. \"Because [A3] shows X and [A1] shows Y, this implies Z\"). Do not present conclusions as bare assertions.\nUse well-structured paragraphs and Markdown bullet lists where useful. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways, each cited inline with its supporting [A#]/[W#]/[S#] ID. Each bullet should capture a conclusion the reader would act on or remember, not just a fact.\n\n## Conclusion\nA 3–5 sentence wrap-up that:\n1. States the overall answer in one or two sentences.\n2. Gives 1–3 actionable recommendations or decisions a reader could act on, each grounded in and citing the evidence (e.g. \"Given [A3], [W2] and [S1], studios should…\").\n3. States any open caveats or evidence gaps.\nEnd with a complete sentence.\n\nBefore finalising, verify: (a) every conclusion traces to a cited claim, (b) at least one actionable implication is stated, (c) no unsupported facts were introduced.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
+      content: "You are a senior evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n- User-supplied items with IDs like [S1], [S2] ... (sources the user attached from their saved articles; treat them EXACTLY like web-sourced [W#] items — they are first-class, citable evidence. Cite them with [S#] whenever they bear on the answer, and distinguish them in your wording (e.g. \"Per the saved article [S2]…\"). Weigh them as authoritative context the user provided). These attached My Sources [S#] items are the user's primary evidence - lead with them. Supplement with application [A#] entries (always available) and, when web search is enabled, internet [W#] sources. Cite the evidence that genuinely supports your answer; do not force-cite material irrelevant to the question, but ensure every attached [S#] is reflected wherever it bears on the answer (you may cite an [S#] alongside another source to prove the same claim).\n\n\n\nGround every claim in the supplied evidence and cite it inline. You MAY draw reasoned inferences and practical implications FROM that evidence — connecting the dots is analysis, not invention — but you must NEVER introduce facts, figures, dates, events, or sources that are not present in the evidence. When you state an inference that goes beyond a single literal excerpt, mark it as derived from its citations (e.g. \"Taken together, this implies… [A3][A1]\").\n\nWhen the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite them.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nUser-supplied [S#] sources are handled IDENTICALLY to web [W#] sources above: draw on them, cite them inline with their [S#] ID whenever they bear on the answer, and keep them distinguishable in your wording (e.g. \"Per the saved article [S2]…\"). They are first-class evidence the user attached specifically for this question — do not treat them as lesser than [A#] or [W#]. Because the user deliberately saved them for this work, weight [S#] as primary, authoritative evidence. If no [S#] sources are present, ignore this.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer built as a clear chain of reasoning, not a flat list of facts. For each substantive point:\n- State the claim.\n- Cite the supporting evidence INLINE with its exact ID in square brackets (e.g. [A1] or [W2]), placed immediately after the claim it supports.\n- Show the reasoning: connect the cited evidence to the claim with explicit logic (e.g. \"Because [A3] shows X and [A1] shows Y, this implies Z\"). Do not present conclusions as bare assertions.\nUse well-structured paragraphs and Markdown bullet lists where useful. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways, each cited inline with its supporting [A#]/[W#]/[S#] ID. Each bullet should capture a conclusion the reader would act on or remember, not just a fact.\n\n## Conclusion\nA 3–5 sentence wrap-up that:\n1. States the overall answer in one or two sentences.\n2. Gives 1–3 actionable recommendations or decisions a reader could act on, each grounded in and citing the evidence (e.g. \"Given [A3], [W2] and [S1], studios should…\").\n3. States any open caveats or evidence gaps.\nEnd with a complete sentence.\n\nBefore finalising, verify: (a) every conclusion traces to a cited claim, (b) at least one actionable implication is stated, (c) no unsupported facts were introduced.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
     },
     {
       role: "user",
-      content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.\n\nMandatory: cite ALL relevant evidence. Any [S#] (My Sources) and [W#] (Include Internet Sources) items that bear on the question must BOTH appear as inline citations in your response. Evidence from "My Sources" and "Include Internet Sources" should both be included in the final response.`,
+      content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.\n\nLead with the user's attached [S#] sources, then supplement with [A#] (knowledge base) and, if provided, [W#] (internet). Ground every claim in the evidence you cite. Cite the sources that genuinely support each claim, and ensure every attached [S#] is reflected in your answer - you may cite it alongside another source to prove the same point. Do not force-cite evidence that does not bear on the question.`,
     },
   ];
 
@@ -369,17 +421,25 @@ async function runApiModelGeneration(question, evidence) {
     const userEvidenceIds = evidence.filter(item => item.sourceType === "user").map(item => item.id);
     const citedUser = userEvidenceIds.some(id => answer.includes(`[${id}]`));
     const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
-    // User-supplied sources (My Sources [S#]) are required to appear in the
-    // final response. If the model cited other evidence but omitted the
-    // user-attached items, fall back to the extractive answer, which always
-    // surfaces them in "Your attached sources" — this guarantees
-    // explicitly-attached context is never silently dropped (e.g. when
-    // voluminous web evidence is present).
-    if (userEvidenceIds.length && !citedUser) return buildExtractiveAnswer(question, evidence);
-    // Require genuine inline citation coverage; otherwise fall back to the
-    // detailed extractive answer so the user always gets a comprehensive,
-    // inline-cited response rather than a model answer with no sources.
-    if (citationCount >= 2) return answer;
+    // User-supplied sources (My Sources [S#]) are the user's primary evidence.
+    // The prompt steers the model to lead with them; if it still omitted an
+    // attached [S#], the nudge below gives it one recovery attempt rather than
+    // silently dropping the context or degrading to the extractive list. Any
+    // residual uncited [S#] is disclosed to the user via a client-side notice.
+    if (userEvidenceIds.length && !citedUser) {
+      try {
+        answer = await nudgeForUserSources(messages, answer, evidence, userEvidenceIds);
+      } catch (_) {
+        // nudge is best-effort; keep the reasoned answer and let the client
+        // notice disclose any residual gap.
+      }
+    }
+    // Composite (a)+(b3): accept a reasoned answer once it cites at least one
+    // source (was >= 2, which forced the extractive "list" almost always).
+    // Retain the extractive fallback only as a true safety net for a wholly
+    // uncited answer.
+    const gate = evaluateCitationGate(answer, evidence);
+    if (gate.pass) return answer;
     return buildExtractiveAnswer(question, evidence);
     } finally {
       clearTimeout(timeout);
@@ -667,6 +727,8 @@ module.exports = {
   generateOpenSourceAnswer,
   runModelChat,
   buildExtractiveAnswer,
+  evaluateCitationGate,
+  nudgeForUserSources,
   webResultRelevance,
   isModelReady,
   isScanModelReady,

@@ -310,3 +310,76 @@ test("fetchArticleSubhead never returns the Google News boilerplate", async () =
   assert.ok(out === null || typeof out === "string", "returns null or a string");
   assert.ok(!srv.isGoogleNewsBoilerplate(out || ""), "must never return the Google News boilerplate");
 });
+
+// ===== Q&A citation gate + [S#] recovery nudge (composite a + b3) =====
+
+test("evaluateCitationGate: one citation passes, zero citations fails", () => {
+  const evidence = [
+    { id: "A1", sourceType: "application" },
+    { id: "A2", sourceType: "application" },
+  ];
+  const one = eng.evaluateCitationGate("This is grounded in [A1] clearly.", evidence);
+  assert.strictEqual(one.pass, true, "answer with >=1 citation should pass (no forced extractive list)");
+  assert.strictEqual(one.citationCount, 1);
+  const none = eng.evaluateCitationGate("No sources cited at all here, just prose.", evidence);
+  assert.strictEqual(none.pass, false, "wholly uncited answer must fail (extractive safety net)");
+  assert.strictEqual(none.citationCount, 0);
+});
+
+test("evaluateCitationGate: [S#] attached but missing still passes when another source is cited", () => {
+  const evidence = [
+    { id: "S1", sourceType: "user" },
+    { id: "A1", sourceType: "application" },
+  ];
+  const res = eng.evaluateCitationGate("Grounded in [A1] from the knowledge base, but the attached user article is not referenced here.", evidence);
+  assert.strictEqual(res.pass, true, "cited [A1] => reasoned answer passes");
+  assert.strictEqual(res.citedUser, false, "attached [S#] was not cited (nudge + client notice would handle it)");
+});
+
+test("nudgeForUserSources: recovers an attached [S#] when the model omits it", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: "Now the saved article [S1] is reflected as requested, and this response is long enough to satisfy the minimum length requirement for acceptance." } }],
+    }),
+  });
+  try {
+    const evidence = [{ id: "S1", sourceType: "user" }];
+    const out = await eng.nudgeForUserSources([{ role: "user", content: "q" }], "Answer without [S1].", evidence, ["S1"]);
+    assert.ok(out.includes("[S1]"), "nudge should recover the attached [S#]");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("nudgeForUserSources: keeps original answer when nudge does not recover [S#]", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content: "Still no citation of the saved article appears here, but this response is long enough to clear the minimum length guard and should not be accepted." } }],
+    }),
+  });
+  try {
+    const evidence = [{ id: "S1", sourceType: "user" }];
+    const baseline = "Answer without [S1].";
+    const out = await eng.nudgeForUserSources([{ role: "user", content: "q" }], baseline, evidence, ["S1"]);
+    assert.strictEqual(out, baseline, "nudge that fails to recover [S#] must return the original answer");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("nudgeForUserSources: network failure is best-effort (returns original answer)", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("network down"); };
+  try {
+    const evidence = [{ id: "S1", sourceType: "user" }];
+    const baseline = "Answer without [S1].";
+    const out = await eng.nudgeForUserSources([{ role: "user", content: "q" }], baseline, evidence, ["S1"]);
+    assert.strictEqual(out, baseline, "nudge failure must return the original answer");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
