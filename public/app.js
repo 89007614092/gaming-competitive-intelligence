@@ -3238,6 +3238,12 @@ function setupReviewPanel() {
   if (overlay) overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.style.display = "none"; });
 
   if (listEl) listEl.addEventListener("click", async (e) => {
+    const readBtn = e.target.closest("[data-read]");
+    if (readBtn) {
+      const card = readBtn.closest(".proposal-card");
+      const url = card && card.getAttribute("data-url");
+      if (url) { await openReaderSplit(card, url); return; }
+    }
     const integrateBtn = e.target.closest("[data-integrate]");
     const dismissBtn = e.target.closest("[data-dismiss]");
     const editToggle = e.target.closest("[data-edit-toggle]");
@@ -3271,33 +3277,144 @@ function setupReviewPanel() {
       return;
     }
     if (integrateBtn) {
-      const id = integrateBtn.dataset.integrate;
       const card = integrateBtn.closest(".proposal-card");
-      const editBox = card.querySelector(".proposal-edit-box");
-      const targetSel = card.querySelector(".proposal-target");
-      const catKey = card.querySelector(".proposal-catkey");
-      const body = { edit: editBox ? editBox.value : "" };
-      if (targetSel && targetSel.value) body.targetDataset = targetSel.value;
-      if (catKey && catKey.value) body.targetCategoryKey = catKey.value;
-      integrateBtn.disabled = true;
-      try {
-        const res = await authedFetch(`${API_BASE}/proposed-changes/${id}/integrate`, {
-          method: "POST", body: JSON.stringify(body),
-        });
-        if (res.ok) {
-          card.remove();
-          await updateSuggestedUpdatesBadge();
-          checkReviewEmpty();
-          showToast("Change integrated into the app.", "success");
-        } else {
-          integrateBtn.disabled = false;
-          showToast("Could not integrate that change.", "error");
-        }
-      } catch (_) {
-        integrateBtn.disabled = false;
-      }
+      if (card) await integrateProposalCard(card);
     }
   });
+
+  // Split-screen reader controls (inside #readerSplitView).
+  const split = document.getElementById("readerSplitView");
+  if (split) {
+    split.addEventListener("click", async (e) => {
+      const back = e.target.closest("#readerBack");
+      const save = e.target.closest("#readerSave");
+      const integrate = e.target.closest("#readerIntegrate");
+      if (back) { await closeReaderSplit(false); return; }
+      if (save) { await closeReaderSplit(true); return; }
+      if (integrate) {
+        const id = split.dataset.cardId;
+        const listEl2 = document.getElementById("reviewPanelList");
+        const card = id && listEl2 ? listEl2.querySelector(`.proposal-card[data-id="${CSS.escape(id)}"]`) : null;
+        if (card) { await applyReaderSummaryToCard(); await integrateProposalCard(card); }
+        await closeReaderSplit(false);
+      }
+    });
+  }
+}
+
+// Integrate a proposal card into the curated dataset, reading the (optionally
+// edited) summary straight from the card's `.proposal-edit-box`. Shared by the
+// card's own Integrate button and the split-screen reader's Integrate action.
+async function integrateProposalCard(card) {
+  const id = card.getAttribute("data-id");
+  if (!id) return;
+  const integrateBtn = card.querySelector("[data-integrate]");
+  const editBox = card.querySelector(".proposal-edit-box");
+  const targetSel = card.querySelector(".proposal-target");
+  const catKey = card.querySelector(".proposal-catkey");
+  const body = { edit: editBox ? editBox.value : "" };
+  if (targetSel && targetSel.value) body.targetDataset = targetSel.value;
+  if (catKey && catKey.value) body.targetCategoryKey = catKey.value;
+  if (integrateBtn) integrateBtn.disabled = true;
+  try {
+    const res = await authedFetch(`${API_BASE}/proposed-changes/${id}/integrate`, {
+      method: "POST", body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      card.remove();
+      await updateSuggestedUpdatesBadge();
+      checkReviewEmpty();
+      showToast("Change integrated into the app.", "success");
+    } else {
+      if (integrateBtn) integrateBtn.disabled = false;
+      showToast("Could not integrate that change.", "error");
+    }
+  } catch (_) {
+    if (integrateBtn) integrateBtn.disabled = false;
+  }
+}
+
+// Open the split-screen reader for a proposal: fetch the source article via the
+// hardened /api/reader endpoint and render it as TEXT ONLY (never innerHTML, so
+// there is no XSS surface). The right pane is the summary editor; its contents
+// are written back to the card on Save / Integrate.
+async function openReaderSplit(card, url) {
+  const split = document.getElementById("readerSplitView");
+  const listEl = document.getElementById("reviewPanelList");
+  const summaryBox = document.getElementById("readerSummary");
+  const articleEl = document.getElementById("readerArticle");
+  const statusEl = document.getElementById("readerStatus");
+  const origLink = document.getElementById("readerOriginalLink");
+  if (!split || !summaryBox || !articleEl || !listEl) return;
+
+  let editBox = card.querySelector(".proposal-edit-box");
+  if (!editBox) {
+    // Blocked / no-preview cards have no editor yet — create a hidden one so a
+    // manually written summary can still be integrated.
+    editBox = document.createElement("textarea");
+    editBox.className = "proposal-edit-box text-input";
+    editBox.style.display = "none";
+    card.appendChild(editBox);
+  }
+  const summaryText = card.querySelector(".proposal-summary-text");
+  summaryBox.value = editBox.value || (summaryText && summaryText.textContent) || "";
+  articleEl.textContent = "";
+  if (origLink) origLink.href = url;
+  split.dataset.cardId = card.getAttribute("data-id") || "";
+  listEl.style.display = "none";
+  split.style.display = "flex";
+  if (statusEl) { statusEl.textContent = "Loading article…"; statusEl.style.display = "block"; }
+
+  try {
+    const res = await fetch(`${API_BASE}/reader?url=${encodeURIComponent(url)}`);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      if (statusEl) {
+        statusEl.textContent = (errJson.error || "Could not load this article. Use “Open original” to read it.");
+        statusEl.style.display = "block";
+      }
+      return;
+    }
+    const data = await res.json();
+    if (statusEl) statusEl.style.display = "none";
+    articleEl.textContent = data.text && data.text.trim()
+      ? data.text
+      : "(No readable text could be extracted from this page.)";
+  } catch (_) {
+    if (statusEl) {
+      statusEl.textContent = "Could not load this article. Use “Open original” to read it.";
+      statusEl.style.display = "block";
+    }
+  }
+}
+
+// Copy the split-view summary textarea back into the proposal card so the
+// existing Integrate flow picks it up.
+async function applyReaderSummaryToCard() {
+  const split = document.getElementById("readerSplitView");
+  const listEl = document.getElementById("reviewPanelList");
+  const summaryBox = document.getElementById("readerSummary");
+  if (!split || !listEl || !summaryBox) return;
+  const id = split.dataset.cardId;
+  if (!id) return;
+  const card = listEl.querySelector(`.proposal-card[data-id="${CSS.escape(id)}"]`);
+  if (!card) return;
+  const val = summaryBox.value;
+  const editBox = card.querySelector(".proposal-edit-box");
+  if (editBox) editBox.value = val;
+  const textEl = card.querySelector(".proposal-summary-text");
+  if (textEl) { textEl.textContent = val; textEl.style.display = ""; }
+}
+
+// Hide the split view and restore the proposal list. When apply is true the
+// summary textarea is written back to the card first.
+async function closeReaderSplit(apply) {
+  const split = document.getElementById("readerSplitView");
+  const listEl = document.getElementById("reviewPanelList");
+  if (!split || !listEl) return;
+  if (apply) await applyReaderSummaryToCard();
+  split.style.display = "none";
+  listEl.style.display = "";
 }
 
 async function renderReviewPanel() {
@@ -3399,7 +3516,7 @@ async function renderReviewPanel() {
       const catKey = p.targetCategory || "regulations";
       const reasonKey = reasonLabels[p.updateCategory] ? p.updateCategory : "new-development";
       return `
-      <div class="proposal-card" data-id="${p.id}">
+      <div class="proposal-card" data-id="${p.id}" data-url="${escapeHtml(p.url || "")}">
         <div class="proposal-head">
           <span class="proposal-action proposal-action-${p.detectedAction}">${actionLabel[p.detectedAction] || p.detectedAction}</span>
           <span class="proposal-source">${escapeHtml(p.publisher || p.source || "")}</span>
@@ -3421,6 +3538,7 @@ async function renderReviewPanel() {
         </div>
         <div class="proposal-actions">
           <button class="btn btn-sm btn-primary" data-integrate="${p.id}" type="button">Integrate</button>
+          ${p.url ? `<button class="btn btn-sm" data-read="${p.id}" type="button">Read &amp; write summary</button>` : ""}
           <button class="btn btn-sm" data-dismiss="${p.id}" type="button">Dismiss</button>
         </div>
       </div>`;

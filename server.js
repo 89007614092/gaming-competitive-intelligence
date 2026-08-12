@@ -396,6 +396,161 @@ function extractText(html) {
   return clean.slice(0, 60000);
 }
 
+// ============================================================================
+// Reader proxy (Suggested Updates split-screen reader)
+// ----------------------------------------------------------------------------
+// On-demand, hardened fetch of a single PUBLIC article, returned as extracted
+// TEXT ONLY (no raw HTML) so the client can render it with textContent and
+// there is no XSS surface. It reuses the existing SSRF guard chain
+// (validateSourceUrl + assertPublicHost) and additionally:
+//   - follows redirects MANUALLY, re-validating the host of EVERY hop
+//     (defends against a 302 landing on a private/loopback address);
+//   - streams the body with a hard byte cap (default 5 MB, READER_MAX_BYTES);
+//   - enforces a per-request timeout (default 20s, READER_TIMEOUT_MS);
+//   - restricts accepted content types to html/xhtml/plain/xml.
+// The route is rate-limited per IP and rejects cross-origin callers.
+// ============================================================================
+
+// Per-IP rate-limiter factory (sliding window). check(key) returns true while
+// under budget, false once the window is saturated.
+function createRateLimiter({ max = 30, windowMs = 60000 } = {}) {
+  const hits = new Map();
+  return function check(key) {
+    const now = Date.now();
+    const arr = (hits.get(key) || []).filter((t) => now - t < windowMs);
+    if (arr.length >= max) { hits.set(key, arr); return false; }
+    arr.push(now);
+    hits.set(key, arr);
+    return true;
+  };
+}
+
+// Stream a response body, throwing if it exceeds maxBytes. Returns a Buffer.
+async function readStreamWithCap(response, maxBytes) {
+  if (!response.body || !response.body.getReader) {
+    const buf = Buffer.from(await response.text());
+    if (buf.length > maxBytes) throw new Error("Response too large");
+    return buf;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    if (total + value.length > maxBytes) throw new Error("Response too large");
+    total += value.length;
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
+const READER_MAX_BYTES = Number(process.env.READER_MAX_BYTES) || 5 * 1024 * 1024;
+const READER_MAX_REDIRECTS = Number(process.env.READER_MAX_REDIRECTS) || 5;
+const READER_TIMEOUT_MS = Number(process.env.READER_TIMEOUT_MS) || 20000;
+const readerRateLimiter = createRateLimiter({
+  max: Number(process.env.READER_RATE_MAX) || 30,
+  windowMs: Number(process.env.READER_RATE_WINDOW_MS) || 60000,
+});
+
+async function fetchReaderContent(url, opts = {}) {
+  const maxBytes = Number(opts.maxBytes) || READER_MAX_BYTES;
+  const timeoutMs = Number(opts.timeoutMs) || READER_TIMEOUT_MS;
+  const maxRedirects = Number(opts.maxRedirects) || READER_MAX_REDIRECTS;
+  if (!url || typeof url !== "string") throw new Error("A valid source URL is required");
+
+  const initial = validateSourceUrl(url.slice(0, 2000));
+  await assertPublicHost(new URL(initial).hostname);
+
+  const seen = new Set();
+  let current = initial;
+  let response = null;
+
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    if (seen.has(current)) throw new Error("Redirect loop detected");
+    seen.add(current);
+    await assertPublicHost(new URL(current).hostname);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(current, {
+        headers: {
+          "User-Agent": SCRAPE_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,text/plain,application/xml",
+        },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      // Not a redirect -> this is the final response.
+      if (!(res.status >= 300 && res.status < 400) || !res.headers.get("location")) {
+        response = res;
+        break;
+      }
+      const nextHop = new URL(res.headers.get("location"), current).toString();
+      await assertPublicHost(new URL(nextHop).hostname); // re-validate BEFORE following
+      current = nextHop;
+    } catch (err) {
+      if (err.name === "AbortError") throw new Error("Source extraction timed out");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (!response) throw new Error("Too many redirects");
+  if (!response.ok) throw new Error("Source returned HTTP " + response.status);
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!/(text\/html|application\/xhtml\+xml|text\/plain|application\/xml|text\/xml)/i.test(contentType)) {
+    throw new Error("Unsupported source content type: " + (contentType || "unknown"));
+  }
+  const buf = await readStreamWithCap(response, maxBytes);
+  const html = buf.toString("utf8");
+  const text = extractText(html);
+  const finalUrl = response.url || current;
+  const title = extractTitle(html) || new URL(finalUrl).hostname;
+  return { title, text, url: finalUrl, excerpt: text.slice(0, 400) };
+}
+
+// Defense-in-depth against CSRF-style abuse: reject cross-origin callers.
+// Same-origin browser requests typically omit the Origin header, so its absence
+// is allowed; if present it must match the request Host exactly.
+function assertSameOrigin(req) {
+  const origin = req.get("origin");
+  if (!origin) return;
+  let originHost;
+  try { originHost = new URL(origin).host; } catch { throw new Error("Invalid Origin header"); }
+  if (originHost !== req.get("host")) throw new Error("Cross-origin requests are not allowed");
+}
+
+app.get("/api/reader", async (req, res) => {
+  try {
+    try { assertSameOrigin(req); }
+    catch { return res.status(403).json({ error: "Cross-origin requests are not allowed" }); }
+
+    const url = req.query.url;
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "A url query parameter is required" });
+    }
+    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    if (!readerRateLimiter(ip)) {
+      return res.status(429).json({ error: "Too many requests, please slow down" });
+    }
+    const result = await fetchReaderContent(url);
+    res.json(result);
+  } catch (err) {
+    // Generic error mapping — never leak internals (hosts, stack traces).
+    const msg = err && err.message ? err.message : "";
+    const code = /required|valid source/i.test(msg) ? 400
+      : /too large/i.test(msg) ? 413
+      : 502; // timeout, redirect loop, unsupported type, blocked/private host, DNS failure
+    const message = code === 400 ? "A valid source URL is required"
+      : code === 413 ? "The source response exceeded the size limit"
+      : "Could not retrieve the source";
+    res.status(code).json({ error: message });
+  }
+});
+
 function getYouTubeVideoId(input) {
   try {
     const url = new URL(input);
@@ -3152,6 +3307,14 @@ module.exports = {
   tavilySubhead,
   isGoogleNewsBoilerplate,
   pickSubheadCandidate,
+
+  // Reader proxy (Suggested Updates split-screen reader) — hardened, text-only.
+  validateSourceUrl,
+  assertPublicHost,
+  isPrivateOrReservedIp,
+  fetchReaderContent,
+  readStreamWithCap,
+  createRateLimiter,
 
   // Resolver chains — exported so tests can assert the News-tab enrichment and
   // the background scanner use independent chains (no cross-contention).

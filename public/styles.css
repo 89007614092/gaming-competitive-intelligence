@@ -4639,3 +4639,34 @@ body {
   line-height: 1.5;
   color: var(--text-muted);
 }
+
+/* === Suggested Updates split-screen reader === */
+.reader-split { display: flex; flex-direction: column; gap: 12px; min-height: 60vh; }
+.reader-split-head { display: flex; align-items: center; gap: 12px; }
+.reader-split-title { font-weight: 600; flex: 1; font-size: 15px; }
+.reader-split-status {
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--warning-light); color: var(--warning);
+  font-size: 13px; line-height: 1.45;
+}
+.reader-split-panes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; min-height: 0;
+}
+.reader-article-pane, .reader-summary-pane {
+  display: flex; flex-direction: column; min-height: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px;
+  background: var(--surface);
+}
+.reader-pane-label {
+  margin: 0 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--text-muted);
+}
+.reader-article {
+  overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;
+  font-size: 13.5px; line-height: 1.6; flex: 1; color: var(--text);
+}
+.reader-summary { flex: 1; resize: none; font-size: 13.5px; line-height: 1.55; }
+.reader-actions { display: flex; gap: 8px; margin-top: 10px; }
+@media (max-width: 720px) {
+  .reader-split-panes { grid-template-columns: 1fr; }
+}
