@@ -310,3 +310,75 @@ test("fetchArticleSubhead never returns the Google News boilerplate", async () =
   assert.ok(out === null || typeof out === "string", "returns null or a string");
   assert.ok(!srv.isGoogleNewsBoilerplate(out || ""), "must never return the Google News boilerplate");
 });
+
+// ===== Phase 3b: pasted context ([U#]) =====
+
+test("parsePastedContext: blank lines split into separate [U#] items", () => {
+  const raw = [
+    "Regulators opened a formal review of generative AI licensing this quarter, citing consumer-safety gaps.",
+    "",
+    "A separate industry filing argued the compliance timeline is unworkable for smaller studios and vendors.",
+  ].join("\n");
+  const items = srv.parsePastedContext(raw);
+  assert.strictEqual(items.length, 2);
+  assert.deepStrictEqual(items.map(i => i.id), ["U1", "U2"]);
+  // Must be flagged as user-supplied so it inherits the "must be cited" gate.
+  assert.ok(items.every(i => i.sourceType === "user"), "pasted items are sourceType user");
+  assert.ok(items.every(i => i.dataset === "Pasted context"));
+  assert.ok(items[1].text.includes("unworkable"), "second chunk keeps its own text");
+});
+
+test("parsePastedContext: empty input yields no evidence; single blob is one [U1]", () => {
+  assert.deepStrictEqual(srv.parsePastedContext(""), []);
+  assert.deepStrictEqual(srv.parsePastedContext("   \n  \n "), []);
+  assert.deepStrictEqual(srv.parsePastedContext(null), []);
+  const one = srv.parsePastedContext("A single continuous paragraph of pasted evidence with no blank lines in it.");
+  assert.strictEqual(one.length, 1);
+  assert.strictEqual(one[0].id, "U1");
+});
+
+test("parsePastedContext: bounded chunk count, and short fragments merge", () => {
+  // 10 substantial chunks -> capped at 6, with the tail folded into the last one
+  // (never silently discarded).
+  const long = Array.from({ length: 10 }, (_, i) =>
+    `Chunk ${i + 1}: a substantial paragraph of pasted evidence about AI regulation and compliance obligations for studios.`
+  ).join("\n\n");
+  const items = srv.parsePastedContext(long);
+  assert.strictEqual(items.length, 6, "chunk count is capped");
+  assert.ok(items[5].text.includes("Chunk 10"), "overflow is folded into the final chunk");
+
+  // A stray short line must not become its own citation.
+  const stray = "A substantial first paragraph of pasted evidence that comfortably clears the merge threshold for chunking.\n\nShort note.";
+  const merged = srv.parsePastedContext(stray);
+  assert.strictEqual(merged.length, 1, "short fragment merges into the previous chunk");
+  assert.ok(merged[0].text.includes("Short note."));
+});
+
+test("parsePastedContext: a leading URL line becomes the chunk link", () => {
+  const raw = "https://example.com/report\nThe report finds that enforcement actions rose sharply across the sector this year.";
+  const [item] = srv.parsePastedContext(raw);
+  assert.strictEqual(item.url, "https://example.com/report");
+  assert.ok(/example\.com/.test(item.title), "title names the host");
+});
+
+test("buildExtractiveAnswer surfaces pasted [U#] context in its own section", () => {
+  const evidence = [
+    {
+      id: "A1", sourceType: "application", dataset: "Knowledge base", title: "AI compliance overview",
+      section: "Regulation",
+      text: "Application evidence describing the compliance regime and its deadlines for game studios operating in the region.",
+      excerpt: "Application evidence describing the compliance regime and its deadlines for game studios.",
+    },
+    {
+      id: "U1", sourceType: "user", dataset: "Pasted context", title: "Pasted context 1",
+      section: "Pasted by user",
+      text: "The pasted note states that enforcement of the licensing rules begins next quarter for all live-service titles.",
+      excerpt: "The pasted note states that enforcement of the licensing rules begins next quarter.",
+    },
+  ];
+  const answer = eng.buildExtractiveAnswer("When does enforcement of licensing rules begin?", evidence);
+  assert.ok(answer.includes("**Your pasted context**"), "pasted context gets its own heading");
+  assert.ok(answer.includes("[U1]"), "pasted item is cited inline");
+  assert.ok(answer.includes("[A1]"), "application evidence is still cited");
+  assert.ok(/pasted context item/.test(answer) || answer.includes("[U1]"), "coverage note accounts for pasted items");
+});

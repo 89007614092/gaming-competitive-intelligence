@@ -1706,6 +1706,29 @@ body {
   font-size: 0.85rem;
 }
 
+/* Phase 3b: "Add Context" paste box (becomes [U#] citations) */
+.pasted-context-input {
+  width: 100%;
+  min-height: 130px;
+  max-height: 320px;
+  padding: 0.7rem 0.8rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  resize: vertical;
+}
+.pasted-context-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.pasted-context-hint {
+  margin-top: 0.5rem;
+}
+
 .summary-composer-actions {
   display: flex;
   align-items: center;
@@ -1861,6 +1884,8 @@ body {
 .ans-cite:hover { text-decoration: underline; }
 .ans-cite-web { background: #dcfce7; color: #15803d; }
 .ans-cite-user { background: #fef9c3; color: #a16207; }
+/* Pasted context [U#] — purple, distinct from attached [S#] yellow */
+.ans-cite-paste { background: #ede9fe; color: #6d28d9; }
 
 .summary-warning {
   margin-bottom: 1rem;
