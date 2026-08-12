@@ -1282,7 +1282,7 @@ function filterNews(keyword, tagEl) {
 // ===== Search =====
 // Search results are rendered into the main article feed (newsFeed) so the
 // visible list the user is watching actually updates to match the query, with
-// a banner + "Clear search" affordance to return to the live feed.
+// a banner + "Return to Default" button to return to the live feed.
 let searchResultsData = [];
 let searchActive = false;
 let activeSearchQuery = "";
