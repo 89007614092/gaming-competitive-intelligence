@@ -25,10 +25,7 @@
           Knowledge Base
         </button>
         <button class="nav-btn" data-view="news-view" draggable="true">
-          News
-        </button>
-        <button class="nav-btn" data-view="search-view" draggable="true">
-          Search &amp; Reports
+          News + Search
         </button>
         <button class="nav-btn" data-view="summarise-view" draggable="true">
           Q&amp;A
@@ -102,6 +99,17 @@
           <button class="sub-tab-btn" data-target="newsFeedSection" data-news-mode="saved">Saved Articles <span class="saved-count" id="savedArticleCount">0</span></button>
         </div>
 
+        <!-- Search within News + Search -->
+        <div class="news-search-bar">
+          <input type="text" id="searchInput" placeholder="Search articles, e.g., NetEase AI game engine partnership 2026" class="search-input" />
+          <button class="btn btn-primary" id="searchBtn"><span class="btn-icon">&#x1F50D;</span> Search</button>
+          <select id="searchLimit" class="select-input">
+            <option value="5">5 results</option>
+            <option value="10" selected>10 results</option>
+            <option value="20">20 results</option>
+          </select>
+        </div>
+
         <!-- News Feed -->
         <div class="section" id="newsFeedSection">
           <div class="section-header">
@@ -115,148 +123,12 @@
             </div>
           </div>
         </div>
+
+        <!-- Search results -->
+        <div class="section" id="searchResultsSection" style="display:none;"></div>
       </section>
 
       <!-- ===== SEARCH VIEW ===== -->
-      <section class="view" id="search-view">
-        <header class="page-header">
-          <h1>Search &amp; Reports</h1>
-          <p class="subtitle">Discover, extract, and synthesize competitive intelligence in one workspace</p>
-        </header>
-
-        <div class="workspace-switcher" role="tablist" aria-label="Search and reports workspace">
-          <button class="workspace-tab-btn active" data-workspace-mode="search" role="tab" aria-selected="true">Search</button>
-          <button class="workspace-tab-btn" data-workspace-mode="reports" role="tab" aria-selected="false">Reports <span class="workspace-count" id="reportDraftCount">0</span></button>
-        </div>
-
-        <div class="workspace-panel active" id="searchWorkspace" data-workspace-panel="search">
-        <div class="search-box">
-          <input
-            type="text"
-            id="searchInput"
-            placeholder="e.g., NetEase AI game engine partnership 2026"
-            class="search-input"
-          />
-          <button class="btn btn-primary" id="searchBtn">
-            <span class="btn-icon">&#x1F50D;</span> Search
-          </button>
-          <select id="searchLimit" class="select-input">
-            <option value="5">5 results</option>
-            <option value="10" selected>10 results</option>
-            <option value="20">20 results</option>
-          </select>
-        </div>
-
-        <div class="direct-source-box">
-          <div class="direct-source-copy">
-            <strong>Extract a specific source</strong>
-            <span>Paste an article, webpage, YouTube video, or page with an embedded caption track.</span>
-          </div>
-          <div class="direct-source-actions">
-            <input type="url" id="directSourceUrl" class="text-input" placeholder="https://example.com/article or https://youtube.com/watch?v=..." />
-            <button class="btn btn-primary" id="scrapeDirectSource" type="button">Extract text</button>
-            <button class="btn btn-accent" id="addDirectSourceToReport" type="button">+ Report</button>
-          </div>
-        </div>
-
-        <!-- Sub-tab Navigation -->
-        <div class="sub-tab-bar" data-view="search-view">
-          <button class="sub-tab-btn active" data-target="searchResultsSection">Search Results</button>
-          <button class="sub-tab-btn" data-target="scrapeSection">Scraped Content</button>
-        </div>
-
-        <!-- Search Results -->
-        <div class="search-results" id="searchResultsSection">
-          <div class="empty-state">
-            <div class="empty-icon">&#x1F50D;</div>
-            <p>Enter a search query above to discover competitor intelligence</p>
-          </div>
-        </div>
-
-        <!-- Scrape Panel -->
-        <div class="scrape-panel" id="scrapeSection" style="display:none;">
-          <div class="panel-header">
-            <h3>Scraped Content</h3>
-            <button class="btn btn-sm" id="closeScrape">&#x2715;</button>
-          </div>
-          <div class="panel-body" id="scrapedContent">
-            <div class="loading-state"><div class="spinner"></div></div>
-          </div>
-          <div class="panel-footer">
-            <button class="btn btn-accent" id="addToReport">+ Add to Report</button>
-          </div>
-        </div>
-        </div>
-
-      <!-- ===== REPORTS WORKSPACE ===== -->
-      <div class="workspace-panel" id="reportsWorkspace" data-workspace-panel="reports">
-        <!-- Sub-tab Navigation -->
-        <div class="sub-tab-bar" data-view="reports-workspace">
-          <button class="sub-tab-btn active" data-target="reportBuilderSection">New Report</button>
-          <button class="sub-tab-btn" data-target="savedReportsSection">Saved Reports</button>
-        </div>
-
-        <!-- Report Builder -->
-        <div class="report-builder" id="reportBuilderSection">
-          <div class="builder-header">
-            <h3>New Report</h3>
-          </div>
-          <div class="builder-body">
-            <input
-              type="text"
-              id="reportTitle"
-              placeholder="Report name"
-              class="text-input"
-            />
-            <div class="report-source-entry">
-              <input type="url" id="reportSourceUrl" class="text-input" placeholder="Paste an article or video URL to add directly..." />
-              <button class="btn btn-sm" id="reportAddSourceBtn" type="button">Add source</button>
-            </div>
-            <div class="url-list" id="urlList">
-              <p class="hint">Add website or video URLs. Public video captions are extracted as transcripts when available.</p>
-            </div>
-            <div class="saved-articles-for-report">
-              <h4 class="builder-subhead">From Saved Articles</h4>
-              <p class="hint saved-articles-hint">Starred articles are added as sources and scraped live when you generate the report (the same as a pasted URL).</p>
-              <div class="saved-articles-list" id="savedArticlesForReport"></div>
-            </div>
-            <button class="btn btn-primary" id="generateReportBtn">
-              <span class="btn-icon">&#x1F4DD;</span> Generate Report
-            </button>
-          </div>
-        </div>
-
-        <!-- Report Result -->
-        <div class="report-result" id="reportResult" style="display:none;">
-          <div class="report-header">
-            <h2 id="reportResultTitle"></h2>
-            <span class="report-date" id="reportDate"></span>
-          </div>
-          <div class="report-findings">
-            <h3>Key Findings</h3>
-            <ul id="reportFindings"></ul>
-          </div>
-          <div class="report-themes" id="reportThemes"></div>
-          <div class="report-sources">
-            <h3>Source Summaries</h3>
-            <ul id="reportSources"></ul>
-          </div>
-          <div class="report-full" id="reportFull" style="display:none;">
-            <h3>Cohesive Report</h3>
-            <div id="reportFullContent"></div>
-          </div>
-          <button class="btn btn-sm" id="toggleFullContent">Show Cohesive Report</button>
-        </div>
-
-        <!-- Saved Reports -->
-        <div class="section" id="savedReportsSection">
-          <h3>Saved Reports</h3>
-          <div id="savedReportsList">
-            <p class="hint">No saved reports yet</p>
-          </div>
-        </div>
-      </div>
-      </section>
 
       <!-- ===== SUMMARISE VIEW ===== -->
       <section class="view" id="summarise-view">

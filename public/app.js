@@ -39,10 +39,6 @@ function safeHref(url) {
   return /^https?:\/\//i.test(u) ? u : "#";
 }
 
-let reportUrls = [];
-let currentScrapedSource = null;
-let savedReports = JSON.parse(localStorage.getItem("savedReports") || "[]");
-
 // ===== Init =====
 document.addEventListener("DOMContentLoaded", () => {
   restoreTabOrder();
@@ -53,7 +49,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSubTabs();
   setupNewsFavorites();
   setupNewsCompetitors();
-  setupSearchReportsWorkspace();
   setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
@@ -75,7 +70,6 @@ function setupNavigation() {
       resetSubTabForView(viewId);
 
       if (viewId === "news-view") loadNews();
-      if (viewId === "search-view" && searchReportsMode === "reports") renderSavedReports();
       if (viewId === "knowledge-base") loadKnowledgeBase();
       if (viewId === "spider-web") loadSpiderWeb();
       if (viewId === "tencent-products") loadTencentProducts();
@@ -97,71 +91,6 @@ function setupNavigation() {
   document.getElementById("searchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") doSearch();
   });
-
-  document.getElementById("scrapeDirectSource").addEventListener("click", () => {
-    const url = document.getElementById("directSourceUrl").value.trim();
-    if (!url) return showToast("Paste a source URL first");
-    scrapeUrl(url);
-  });
-  document.getElementById("addDirectSourceToReport").addEventListener("click", () => {
-    const url = document.getElementById("directSourceUrl").value.trim();
-    if (!url) return showToast("Paste a source URL first");
-    addUrlToReport(url, url);
-  });
-  document.getElementById("reportAddSourceBtn").addEventListener("click", () => {
-    const input = document.getElementById("reportSourceUrl");
-    const url = input.value.trim();
-    if (!url) return showToast("Paste a source URL first");
-    if (addUrlToReport(url, url)) input.value = "";
-  });
-
-  // Close scrape panel
-  document.getElementById("closeScrape").addEventListener("click", () => {
-    document.getElementById("scrapeSection").style.display = "none";
-  });
-
-  // Add to report
-  document.getElementById("addToReport").addEventListener("click", addCurrentToReport);
-
-  // Generate report
-  document.getElementById("generateReportBtn").addEventListener("click", generateReport);
-
-  // Toggle full content
-  document.getElementById("toggleFullContent").addEventListener("click", toggleFullContent);
-}
-
-// ===== Search & Reports Workspace =====
-let searchReportsMode = "search";
-
-function setupSearchReportsWorkspace() {
-  document.querySelectorAll("[data-workspace-mode]").forEach(button => {
-    button.addEventListener("click", () => switchSearchReportsWorkspace(button.dataset.workspaceMode));
-  });
-  updateReportDraftCount();
-}
-
-function switchSearchReportsWorkspace(mode) {
-  searchReportsMode = mode === "reports" ? "reports" : "search";
-
-  document.querySelectorAll("[data-workspace-mode]").forEach(button => {
-    const active = button.dataset.workspaceMode === searchReportsMode;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
-  });
-  document.querySelectorAll("[data-workspace-panel]").forEach(panel => {
-    panel.classList.toggle("active", panel.dataset.workspacePanel === searchReportsMode);
-  });
-
-  if (searchReportsMode === "reports") {
-    renderUrlList();
-    renderSavedReports();
-    renderSavedArticlesForReport();
-  }
-}
-
-function updateReportDraftCount() {
-  const count = document.getElementById("reportDraftCount");
-  if (count) count.textContent = reportUrls.length;
 }
 
 // ===== Smart Summary =====
@@ -426,7 +355,7 @@ function renderSummaryEvidence(sources) {
 // ===== Drag-and-Drop Tab Reordering =====
 const TAB_ORDER_KEY = "tabOrder";
 const DEFAULT_TAB_ORDER = [
-  "knowledge-base", "news-view", "search-view", "summarise-view",
+  "knowledge-base", "news-view", "summarise-view",
   "spider-web", "tencent-products", "gaming-trends",
   "current-use-cases", "regulatory-timeline", "risks", "company-map"
 ];
@@ -901,7 +830,6 @@ function loadSavedNewsArticles() {
 function saveNewsArticles() {
   localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(savedNewsArticles));
   updateSavedArticleCount();
-  renderSavedArticlesForReport();
 }
 
 function newsArticleKey(article) {
@@ -922,23 +850,30 @@ function setupNewsFavorites() {
     });
   });
 
-  document.getElementById("newsFeed")?.addEventListener("click", event => {
-    const button = event.target.closest(".news-favorite-btn");
-    if (!button) return;
-    event.preventDefault();
-    event.stopPropagation();
+  const newsFeedEl = document.getElementById("newsFeed");
+  const searchResultsEl = document.getElementById("searchResultsSection");
+  const attachFavoriteHandler = (container, sourceListGetter) => {
+    container?.addEventListener("click", event => {
+      const button = event.target.closest(".news-favorite-btn");
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
 
-    const key = decodeURIComponent(button.dataset.articleKey || "");
-    const article = [...allArticles, ...savedNewsArticles]
-      .find(item => newsArticleKey(item) === key);
-    if (article) toggleNewsFavorite(article);
-  });
+      const key = decodeURIComponent(button.dataset.articleKey || "");
+      const article = sourceListGetter().find(item => newsArticleKey(item) === key);
+      if (article) toggleNewsFavorite(article, container);
+    });
+  };
+  attachFavoriteHandler(newsFeedEl, () => [...allArticles, ...savedNewsArticles]);
+  attachFavoriteHandler(searchResultsEl, () => searchResultsData);
 }
 
 function setNewsViewMode(mode) {
   newsViewMode = mode === "saved" ? "saved" : "recent";
   const title = document.getElementById("newsSectionTitle");
   const filters = document.getElementById("filterTags");
+  const searchResults = document.getElementById("searchResultsSection");
+  if (searchResults) searchResults.style.display = "none";
 
   if (title) title.textContent = newsViewMode === "saved" ? "Saved Articles" : "Recent News & Updates";
   if (filters) filters.style.display = newsViewMode === "saved" ? "none" : "flex";
@@ -950,7 +885,7 @@ function setNewsViewMode(mode) {
   }
 }
 
-function toggleNewsFavorite(article) {
+function toggleNewsFavorite(article, container = document.getElementById("newsFeed")) {
   const key = newsArticleKey(article);
   const existingIndex = savedNewsArticles.findIndex(saved => newsArticleKey(saved) === key);
 
@@ -962,10 +897,11 @@ function toggleNewsFavorite(article) {
 
   saveNewsArticles();
   showToast(existingIndex >= 0 ? "Article removed from saved items." : "Article saved for later.");
-  if (newsViewMode === "saved") {
-    renderSavedArticles();
+  if (container === document.getElementById("newsFeed")) {
+    if (newsViewMode === "saved") renderSavedArticles();
+    else renderNewsCards(allArticles, currentFilter);
   } else {
-    renderNewsCards(allArticles, currentFilter);
+    renderSearchCards(searchResultsData);
   }
 }
 
@@ -978,68 +914,46 @@ function renderSavedArticles() {
   renderNewsCards(savedNewsArticles, null, true);
 }
 
-// ===== Saved Articles -> Report bridge =====
-// Lists the user's starred articles inside the Reports workspace so they can be
-// pulled into the current report draft without leaving the tab.
-function renderSavedArticlesForReport() {
-  const container = document.getElementById("savedArticlesForReport");
-  if (!container) return;
-  if (!savedNewsArticles.length) {
-    container.innerHTML = '<p class="hint">No saved articles yet. Star articles in Recent News &amp; Updates to add them here.</p>';
-    return;
-  }
-  container.innerHTML = savedNewsArticles.map(article => {
-    const url = article.url || "";
-    let norm = null;
-    try { norm = new URL(url).toString(); } catch (_) { norm = null; }
-    const inReport = norm && reportUrls.some(s => s.url === norm);
-    const disabled = !norm || inReport;
-    const safeUrl = norm || "#";
-    const sourceBits = [];
-    if (article.sourceName) {
-      sourceBits.push(article.sourceName);
-    } else if (norm) {
-      try { sourceBits.push(new URL(url).hostname.replace(/^www\./i, "")); } catch (_) { /* no host */ }
-    }
-    if (article.publishedAt) {
-      sourceBits.push(new Date(article.publishedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }));
-    }
-    const sourceLine = sourceBits.filter(Boolean).join(" · ");
-    const label = inReport ? "Added" : (norm ? "Add" : "No URL");
-    return `
-      <div class="url-item report-source-item saved-article-item">
-        <div class="report-source-info">
-          <strong><a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(article.title || "Untitled")}</a></strong>
-          ${sourceLine ? `<span class="saved-article-meta">${escapeHtml(sourceLine)}</span>` : ""}
-        </div>
-        <button class="btn btn-sm saved-article-add" type="button" data-url="${escapeHtml(url)}" ${disabled ? "disabled" : ""}>${label}</button>
-      </div>`;
-  }).join("");
-
-  container.querySelectorAll(".saved-article-add:not([disabled])").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const article = savedNewsArticles.find(a => (a.url || "") === btn.dataset.url);
-      if (article) addSavedArticleToReport(article);
-    });
-  });
+function hostOf(url) {
+  try { return new URL(String(url || "")).hostname.replace(/^www\./i, ""); } catch (_) { return ""; }
 }
 
-function addSavedArticleToReport(article) {
-  const url = article.url || "";
-  if (!/^https?:\/\//i.test(url)) {
-    showToast("This saved article has no valid URL to add");
-    return;
+// Shared card markup so News feed, Saved, and Search results all render
+// identically and stay star/save-able via the same favorite handler.
+function newsCardHtml(a, i, saved) {
+  const safeUrl = /^https?:\/\//i.test(a.url || "") ? a.url : "#";
+  const sourceBits = [];
+  if (a.sourceName) {
+    sourceBits.push(a.sourceName);
+  } else if (safeUrl !== "#") {
+    // Fall back to the article's host, not the full URL (the title is the
+    // link already, so repeating the raw URL wastes space on the card).
+    sourceBits.push(hostOf(a.url));
   }
-  // Add the saved article as a REAL source to be scraped live when the report
-  // is generated. Previously these were seeded with just the RSS snippet
-  // (sourceType: news-snippet); now they go through the same live extraction as
-  // any pasted URL — the server resolves news.google.com redirect URLs to the
-  // publisher and pulls the full article body. Passing no extracted content lets
-  // addUrlToReport mark it "Pending extraction" so the user knows it will be
-  // fetched on generation.
-  if (addUrlToReport(url, article.title || url)) {
-    renderSavedArticlesForReport();
+  if (a.publishedAt) {
+    sourceBits.push(new Date(a.publishedAt).toLocaleDateString(undefined, {
+      year: "numeric", month: "short", day: "numeric"
+    }));
   }
+  const sourceLine = sourceBits.filter(Boolean).join(" · ");
+  const articleKey = encodeURIComponent(newsArticleKey(a));
+
+  return `
+    <div class="news-card${saved ? " is-saved" : ""}" data-index="${i}">
+      <div class="news-card-header">
+        <div class="news-title">
+          <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
+        </div>
+        <div class="news-card-actions">
+          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
+        </div>
+      </div>
+      <div class="news-tag-row">
+        <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
+      </div>
+      <p class="news-source">${escapeHtml(sourceLine)}</p>
+      <p class="news-description">${escapeHtml(trimDescription(a.subhead || a.description))}</p>
+    </div>`;
 }
 
 function renderNewsCards(articles, filter, savedView = false) {
@@ -1058,46 +972,22 @@ function renderNewsCards(articles, filter, savedView = false) {
     return;
   }
 
-  feed.innerHTML = filtered
-    .map((a, i) => {
-      const safeUrl = /^https?:\/\//i.test(a.url || "") ? a.url : "#";
-      const sourceBits = [];
-      if (a.sourceName) {
-        sourceBits.push(a.sourceName);
-      } else if (safeUrl !== "#") {
-        // Fall back to the article's host, not the full URL (the title is the
-        // link already, so repeating the raw URL wastes space on the card).
-        try { sourceBits.push(new URL(a.url).hostname.replace(/^www\./i, "")); } catch (_) { /* no host */ }
-      }
-      if (a.publishedAt) {
-        sourceBits.push(new Date(a.publishedAt).toLocaleDateString(undefined, {
-          year: "numeric", month: "short", day: "numeric"
-        }));
-      }
-      const sourceLine = sourceBits.filter(Boolean).join(" · ");
-      const saved = isNewsArticleSaved(a);
-      const articleKey = encodeURIComponent(newsArticleKey(a));
-
-      return `
-    <div class="news-card${saved ? " is-saved" : ""}" data-index="${i}">
-      <div class="news-card-header">
-        <div class="news-title">
-          <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
-        </div>
-        <div class="news-card-actions">
-          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
-        </div>
-      </div>
-      <div class="news-tag-row">
-        <span class="news-tag">${escapeHtml((a.competitorKeyword || "News").replace(/ Tencent 2026/i, ""))}</span>
-      </div>
-      <p class="news-source">${escapeHtml(sourceLine)}</p>
-      <p class="news-description">${escapeHtml(trimDescription(a.subhead || a.description))}</p>
-    </div>`;
-    })
-    .join("");
+  feed.innerHTML = filtered.map((a, i) => newsCardHtml(a, i, isNewsArticleSaved(a))).join("");
 
   if (!savedView) setupNewsSubheadEnrichment(feed, filtered);
+}
+
+// Search results reuse the same card markup as the News feed so they can be
+// starred and saved just like any other article.
+function renderSearchCards(results) {
+  searchResultsData = results;
+  const container = document.getElementById("searchResultsSection");
+  if (!container) return;
+  if (!results.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F50E;</div><p>No results found. Try a different query.</p></div>';
+    return;
+  }
+  container.innerHTML = results.map((a, i) => newsCardHtml(a, i, isNewsArticleSaved(a))).join("");
 }
 
 // Trims an article snippet to a short "hook" (first part) on a word boundary so
@@ -1167,6 +1057,7 @@ async function doSearch() {
 
   const limit = parseInt(document.getElementById("searchLimit").value);
   const resultsDiv = document.getElementById("searchResultsSection");
+  resultsDiv.style.display = "block";
 
   resultsDiv.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Searching...</p></div>';
 
@@ -1184,349 +1075,19 @@ async function doSearch() {
       return;
     }
 
-    searchResultsData = (data.data || []).map(result => ({ ...result, searchQuery: query }));
+    const results = (data.data || []).map(result => ({
+      url: result.url,
+      title: result.title || "Untitled",
+      description: result.description || "",
+      sourceName: hostOf(result.url),
+    }));
 
-    if (!searchResultsData.length) {
-      resultsDiv.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F50E;</div><p>No results found. Try a different query.</p></div>';
-      return;
-    }
-
-    resultsDiv.innerHTML = searchResultsData
-      .map(
-        (r, i) => `
-      <div class="result-card">
-        <div class="result-info">
-          <div class="result-title">${r.title || "Untitled"}</div>
-          <div class="result-url">${r.url || ""}</div>
-          <div class="result-snippet">${r.description || ""}</div>
-        </div>
-        <div class="result-actions">
-          <button class="btn btn-sm scrape-btn" data-index="${i}">&#x1F4C4; Scrape</button>
-          <button class="btn btn-sm report-add-btn" data-index="${i}">+ Report</button>
-        </div>
-      </div>`
-      )
-      .join("");
-
-    // Attach event listeners
-    document.querySelectorAll(".scrape-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        const idx = parseInt(e.target.dataset.index);
-        scrapeUrl(searchResultsData[idx].url, searchResultsData[idx].title, searchResultsData[idx].searchQuery);
-      });
-    });
-
-    document.querySelectorAll(".report-add-btn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        const idx = parseInt(e.target.dataset.index);
-        addUrlToReport(searchResultsData[idx].url, searchResultsData[idx].title, null, searchResultsData[idx].searchQuery);
-        e.target.textContent = "Added!";
-        e.target.disabled = true;
-        setTimeout(() => {
-          e.target.textContent = "+ Report";
-          e.target.disabled = false;
-        }, 1500);
-      });
-    });
+    renderSearchCards(results);
   } catch (err) {
     resultsDiv.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${err.message}</p></div>`;
   }
 }
 
-// ===== Website / Video Transcript Extraction =====
-async function scrapeUrl(url, title, searchQuery = "") {
-  const panel = document.getElementById("scrapeSection");
-  const content = document.getElementById("scrapedContent");
-
-  panel.style.display = "flex";
-  content.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Extracting website text or video transcript...</p></div>';
-  currentScrapedSource = null;
-
-  try {
-    const res = await fetch(`${API_BASE}/scrape`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
-    const data = await res.json();
-
-    if (!data.success) {
-      content.innerHTML = `<div class="scrape-error"><strong>Extraction failed</strong><p>${escapeXml(data.error || "Unknown extraction error")}</p><a href="${escapeXml(url)}" target="_blank" rel="noopener">Open source</a></div>`;
-      return;
-    }
-
-    const extracted = data.data;
-    const metadata = extracted.metadata || {};
-    const sourceTitle = metadata.title || title || url;
-    currentScrapedSource = {
-      url: metadata.originalUrl || url,
-      finalUrl: metadata.url || url,
-      title: sourceTitle,
-      content: extracted.content || extracted.markdown || "",
-      sourceType: metadata.sourceType || "webpage",
-      extractionMethod: metadata.extractionMethod || "Extracted content",
-      wordCount: metadata.wordCount || 0,
-      searchQuery,
-    };
-
-    content.innerHTML = `
-      <div class="scrape-result-header">
-        <div>
-          <span class="scrape-type-badge">${metadata.sourceType === "video-transcript" ? "Video transcript" : "Website text"}</span>
-          <h3>${escapeXml(sourceTitle)}</h3>
-          <a href="${escapeXml(metadata.url || url)}" target="_blank" rel="noopener">${escapeXml(metadata.url || url)}</a>
-        </div>
-        <div class="scrape-metrics">
-          <strong>${Number(metadata.wordCount || 0).toLocaleString()}</strong>
-          <span>words</span>
-        </div>
-      </div>
-      <div class="scrape-summary">
-        <strong>Extracted summary</strong>
-        <p>${escapeXml(extracted.summary || "No concise summary could be generated.")}</p>
-      </div>
-      <div class="scrape-method">${escapeXml(metadata.extractionMethod || "Content extraction")}${metadata.language && metadata.language !== "unknown" ? ` &middot; ${escapeXml(metadata.language)}` : ""}</div>
-      <div class="scrape-extracted-text">${escapeXml(truncateText(currentScrapedSource.content, 18000))}</div>`;
-  } catch (err) {
-    content.innerHTML = `<div class="scrape-error"><strong>Extraction error</strong><p>${escapeXml(err.message)}</p></div>`;
-  }
-}
-
-function addCurrentToReport() {
-  if (!currentScrapedSource) return showToast("Extract a source before adding it to the report");
-  addUrlToReport(currentScrapedSource.url, currentScrapedSource.title, currentScrapedSource);
-}
-
-// ===== Report Sources =====
-function addUrlToReport(url, title, extractedSource = null, searchQuery = "") {
-  let normalisedUrl;
-  try {
-    normalisedUrl = new URL(url).toString();
-  } catch {
-    showToast("Enter a valid HTTP or HTTPS URL");
-    return false;
-  }
-  if (!["http:", "https:"].includes(new URL(normalisedUrl).protocol)) {
-    showToast("Only HTTP and HTTPS URLs are supported");
-    return false;
-  }
-  if (reportUrls.find(source => source.url === normalisedUrl)) {
-    showToast("Source is already in this report");
-    return false;
-  }
-
-  reportUrls.push({
-    url: normalisedUrl,
-    title: title || normalisedUrl,
-    searchQuery: searchQuery || extractedSource?.searchQuery || "",
-    ...(extractedSource ? {
-      finalUrl: extractedSource.finalUrl,
-      content: extractedSource.content,
-      sourceType: extractedSource.sourceType,
-      extractionMethod: extractedSource.extractionMethod,
-      wordCount: extractedSource.wordCount,
-    } : {}),
-  });
-  renderUrlList();
-  showToast(extractedSource ? "Extracted source added to report" : "Source URL added to report");
-  return true;
-}
-
-function removeUrlFromReport(url) {
-  reportUrls = reportUrls.filter(source => source.url !== url);
-  renderUrlList();
-}
-
-function renderUrlList() {
-  const list = document.getElementById("urlList");
-  updateReportDraftCount();
-  if (!reportUrls.length) {
-    list.innerHTML = '<p class="hint">Add website or video URLs. Public captions are extracted as transcripts when available.</p>';
-    return;
-  }
-
-  list.innerHTML = reportUrls.map(source => `
-    <div class="url-item report-source-item">
-      <div class="report-source-info">
-        <span class="report-source-type">${source.sourceType === "video-transcript" ? "Transcript" : source.content ? "Extracted webpage" : "Pending extraction"}</span>
-        <strong>${escapeXml(source.title)}</strong>
-        ${source.searchQuery ? `<span class="report-source-focus">Search focus: ${escapeXml(source.searchQuery)}</span>` : ""}
-        <a href="${escapeXml(source.url)}" target="_blank" rel="noopener">${escapeXml(source.url)}</a>
-      </div>
-      <button class="remove-url" type="button" data-url="${escapeXml(source.url)}" aria-label="Remove source">&#x2715;</button>
-    </div>
-  `).join("");
-
-  list.querySelectorAll(".remove-url").forEach(element => {
-    element.addEventListener("click", event => removeUrlFromReport(event.currentTarget.dataset.url));
-  });
-}
-
-// ===== Generate Report =====
-async function generateReport() {
-  if (!reportUrls.length) {
-    showToast("Add at least one URL to the report");
-    return;
-  }
-
-  const enteredTitle = document.getElementById("reportTitle").value.trim();
-  const searchQueries = [...new Set(reportUrls.map(source => source.searchQuery).filter(Boolean))];
-  const title = enteredTitle || (searchQueries.length === 1 ? `${searchQueries[0]} Report` : "Competitive Intelligence Report");
-  const resultDiv = document.getElementById("reportResult");
-
-  resultDiv.style.display = "block";
-  resultDiv.scrollIntoView({ behavior: "smooth" });
-
-  const findingsList = document.getElementById("reportFindings");
-  const sourcesList = document.getElementById("reportSources");
-  findingsList.innerHTML = '<li>Generating report...</li>';
-
-  try {
-    const res = await fetch(`${API_BASE}/report`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sources: reportUrls,
-        title,
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!data.success) {
-      findingsList.innerHTML = `<li>Error: ${data.error}</li>`;
-      return;
-    }
-
-    const report = data.report;
-
-    displayReport(report);
-
-    // Save the complete sourced report for later review.
-    savedReports.unshift({
-      ...report,
-      date: report.generatedAt,
-      findings: report.keyFindings,
-    });
-    if (savedReports.length > 20) savedReports = savedReports.slice(0, 20);
-    localStorage.setItem("savedReports", JSON.stringify(savedReports));
-    renderSavedReports();
-
-    // Clear report URLs
-    reportUrls = [];
-    renderUrlList();
-    renderSavedArticlesForReport();
-  } catch (err) {
-    findingsList.innerHTML = `<li>Error: ${err.message}</li>`;
-  }
-}
-
-function displayReport(report) {
-  const generatedAt = report.generatedAt || report.date;
-  const keyFindings = (report.keyFindings || report.findings || []).slice(0, 5);
-  document.getElementById("reportResult").style.display = "block";
-  document.getElementById("reportResultTitle").textContent = report.title;
-  document.getElementById("reportDate").textContent = generatedAt
-    ? "Generated: " + new Date(generatedAt).toLocaleString()
-    : "";
-  document.getElementById("reportFindings").innerHTML = keyFindings.length
-    ? keyFindings.map(finding => `<li>${escapeXml(finding)}</li>`).join("")
-    : '<li>No key findings were generated.</li>';
-
-  const themes = report.themes || [];
-  document.getElementById("reportThemes").innerHTML = themes.length ? `
-    <h3>Topics</h3>
-    <div class="report-theme-grid">
-      ${themes.map(theme => `
-        <article class="report-theme-card">
-          <h4>${escapeXml(theme.title)}</h4>
-          <ul>${theme.findings.map(finding => `<li>${escapeXml(finding)}</li>`).join("")}</ul>
-        </article>
-      `).join("")}
-    </div>` : "";
-
-  const sourceSummaries = report.sourceSummaries || (report.sources || []).map(source => ({ ...source, sourceNumber: source.number }));
-  const sourceItems = sourceSummaries.map(source => `
-    <li class="report-source-record">
-      <a href="${escapeXml(source.url)}" target="_blank" rel="noopener">${source.sourceNumber ? `[${source.sourceNumber}] ` : ""}${escapeXml(source.title)}</a>
-      <span>${source.sourceType === "video-transcript" ? "Video transcript" : "Website text"}${source.wordCount ? ` &middot; ${Number(source.wordCount).toLocaleString()} words` : ""}${source.extractionMethod ? ` &middot; ${escapeXml(source.extractionMethod)}` : ""}</span>
-      ${source.searchQuery ? `<strong class="report-source-focus">Search focus: ${escapeXml(source.searchQuery)}</strong>` : ""}
-      ${source.summarySentences?.length
-        ? `<ul class="report-source-summary">${source.summarySentences.map(sentence => `<li>${escapeXml(sentence)}</li>`).join("")}</ul>`
-        : source.summary ? `<p class="report-source-summary-text">${escapeXml(source.summary)}</p>` : ""}
-    </li>`);
-  const failedItems = (report.failedSources || []).map(source => `
-    <li class="report-source-record report-source-failed">
-      <a href="${escapeXml(source.url)}" target="_blank" rel="noopener">${escapeXml(source.title || source.url)}</a>
-      ${source.searchQuery ? `<strong class="report-source-focus">Search focus: ${escapeXml(source.searchQuery)}</strong>` : ""}
-      <span>Not extracted &middot; ${escapeXml(source.error)}</span>
-    </li>`);
-  document.getElementById("reportSources").innerHTML = [...sourceItems, ...failedItems].join("");
-
-  document.getElementById("reportFullContent").textContent = report.fullContent || "";
-  document.getElementById("reportFull").style.display = "none";
-  document.getElementById("toggleFullContent").textContent = "Show Cohesive Report";
-}
-
-function toggleFullContent() {
-  const full = document.getElementById("reportFull");
-  const btn = document.getElementById("toggleFullContent");
-  if (full.style.display === "none") {
-    full.style.display = "block";
-    btn.textContent = "Hide Cohesive Report";
-  } else {
-    full.style.display = "none";
-    btn.textContent = "Show Cohesive Report";
-  }
-}
-
-function renderSavedReports() {
-  const container = document.getElementById("savedReportsList");
-  if (!savedReports.length) {
-    container.innerHTML = '<p class="hint">No saved reports yet</p>';
-    return;
-  }
-
-  container.innerHTML = savedReports
-    .map(
-      (r, i) => `
-    <div class="result-card" style="flex-direction:column;align-items:flex-start;">
-      <strong>${r.title}</strong>
-      <span style="font-size:0.8rem;color:var(--text-muted);">${new Date(r.date).toLocaleString()}</span>
-      <span style="font-size:0.82rem;color:var(--text-muted);">${(r.keyFindings || r.findings || []).slice(0, 5).length} findings | ${(r.sources || []).length} sources</span>
-      <div style="margin-top:0.5rem;display:flex;gap:0.5rem;">
-        <button class="btn btn-sm load-report-btn" data-index="${i}">Load</button>
-        <button class="btn btn-sm delete-report-btn" data-index="${i}">Delete</button>
-      </div>
-    </div>`
-    )
-    .join("");
-
-  document.querySelectorAll(".load-report-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const idx = parseInt(e.target.dataset.index);
-      loadSavedReport(idx);
-    });
-  });
-
-  document.querySelectorAll(".delete-report-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const idx = parseInt(e.target.dataset.index);
-      savedReports.splice(idx, 1);
-      localStorage.setItem("savedReports", JSON.stringify(savedReports));
-      renderSavedReports();
-    });
-  });
-}
-
-function loadSavedReport(idx) {
-  const report = savedReports[idx];
-  if (!report) return;
-
-  switchSearchReportsWorkspace("reports");
-  displayReport(report);
-  document.getElementById("reportResult").scrollIntoView({ behavior: "smooth" });
-}
 
 // ===== Knowledge Base =====
 let kbData = null;
