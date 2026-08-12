@@ -828,7 +828,29 @@ app.post("/api/summarise", async (req, res) => {
       internetDropped = true;
     }
 
-    const evidence = [...appEvidence, ...webEvidence];
+    // Phase 3a: user-supplied "My Sources" (saved News articles) attached from
+    // the Q&A tab. Each becomes an [S#] evidence item the model can cite. We cap
+    // the count and sanitise so a malformed/massive payload can't blow up the
+    // context window. Missing text is fine (title-only sources still cite).
+    let userEvidence = [];
+    try {
+      const incoming = Array.isArray(req.body?.userSources) ? req.body.userSources : [];
+      userEvidence = incoming
+        .filter(s => s && (s.title || s.text))
+        .slice(0, 20)
+        .map((s, index) => ({
+          id: `S${index + 1}`,
+          sourceType: "user",
+          dataset: "My Sources",
+          title: String(s.title || "Untitled source").slice(0, 200),
+          section: "User-supplied context",
+          text: String(s.text || "").slice(0, 4000),
+          excerpt: String(s.text || s.title || "").slice(0, 360),
+          url: s.url ? String(s.url).slice(0, 2000) : undefined,
+        }));
+    } catch (_) { /* ignore malformed userSources */ }
+
+    const evidence = [...appEvidence, ...userEvidence, ...webEvidence];
     let answer;
     let mode;
     let modelError = "";

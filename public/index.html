@@ -158,6 +158,10 @@
                 <input type="checkbox" id="summaryUseModel" />
                 <span>Include Internet Sources</span>
               </label>
+              <label class="summary-model-toggle">
+                <input type="checkbox" id="useMySources" />
+                <span>My Sources</span>
+              </label>
             </div>
             <div class="summary-composer-actions">
               <label class="summary-style-label" for="summaryStyle">
@@ -172,6 +176,16 @@
               <button class="btn btn-primary summary-submit" id="summarySubmitBtn" type="button">Ask</button>
             </div>
           </div>
+        </div>
+
+        <!-- My Sources: attach saved News articles (Phase 3a) as [S#] citations -->
+        <div class="my-sources-panel" id="mySourcesPanel" style="display:none;">
+          <div class="my-sources-panel-header">
+            <span class="my-sources-title">My Sources</span>
+            <span class="my-sources-count" id="mySourcesCount">0 selected</span>
+          </div>
+          <div class="my-sources-list" id="mySourcesList"></div>
+          <p class="my-sources-empty" id="mySourcesEmpty" style="display:none;">No saved articles yet. Save articles in News + Search to use them here.</p>
         </div>
 
         <div class="summary-suggestions" aria-label="Example questions">

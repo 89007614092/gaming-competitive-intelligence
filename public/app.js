@@ -50,6 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNewsFavorites();
   setupFolderUI();
   setupNewsCompetitors();
+  setupMySources();
   setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
@@ -143,6 +144,66 @@ function setupQA() {
     .catch(() => { /* best-effort; static fallback disclaimer text remains visible */ });
 }
 
+// ===== Phase 3a: "My Sources" picker (attach saved News articles as [S#]) =====
+function setupMySources() {
+  const toggle = document.getElementById("useMySources");
+  const panel = document.getElementById("mySourcesPanel");
+  if (!toggle || !panel) return;
+  toggle.addEventListener("change", () => {
+    panel.style.display = toggle.checked ? "block" : "none";
+    if (toggle.checked) renderMySourcesList();
+  });
+}
+
+function renderMySourcesList() {
+  const list = document.getElementById("mySourcesList");
+  const empty = document.getElementById("mySourcesEmpty");
+  const count = document.getElementById("mySourcesCount");
+  if (!list) return;
+
+  if (!savedNewsArticles.length) {
+    list.innerHTML = "";
+    if (empty) empty.style.display = "block";
+    if (count) count.textContent = "0 selected";
+    return;
+  }
+  if (empty) empty.style.display = "none";
+
+  const folders = listFolders();
+  const groups = [];
+  folders.forEach(f => {
+    const items = savedNewsArticles.filter(a => (a.folderIds || []).includes(f.id));
+    if (items.length) groups.push({ label: f.name, items });
+  });
+  const ungrouped = savedNewsArticles.filter(a => !(a.folderIds || []).length);
+  if (ungrouped.length) groups.push({ label: "Ungrouped", items: ungrouped });
+
+  list.innerHTML = groups.map(g => `
+    <div class="my-sources-group">
+      <div class="my-sources-group-label">${escapeHtml(g.label)}</div>
+      ${g.items.map(a => {
+        const key = newsArticleKey(a);
+        const checked = selectedMySourceKeys.has(key) ? "checked" : "";
+        const urlHost = a.url ? hostOf(a.url) : "";
+        return `<label class="my-sources-item">
+          <input type="checkbox" class="my-source-check" data-key="${escapeHtml(encodeURIComponent(key))}" ${checked} />
+          <span class="my-sources-item-title">${escapeHtml(a.title || "Untitled")}</span>
+          ${urlHost ? `<a class="my-sources-item-url" href="${escapeHtml(a.url)}" target="_blank" rel="noopener">${escapeHtml(urlHost)}</a>` : ""}
+        </label>`;
+      }).join("")}
+    </div>`).join("");
+
+  list.querySelectorAll(".my-source-check").forEach(cb => {
+    cb.addEventListener("change", () => {
+      const key = decodeURIComponent(cb.dataset.key);
+      if (cb.checked) selectedMySourceKeys.add(key);
+      else selectedMySourceKeys.delete(key);
+      if (count) count.textContent = `${selectedMySourceKeys.size} selected`;
+    });
+  });
+  if (count) count.textContent = `${selectedMySourceKeys.size} selected`;
+}
+
 async function runSummary() {
   const input = document.getElementById("summaryQuestion");
   const button = document.getElementById("summarySubmitBtn");
@@ -159,6 +220,18 @@ async function runSummary() {
   // checkbox (id summaryUseModel) is the only optional control.
   const useModel = true;
   const useInternet = document.getElementById("summaryUseModel")?.checked === true;
+
+  // Phase 3a: attach selected saved articles as user-supplied [S#] sources.
+  let userSources = [];
+  if (document.getElementById("useMySources")?.checked === true) {
+    userSources = savedNewsArticles
+      .filter(a => selectedMySourceKeys.has(newsArticleKey(a)))
+      .map(a => ({
+        title: a.title || "Untitled",
+        url: a.url || "",
+        text: (a.description || "").slice(0, 4000),
+      }));
+  }
 
   button.disabled = true;
   button.textContent = "Asking...";
@@ -179,6 +252,7 @@ async function runSummary() {
         question,
         useInternet,
         useModel,
+        userSources,
       }),
     });
     const data = await response.json();
@@ -320,6 +394,8 @@ function sectionsForStyle(sections, style) {
 
 let lastAnswerText = "";
 let lastAnswerSources = [];
+// Phase 3a: keys of saved News articles the user has chosen to attach as [S#] sources.
+let selectedMySourceKeys = new Set();
 
 function renderAnswerByStyle() {
   const answer = document.getElementById("summaryAnswer");
