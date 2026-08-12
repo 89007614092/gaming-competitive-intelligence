@@ -51,6 +51,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupFolderUI();
   setupNewsCompetitors();
   setupMySources();
+  setupPastedContext();
   setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
@@ -155,6 +156,40 @@ function setupMySources() {
   });
 }
 
+// ===== Phase 3b: "Add Context" paste box (attach raw text as [U#]) =====
+function setupPastedContext() {
+  const toggle = document.getElementById("usePastedContext");
+  const panel = document.getElementById("pastedContextPanel");
+  const box = document.getElementById("pastedContextInput");
+  const count = document.getElementById("pastedContextCount");
+  if (!toggle || !panel || !box) return;
+
+  const updateCount = () => {
+    const len = box.value.length;
+    // Mirrors the server's parsePastedContext() (blank-line/rule split, short
+    // fragments merged, max 6) so the user can see how many [U#] citations
+    // their paste will produce before they ask.
+    const parts = box.value.trim()
+      ? box.value.trim().split(/\n\s*(?:-{3,}|\*{3,}|_{3,})\s*\n|\n{2,}/).map(p => p.trim()).filter(Boolean)
+      : [];
+    let standalone = 0;
+    for (const p of parts) if (!standalone || p.length >= 60) standalone++;
+    const chunks = Math.min(6, standalone);
+    if (count) {
+      count.textContent = len
+        ? `${len.toLocaleString()} characters · ${chunks} citation${chunks === 1 ? "" : "s"}`
+        : "0 characters";
+    }
+  };
+
+  toggle.addEventListener("change", () => {
+    panel.style.display = toggle.checked ? "block" : "none";
+    if (toggle.checked) box.focus();
+  });
+  box.addEventListener("input", updateCount);
+  updateCount();
+}
+
 function renderMySourcesList() {
   const list = document.getElementById("mySourcesList");
   const empty = document.getElementById("mySourcesEmpty");
@@ -233,6 +268,12 @@ async function runSummary() {
       }));
   }
 
+  // Phase 3b: text pasted into the "Add Context" box becomes [U#] sources.
+  let pastedContext = "";
+  if (document.getElementById("usePastedContext")?.checked === true) {
+    pastedContext = (document.getElementById("pastedContextInput")?.value || "").slice(0, 20000).trim();
+  }
+
   button.disabled = true;
   button.textContent = "Asking...";
   result.style.display = "block";
@@ -253,6 +294,7 @@ async function runSummary() {
         useInternet,
         useModel,
         userSources,
+        pastedContext,
       }),
     });
     const data = await response.json();
@@ -306,16 +348,24 @@ async function runSummary() {
 
 // Parse a Markdown answer into sections and render it to HTML.
 // Supports: "## " headings -> <h4.ans-section>, "- "/"* " bullets -> <ul><li>,
-// **bold**, and [A#]/[W#] inline citation chips/links. Legacy "■ " headings and
-// citation behaviour are preserved. Unknown headings become "other" sections.
+// **bold**, and [A#]/[W#]/[S#]/[U#] inline citation chips/links. Legacy "■ "
+// headings and citation behaviour are preserved. Unknown headings become
+// "other" sections.
 function parseAnswer(text, sources) {
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
   const renderInline = (line) => {
     let html = escapeHtml(line);
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\[([AWS]\d+)\]/g, (m, id) => {
+    html = html.replace(/\[([AWSU]\d+)\]/g, (m, id) => {
       const src = sourceMap.get(id);
-      const cls = "ans-cite" + (src?.sourceType === "internet" ? " ans-cite-web" : src?.sourceType === "user" ? " ans-cite-user" : "");
+      // [A#] app = blue (default), [W#] web = green, [S#] attached = yellow,
+      // [U#] pasted context = purple. [S#] and [U#] share sourceType "user",
+      // so the id prefix is what distinguishes them visually.
+      const cls = "ans-cite" + (
+        src?.sourceType === "internet" ? " ans-cite-web"
+        : id.startsWith("U") ? " ans-cite-paste"
+        : src?.sourceType === "user" ? " ans-cite-user"
+        : "");
       const inner = escapeHtml(id);
       if (src && /^https?:\/\//i.test(src.url || "")) {
         return `<a class="${cls}" href="${escapeHtml(src.url)}" target="_blank" rel="noopener" title="${escapeHtml(src.title || "")}">${inner}</a>`;

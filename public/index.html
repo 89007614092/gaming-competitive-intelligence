@@ -162,6 +162,10 @@
                 <input type="checkbox" id="useMySources" />
                 <span>My Sources</span>
               </label>
+              <label class="summary-model-toggle">
+                <input type="checkbox" id="usePastedContext" />
+                <span>Add Context</span>
+              </label>
             </div>
             <div class="summary-composer-actions">
               <label class="summary-style-label" for="summaryStyle">
@@ -186,6 +190,17 @@
           </div>
           <div class="my-sources-list" id="mySourcesList"></div>
           <p class="my-sources-empty" id="mySourcesEmpty" style="display:none;">No saved articles yet. Save articles in News + Search to use them here.</p>
+        </div>
+
+        <!-- Add Context: paste raw text (Phase 3b) which becomes [U#] citations -->
+        <div class="my-sources-panel" id="pastedContextPanel" style="display:none;">
+          <div class="my-sources-panel-header">
+            <span class="my-sources-title">Add Context by Copy and Pasting Information Here</span>
+            <span class="my-sources-count" id="pastedContextCount">0 characters</span>
+          </div>
+          <textarea id="pastedContextInput" class="pasted-context-input" maxlength="20000"
+            placeholder="Paste an article, transcript, notes or any other text here. It will be treated as your own evidence and cited as [U1], [U2]…"></textarea>
+          <p class="my-sources-empty pasted-context-hint">Separate distinct excerpts with a blank line to cite them individually. Start a chunk with its URL on its own line to link the citation.</p>
         </div>
 
         <div class="summary-suggestions" aria-label="Example questions">
