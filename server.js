@@ -784,86 +784,6 @@ app.get("/api/summarise/status", (req, res) => {
   }
 });
 
-// Phase 3b: turn a free-text blob the user pasted into the Q&A tab into
-// discrete, citable [U#] evidence items.
-//
-// Chunking: blank lines (or a "---" rule) separate chunks, so a user who pastes
-// several distinct excerpts gets one citation per excerpt rather than one giant
-// blob. A single continuous paste stays as one [U1]. Very short fragments are
-// merged into the previous chunk so a stray line break doesn't create a useless
-// citation. Everything is bounded (chunk count, chunk length, total length) so a
-// massive paste can never blow up the model context window.
-//
-// Titles are derived from the first line of each chunk; if the user pasted a
-// URL on its own first line we keep it as the chunk's link so the source card
-// and citation chip can point at the original.
-const PASTE_MAX_CHUNKS = 6;
-const PASTE_MAX_CHUNK_CHARS = 4000;
-const PASTE_MAX_TOTAL_CHARS = 20000;
-// Fragments shorter than this are folded into the preceding chunk: a stray
-// line break, a date stamp or a byline should not earn its own [U#] citation.
-// Kept deliberately low so a genuinely short paragraph still stands alone.
-const PASTE_MIN_CHUNK_CHARS = 60;
-
-function parsePastedContext(raw) {
-  const text = String(raw || "").replace(/\r\n?/g, "\n").trim();
-  if (!text) return [];
-  const bounded = text.slice(0, PASTE_MAX_TOTAL_CHARS);
-
-  // Split on blank lines or a markdown-style horizontal rule.
-  const rawChunks = bounded
-    .split(/\n\s*(?:-{3,}|\*{3,}|_{3,})\s*\n|\n{2,}/)
-    .map(part => String(part || "").trim())
-    .filter(Boolean);
-
-  // Merge fragments that are too short to stand alone as their own citation.
-  const merged = [];
-  for (const part of rawChunks) {
-    if (merged.length && part.length < PASTE_MIN_CHUNK_CHARS) merged[merged.length - 1] += `\n${part}`;
-    else merged.push(part);
-  }
-  // If chunking produced more chunks than we allow, fold the tail into the last
-  // kept chunk rather than silently discarding the user's own material.
-  const chunks = merged.slice(0, PASTE_MAX_CHUNKS);
-  if (merged.length > PASTE_MAX_CHUNKS) {
-    chunks[PASTE_MAX_CHUNKS - 1] += `\n${merged.slice(PASTE_MAX_CHUNKS).join("\n")}`;
-  }
-
-  return chunks.map((chunk, index) => {
-    const lines = chunk.split("\n").map(l => l.trim()).filter(Boolean);
-    const firstLine = lines[0] || "";
-    const urlMatch = firstLine.match(/^https?:\/\/\S+$/i);
-    const url = urlMatch ? firstLine.slice(0, 2000) : undefined;
-    // A bare URL line is metadata, not prose: keep it as the chunk's link but
-    // drop it from the body, otherwise the sentence splitter chops it at the
-    // dots and the excerpt opens with a fragment like "com/filing".
-    let body = (url ? lines.slice(1).join("\n") : chunk).slice(0, PASTE_MAX_CHUNK_CHARS).trim();
-    if (!body) body = firstLine; // a chunk that is nothing but a link
-    // Title: the first line only when it reads like a heading (short, and
-    // followed by more lines); otherwise a generic label, so a source card
-    // never shows half a sentence as its title.
-    let title;
-    if (url) title = `Pasted context ${index + 1} — ${hostOfUrl(firstLine)}`;
-    else if (firstLine && firstLine.length <= 120 && lines.length > 1) title = firstLine;
-    else title = `Pasted context ${index + 1}`;
-
-    return {
-      id: `U${index + 1}`,
-      sourceType: "user",
-      dataset: "Pasted context",
-      title: String(title).slice(0, 200),
-      section: "Pasted by user",
-      text: body,
-      excerpt: body.slice(0, 360),
-      url,
-    };
-  });
-}
-
-function hostOfUrl(value) {
-  try { return new URL(value).hostname.replace(/^www\./, ""); } catch (_) { return "link"; }
-}
-
 // POST /api/summarise — answer questions from app data, synthesised by the
 // hosted open-source model on EVERY answer (graceful extractive fallback if the
 // model is unavailable). Optional web evidence is included only when the caller
@@ -917,20 +837,11 @@ app.post("/api/summarise", async (req, res) => {
       });
     } catch (_) { /* ignore malformed userSources */ }
 
-    // Phase 3b: free-text the user pasted into the Q&A tab becomes [U#] items.
-    // These carry sourceType "user", so they inherit the same first-class
-    // treatment (and the deterministic "must be cited" guarantee) as [S#].
-    let pastedEvidence = [];
-    try {
-      pastedEvidence = parsePastedContext(req.body?.pastedContext);
-    } catch (_) { /* ignore malformed pastedContext */ }
-
     let webEvidence = [];
     let webSearchError = "";
-    // When the user attached or pasted their own sources, cap the web results so
-    // the user's hand-picked context isn't drowned out by internet noise.
-    const userSuppliedCount = userEvidence.length + pastedEvidence.length;
-    const webCap = userSuppliedCount > 0 ? Math.max(2, 6 - userSuppliedCount) : 5;
+    // When the user attached their own sources, cap the web results so the
+    // user's hand-picked context isn't drowned out by internet noise.
+    const webCap = userEvidence.length > 0 ? Math.max(2, 6 - userEvidence.length) : 5;
 
     if (useInternet) {
       try {
@@ -983,7 +894,7 @@ app.post("/api/summarise", async (req, res) => {
       internetDropped = true;
     }
 
-    const evidence = [...appEvidence, ...userEvidence, ...pastedEvidence, ...webEvidence];
+    const evidence = [...appEvidence, ...userEvidence, ...webEvidence];
     let answer;
     let mode;
     let modelError = "";
@@ -3231,9 +3142,6 @@ module.exports = {
 
   // Text segmentation
   splitSentences,
-
-  // Q&A pasted-context ([U#]) chunking
-  parsePastedContext,
 
   // HTML sanitising
   stripHtml,
