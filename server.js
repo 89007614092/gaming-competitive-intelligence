@@ -1720,6 +1720,13 @@ function consumeScanBudget() {
 // Cache of resolved real article URLs (Google News redirect -> publisher URL),
 // persisted via sourceState.resolvedUrls so we rarely re-query a search engine.
 const resolvedUrlMap = new Map();
+// Session-only negative cache: a Google News URL that just failed resolution
+// (every resolver exhausted) is recorded here so repeated reader opens / scan
+// lookups within the same process skip the (expensive, often failing) re-resolution
+// and return null immediately. Deliberately NOT persisted to disk — a later scan
+// or network change may succeed, and we don't want to freeze a permanent miss.
+// Cleared whenever a successful resolution lands for the same URL.
+const resolverNegativeCache = new Set();
 // Serialize DuckDuckGo/GDELT URL resolutions so we never hit the engines in
 // parallel (which triggers rate limiting) and enforce a minimum gap between
 // calls. We keep TWO independent chain sets so a busy News tab can never starve
@@ -2003,6 +2010,78 @@ function detectKnowledgeCategory(text, sourceCategory) {
   return "case-studies";
 }
 
+// Primary Google News resolver. A news.google.com/rss/articles/<id> URL
+// 302-redirects server-side straight to the publisher — but only when requested
+// with a browser User-Agent (search bots and headless UAs are served a
+// challenge/interstitial instead). So we follow that redirect chain directly,
+// which is far more reliable than the DDG/GDELT/Jina search fallbacks (those are
+// frequently bot-challenged or blocked in some environments). We use
+// redirect:"manual" and only ever follow hops that stay inside the trusted
+// news.google.com aggregator; the moment a redirect leaves it we treat that as
+// the publisher and validate its host through assertPublicHost (SSRF protection:
+// a private/loopback/link-local host is never returned). The chain is capped at
+// 5 hops with a per-hop timeout. Returns the publisher URL, or null if we never
+// reach one (loop, cap exceeded, challenge page, or the final host is still the
+// aggregator itself). Best-effort and silent: any failure returns null so the
+// caller can fall back to the search providers.
+async function followGoogleRedirect(googleUrl) {
+  let current;
+  try {
+    current = validateSourceUrl(String(googleUrl).slice(0, 2000));
+  } catch {
+    return null;
+  }
+  if (!/news\.google\.com/i.test(current)) return null; // not a Google News link
+
+  const seen = new Set();
+  for (let hop = 0; hop <= READER_MAX_REDIRECTS; hop++) {
+    if (seen.has(current)) return null; // redirect loop
+    seen.add(current);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), READER_TIMEOUT_MS);
+    try {
+      const res = await fetch(current, {
+        headers: {
+          "User-Agent": SCRAPE_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,text/plain,application/xml",
+        },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      // A final response (non-3xx, or 3xx without a Location) means we reached the
+      // end of the chain. For a Google News link that end is the aggregator
+      // interstitial, not the publisher -> no resolution.
+      if (!(res.status >= 300 && res.status < 400) || !res.headers.get("location")) {
+        return null;
+      }
+      const next = new URL(res.headers.get("location"), current).toString();
+      const nextHost = new URL(next).hostname;
+      // Only follow hops that stay inside the trusted aggregator; anything else is
+      // the publisher. Match the aggregator as a whole host (boundary-anchored) so
+      // a look-alike like "xnews.google.com" or "news.google.com.evil" is NOT
+      // treated as the aggregator and is instead validated as a publisher target.
+      if (/(^|\.)news\.google\.com$/i.test(nextHost)) {
+        current = next; // still inside the aggregator — keep following
+        continue;
+      }
+      // We've left the aggregator — this is the publisher. Validate its host
+      // before returning (assertPublicHost rejects private/loopback/link-local).
+      try {
+        await assertPublicHost(nextHost);
+      } catch {
+        return null;
+      }
+      return next;
+    } catch (err) {
+      if (err && err.name === "AbortError") return null; // hop timed out
+      return null; // any other failure (network, DNS) -> best-effort null
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null; // exceeded the hop cap
+}
+
 // Google News RSS <link> values are redirect URLs that loop back to the Google
 // News SPA server-side (they never reach the publisher). Resolve the real article
 // URL by searching DuckDuckGo for the title on the source's own domain and
@@ -2012,20 +2091,38 @@ function detectKnowledgeCategory(text, sourceCategory) {
 // GDELT DOC API if DuckDuckGo can't resolve the URL.
 async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerChains) {
   if (resolvedUrlMap.has(googleUrl)) return resolvedUrlMap.get(googleUrl);
+  // Session-only negative cache: a URL that just failed all resolvers is skipped
+  // so the reader / scanner don't re-hammer it. Cleared if a later resolution wins.
+  if (resolverNegativeCache.has(googleUrl)) return null;
   resolverStats.attempts++; // a real (non-cached) resolution is being attempted
   // A publisher NAME (e.g. "Reuters") is not a domain; DDG's `site:` and GDELT's
   // `domain:` filters only match real domains, so a name makes every variant
   // fail. Treat a name-only value as "no domain" and resolve by title alone.
   const effectiveDomain = domain && domain.includes(".") ? domain : "";
   const cacheAndReturn = (real) => {
-    if (!real) return null;
+    if (!real) {
+      // All resolvers exhausted for this URL this session — remember the miss so
+      // we don't retry it repeatedly (keeps the reader snappy, saves outbound calls).
+      resolverNegativeCache.add(googleUrl);
+      return null;
+    }
     resolverStats.ok++; // a real publisher URL was successfully resolved
     resolvedUrlMap.set(googleUrl, real);
+    resolverNegativeCache.delete(googleUrl); // a later success clears any prior miss
     if (!sourceState.resolvedUrls) sourceState.resolvedUrls = {};
     sourceState.resolvedUrls[googleUrl] = real;
     return real;
   };
-  // 0) Jina Reader (keyless) — tried first when SEARCH_PROVIDER=jina. Resolves
+  // 0) Direct redirect-follow (NEW primary resolver). news.google.com links
+  //    302 to the publisher for a browser UA; following that chain directly is
+  //    far more reliable than the search-engine fallbacks below, which are often
+  //    bot-challenged or blocked. Returns the real publisher URL, or null.
+  try {
+    const direct = await followGoogleRedirect(googleUrl);
+    if (direct) return cacheAndReturn(direct);
+  } catch (_) { /* fall through to search providers */ }
+
+  // 1) Jina Reader (keyless) — tried when SEARCH_PROVIDER=jina. Resolves
   //    the title to the real publisher URL via Jina's search endpoint, which
   //    works from any IP (no DDG/GDELT bot-challenge). Falls back to DDG/GDELT
   //    if Jina is unavailable or rate-limited.
@@ -2067,10 +2164,10 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerCh
     chains.ddg = task.catch(() => null);
     return task;
   };
-  // 1) DuckDuckGo (primary): title + site, then title alone (broader).
+  // 2) DuckDuckGo (primary): title + site, then title alone (broader).
   const ddgUrl = (await tryDdg(title)) || (await tryDdg(String(title).replace(/\s*[–—-]\s*[^–—-]+$/, "").trim() || title));
   if (ddgUrl) return cacheAndReturn(ddgUrl);
-  // 2) GDELT DOC API (secondary): real publisher URLs directly. Reached only when
+  // 3) GDELT DOC API (secondary): real publisher URLs directly. Reached only when
   //    DDG fails, so rarely exercised — but it gives the scan a second (third)
   //    chance to fetch a real preview in production.
   const gdeltUrl = await resolveViaGdelt(title, effectiveDomain, chains);
@@ -3350,6 +3447,8 @@ module.exports = {
   // Resolver chains — exported so tests can assert the News-tab enrichment and
   // the background scanner use independent chains (no cross-contention).
   resolveGoogleNewsUrl,
+  followGoogleRedirect,
+  resolverNegativeCache,
   newsChains,
   scannerChains,
   resolvedUrlMap,
