@@ -55,6 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTabDragDrop();
   setupSourceMonitor();
   setupReviewPanel();
+  setupStatExpand();
 });
 
 // ===== Navigation =====
@@ -1812,7 +1813,7 @@ function applySpiderTransform() {
 function renderSpiderLegend(data) {
   const legend = document.getElementById("spiderLegend");
   legend.innerHTML = Object.entries(data.sectorColors).map(([key, sector]) => {
-    const count = data.competitors.filter(comp => comp.sectors[0] === key).length;
+    const count = data.competitors.filter(comp => comp.sectors.includes(key)).length;
     const visible = !spiderViewState.hiddenSectors.has(key);
     return `<button class="spider-legend-item ${visible ? "active" : "inactive"}" type="button" data-sector="${key}" aria-pressed="${visible}">
       <span class="legend-dot" style="background:${sector.color}"></span>
@@ -1858,7 +1859,7 @@ function renderSpiderDiagram(data, container) {
   const sectorColors = data.sectorColors;
   const centerNode = data.center;
   const sectorOrder = Object.keys(sectorColors);
-  const visibleCompetitors = data.competitors.filter(comp => !spiderViewState.hiddenSectors.has(comp.sectors[0]));
+  const visibleCompetitors = data.competitors.filter(comp => comp.sectors.some(s => !spiderViewState.hiddenSectors.has(s)));
   const allNodes = [centerNode, ...visibleCompetitors];
 
   // Large three-ring layout with sector groups kept in contiguous angular bands.
@@ -1936,6 +1937,7 @@ function renderSpiderDiagram(data, container) {
     const isCenter = node.id === centerNode.id;
     const primarySector = node.sectors[0];
     const sector = sectorColors[primarySector] || { color: "#64748b" };
+    const primaryHidden = !isCenter && node.sectors && node.sectors.length && spiderViewState.hiddenSectors.has(node.sectors[0]);
     const radius = isCenter ? 34 : node.sectors.length >= 3 ? 21 : node.sectors.length >= 2 ? 18 : 16;
     const nodeParts = [];
 
@@ -1948,11 +1950,12 @@ function renderSpiderDiagram(data, container) {
       });
     }
 
+    const greyNote = primaryHidden ? `\n\n(primary sector hidden — shown via secondary sector)` : "";
     nodeParts.push(`<circle cx="${pos.x}" cy="${pos.y}" r="${radius}" fill="${sector.color}" stroke="#fff" stroke-width="3" class="spider-node" style="filter:url(#nodeShadow)">
-      <title>${escapeXml(node.name)}${node.description ? `\n\n${escapeXml(node.description)}` : ""}</title>
+      <title>${escapeXml(node.name)}${node.description ? `\n\n${escapeXml(node.description)}` : ""}${greyNote}</title>
     </circle>`);
     nodeParts.push(buildSpiderLabel(node.name, pos.x, isCenter ? pos.y + 54 : pos.y + radius + 20, isCenter));
-    svgParts.push(`<g class="spider-node-group" data-id="${node.id}" data-sector="${primarySector}" tabindex="0" role="button" aria-label="${escapeXml(node.name)}">${nodeParts.join("")}</g>`);
+    svgParts.push(`<g class="spider-node-group${primaryHidden ? " sector-greyed" : ""}" data-id="${node.id}" data-sector="${primarySector}" tabindex="0" role="button" aria-label="${escapeXml(node.name)}">${nodeParts.join("")}</g>`);
   });
 
   svgParts.push(`<text x="${cx}" y="${cy - 48}" text-anchor="middle" font-size="11" fill="#6b7280" letter-spacing="1.5">CENTRE</text>`);
@@ -3057,6 +3060,91 @@ function setupRisksFilters() {
       btn.classList.add("active");
       renderRisks(btn.dataset.filter);
     });
+  });
+}
+
+// ===== Item 3: expandable count-stat cards (view-only detail lists) =====
+const STAT_EXPAND = {
+  useCasesGameCount: () => (currentUseCasesData?.games || []).map(g => g.game),
+  useCasesCompanyCount: () => [...new Set((currentUseCasesData?.games || []).map(g => g.developer))].sort(),
+  useCasesGenerativeCount: () => (currentUseCasesData?.games || [])
+    .filter(g => /machine learning|generative/i.test(g.aiClass)).map(g => g.game),
+  risksCategoryCount: () => Object.values(risksData?.categories || {}).map(c => c.title),
+  risksTotalCount: () => Object.values(risksData?.categories || {})
+    .flatMap(c => c.risks.map(r => r.title)),
+  risksCriticalCount: () => Object.values(risksData?.categories || {})
+    .flatMap(c => c.risks.filter(r => r.severity === "critical").map(r => r.title)),
+  risksCompaniesCount: () => {
+    const set = new Set();
+    Object.values(risksData?.categories || {}).forEach(c =>
+      c.risks.forEach(r => (r.affectedCompanies || []).forEach(x => set.add(x))));
+    return [...set];
+  },
+};
+
+function toggleStatExpand(card) {
+  const ul = card.querySelector(".stat-expand-list");
+  if (!ul) return;
+  const expanded = card.classList.toggle("expanded");
+  card.setAttribute("aria-expanded", expanded ? "true" : "false");
+  ul.setAttribute("aria-hidden", expanded ? "false" : "true");
+  if (expanded && ul.childElementCount === 0) {
+    const items = STAT_EXPAND[card.dataset.statKey]?.() || [];
+    ul.innerHTML = items.length
+      ? items.map(i => `<li>${escapeHtml(i)}</li>`).join("")
+      : '<li class="stat-expand-empty">No items to list</li>';
+  }
+}
+
+let statExpandReady = false;
+let statExpandGlobalBound = false;
+function setupStatExpand() {
+  if (statExpandReady) return;
+  statExpandReady = true;
+  Object.keys(STAT_EXPAND).forEach(key => {
+    const val = document.getElementById(key);
+    if (!val) return;
+    const card = val.closest(".stat-card");
+    if (!card || card.dataset.statReady) return;
+    card.dataset.statReady = "1";
+    card.dataset.statKey = key;
+    card.classList.add("expandable");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-expanded", "false");
+    const label = card.querySelector(".stat-label");
+    if (label && !label.querySelector(".stat-expand-cue")) {
+      const cue = document.createElement("span");
+      cue.className = "stat-expand-cue";
+      cue.textContent = " ⌄";
+      label.appendChild(cue);
+    }
+    if (!card.querySelector(".stat-expand-list")) {
+      const ul = document.createElement("ul");
+      ul.className = "stat-expand-list";
+      ul.setAttribute("aria-hidden", "true");
+      card.appendChild(ul);
+    }
+    card.addEventListener("click", (e) => { e.stopPropagation(); toggleStatExpand(card); });
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleStatExpand(card); }
+    });
+  });
+  if (!statExpandGlobalBound) {
+    statExpandGlobalBound = true;
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".stat-card.expandable")) closeAllStatExpand();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeAllStatExpand();
+    });
+  }
+}
+function closeAllStatExpand() {
+  document.querySelectorAll(".stat-card.expanded").forEach(c => {
+    c.classList.remove("expanded");
+    c.setAttribute("aria-expanded", "false");
+    c.querySelector(".stat-expand-list")?.setAttribute("aria-hidden", "true");
   });
 }
 
