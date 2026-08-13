@@ -4721,6 +4721,19 @@ body {
 }
 .reader-summary { flex: 1; resize: none; font-size: 13.5px; line-height: 1.55; }
 .reader-actions { display: flex; gap: 8px; margin-top: 10px; }
+.reader-split-status.reader-status-error { background: var(--danger-light, #fee2e2); color: var(--danger); }
+.reader-manual-entry {
+  margin-top: 12px; padding: 14px; border: 1px dashed var(--border);
+  border-radius: var(--radius); background: var(--surface-alt, #f8fafc); font-size: 13px; line-height: 1.5;
+}
+.reader-manual-note { margin: 0 0 8px; color: var(--text); }
+.reader-manual-steps { margin: 0 0 12px; padding-left: 18px; color: var(--text-muted); }
+.reader-manual-steps li { margin-bottom: 2px; }
+.reader-manual-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.reader-field { font-size: 12px; color: var(--text-muted); }
+.reader-field-block { display: block; margin-bottom: 4px; }
+.reader-manual-url { flex: 1; min-width: 200px; }
+.reader-manual-text { width: 100%; margin-bottom: 8px; font-size: 13px; line-height: 1.5; }
 @media (max-width: 720px) {
   .reader-split-panes { grid-template-columns: 1fr; }
 }

@@ -85,20 +85,49 @@ test("createRateLimiter throttles after the budget is exhausted", () => {
 });
 
 test("fetchReaderContent never surfaces the Google News boilerplate", async () => {
-  // For an unresolved news.google.com URL the resolver fails (offline sandbox)
-  // and the guard throws before any aggregator fetch; if resolution ever
-  // succeeds the post-extraction backstop still rejects the boilerplate.
-  // Either way the caller must never receive the "Comprehensive up-to-date
-  // news coverage..." landing text.
-  let result = null, threw = false;
+  // For an unresolved news.google.com URL every resolver fails (here we force the
+  // network down) and the Option-A viewer fallback also fails. The reader must
+  // then return a structured {unresolved:true} marker — NOT throw a dead-end
+  // error, and NEVER surface the "Comprehensive up-to-date news coverage..."
+  // aggregator landing text. The client uses the marker to offer manual entry.
+  const restore = mockFetch(async () => { throw new Error("network down"); });
   try {
-    result = await srv.fetchReaderContent("https://news.google.com/rss/articles/CBMi_example");
-  } catch (_) { threw = true; }
-  if (!threw) {
-    assert.ok(result && typeof result.text === "string", "returns text or throws");
-    assert.ok(!srv.isGoogleNewsBoilerplate(result.text || ""), "must never surface the Google News boilerplate");
-  }
-  assert.ok(true, "no boilerplate path taken");
+    const result = await srv.fetchReaderContent("https://news.google.com/rss/articles/CBMi_example");
+    assert.strictEqual(result && result.unresolved, true,
+      "unresolved Google News link returns the manual-entry marker, never boilerplate");
+    assert.strictEqual(result.reason, "google-news");
+    assert.ok(!result.text || !srv.isGoogleNewsBoilerplate(result.text || ""),
+      "must never surface the Google News boilerplate");
+  } finally { restore(); }
+});
+
+test("fetchReaderContent returns a partial viewer preview when the publisher is unreachable", async () => {
+  // The Google News viewer page (with /rss/ stripped) serves a real headline +
+  // description even though the publisher can't be reached. The reader should
+  // surface that as a PARTIAL preview rather than the unresolved marker.
+  const viewerHtml = `<!doctype html><html><head><title>EU AI Act passes final vote</title>
+    <meta name="description" content="The EU AI Act has been approved by lawmakers in a landmark vote that sets binding rules for providers of general-purpose AI models.">
+    </head><body><article><h1>EU AI Act passes final vote</h1>
+    <p>The EU AI Act has been approved by lawmakers in a landmark vote that sets out binding rules for providers of general-purpose AI models. The regulation introduces a risk-based framework classifying systems by potential harm, with the strictest obligations reserved for high-risk applications such as biometric surveillance and critical infrastructure.</p>
+    </article></body></html>`;
+  const restore = mockFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("news.google.com/articles/")) {
+      return {
+        status: 200, ok: true, url: u,
+        headers: { get: (h) => (String(h).toLowerCase() === "content-type" ? "text/html" : null) },
+        text: async () => viewerHtml,
+        arrayBuffer: async () => Buffer.from(viewerHtml),
+      };
+    }
+    throw new Error("network down");
+  });
+  try {
+    const result = await srv.fetchReaderContent("https://news.google.com/rss/articles/CBMi_viewer");
+    assert.ok(result && result.partial === true, "should return a partial preview from the viewer page");
+    assert.ok(/EU AI Act/.test(result.text), "partial preview should contain the headline text");
+    assert.notStrictEqual(result.unresolved, true, "should NOT be the unresolved marker when viewer text was extracted");
+  } finally { restore(); }
 });
 
 // ---- followGoogleRedirect (primary Google News resolver) -------------------

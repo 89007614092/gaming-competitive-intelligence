@@ -3446,6 +3446,7 @@ async function openReaderSplit(card, url) {
   const articleEl = document.getElementById("readerArticle");
   const statusEl = document.getElementById("readerStatus");
   const origLink = document.getElementById("readerOriginalLink");
+  const manualEl = document.getElementById("readerManualEntry");
   if (!split || !summaryBox || !articleEl || !listEl) return;
 
   let editBox = card.querySelector(".proposal-edit-box");
@@ -3460,6 +3461,15 @@ async function openReaderSplit(card, url) {
   const summaryText = card.querySelector(".proposal-summary-text");
   summaryBox.value = editBox.value || (summaryText && summaryText.textContent) || "";
   articleEl.textContent = "";
+  articleEl.dataset.partial = "";
+  if (manualEl) {
+    manualEl.style.display = "none";
+    const ui = document.getElementById("readerManualUrl");
+    const ti = document.getElementById("readerManualText");
+    if (ui) ui.value = "";
+    if (ti) ti.value = "";
+  }
+  if (statusEl) { statusEl.style.display = "none"; statusEl.textContent = ""; statusEl.classList.remove("reader-status-error"); }
   if (origLink) origLink.href = url;
   split.dataset.cardId = card.getAttribute("data-id") || "";
   listEl.style.display = "none";
@@ -3478,27 +3488,95 @@ async function openReaderSplit(card, url) {
   const domain = rawDomain.includes(".") ? rawDomain : "";
   const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}`;
 
+  await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, manualEl);
+  bindReaderManualEntry();
+}
+
+// Fetch a reader URL and render the result. On a Google News link that the
+// server cannot resolve, switch the article pane to manual entry (Option D)
+// instead of showing a dead-end error.
+async function loadReaderUrl(targetUrl, articleEl, statusEl, manualEl) {
   try {
-    const res = await fetch(`${API_BASE}/reader?${qs}`);
+    const res = await fetch(targetUrl);
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
+      if (/Google News link/i.test(errJson.error || "") && manualEl) {
+        showReaderManualEntry(manualEl, statusEl);
+        return;
+      }
       if (statusEl) {
         statusEl.textContent = (errJson.error || "Could not load this article. Use “Open original” to read it.");
         statusEl.style.display = "block";
+        statusEl.classList.add("reader-status-error");
       }
       return;
     }
     const data = await res.json();
-    if (statusEl) statusEl.style.display = "none";
+    // Server exhausted every resolver AND the Google News viewer fallback: offer
+    // the user a way to supply the URL / full text themselves.
+    if (data.unresolved) {
+      if (manualEl) showReaderManualEntry(manualEl, statusEl);
+      else if (statusEl) { statusEl.textContent = data.message || "Could not load this article."; statusEl.style.display = "block"; }
+      return;
+    }
+    if (statusEl) { statusEl.style.display = "none"; statusEl.classList.remove("reader-status-error"); }
+    articleEl.dataset.partial = data.partial ? "1" : "";
     articleEl.textContent = data.text && data.text.trim()
       ? data.text
       : "(No readable text could be extracted from this page.)";
+    if (data.partial) {
+      // Honest, non-intrusive note that this is a partial preview, not the full article.
+      if (statusEl) {
+        statusEl.textContent = "Retrieved a partial preview from Google News (headline + summary only). Open the original for the full article.";
+        statusEl.style.display = "block";
+        statusEl.classList.remove("reader-status-error");
+      }
+    }
   } catch (_) {
     if (statusEl) {
       statusEl.textContent = "Could not load this article. Use “Open original” to read it.";
       statusEl.style.display = "block";
+      statusEl.classList.add("reader-status-error");
     }
   }
+}
+
+function showReaderManualEntry(manualEl, statusEl) {
+  if (statusEl) { statusEl.style.display = "none"; statusEl.classList.remove("reader-status-error"); }
+  manualEl.style.display = "block";
+}
+
+// Wire the manual-entry controls once. Pasting a real publisher URL re-runs the
+// reader fetch; pasting full text drops it straight into the article pane.
+function bindReaderManualEntry() {
+  const manualEl = document.getElementById("readerManualEntry");
+  if (!manualEl || manualEl.dataset.bound === "1") return;
+  manualEl.dataset.bound = "1";
+  const urlInput = document.getElementById("readerManualUrl");
+  const textInput = document.getElementById("readerManualText");
+  const articleEl = document.getElementById("readerArticle");
+  const statusEl = document.getElementById("readerStatus");
+  const loadBtn = document.getElementById("readerManualLoad");
+  const useBtn = document.getElementById("readerManualUseText");
+  if (loadBtn) loadBtn.addEventListener("click", async () => {
+    const u = (urlInput.value || "").trim();
+    if (!u) { urlInput.focus(); return; }
+    if (statusEl) { statusEl.textContent = "Loading from URL…"; statusEl.style.display = "block"; statusEl.classList.remove("reader-status-error"); }
+    await loadReaderUrl(`${API_BASE}/reader?url=${encodeURIComponent(u)}`, articleEl, statusEl, manualEl);
+    // Collapse the manual panel once real content arrives.
+    if (articleEl.textContent && articleEl.textContent.trim() && !articleEl.dataset.partial) {
+      manualEl.style.display = "none";
+      if (statusEl) statusEl.style.display = "none";
+    }
+  });
+  if (useBtn) useBtn.addEventListener("click", () => {
+    const t = (textInput.value || "").trim();
+    if (!t) { textInput.focus(); return; }
+    articleEl.textContent = t;
+    articleEl.dataset.partial = "";
+    manualEl.style.display = "none";
+    if (statusEl) statusEl.style.display = "none";
+  });
 }
 
 // Copy the split-view summary textarea back into the proposal card so the
