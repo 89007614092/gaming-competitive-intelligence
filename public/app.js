@@ -3372,14 +3372,18 @@ async function openReaderSplit(card, url) {
   split.dataset.cardId = card.getAttribute("data-id") || "";
   listEl.style.display = "none";
   split.style.display = "flex";
-  if (statusEl) { statusEl.textContent = "Loading article…"; statusEl.style.display = "block"; }
+  if (statusEl) { statusEl.textContent = "Resolving source & loading article…"; statusEl.style.display = "block"; }
 
   // Pass the article title + publisher so the server can resolve news.google.com
   // redirect URLs to the real publisher (the landing page has no article body).
   const titleEl = card.querySelector(".proposal-title");
   const sourceEl = card.querySelector(".proposal-source");
   const title = titleEl ? titleEl.textContent.trim() : "";
-  const domain = sourceEl ? sourceEl.textContent.trim() : "";
+  const rawDomain = sourceEl ? sourceEl.textContent.trim() : "";
+  // Only pass a real domain (one containing a dot). Publisher names like
+  // "Reuters" are not domains and would make source resolution fail; the
+  // server resolves by article title in that case.
+  const domain = rawDomain.includes(".") ? rawDomain : "";
   const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}`;
 
   try {

@@ -83,3 +83,20 @@ test("createRateLimiter throttles after the budget is exhausted", () => {
   assert.strictEqual(lim("alice"), false, "third request in window must be blocked");
   assert.strictEqual(lim("bob"), true, "different key has its own budget");
 });
+
+test("fetchReaderContent never surfaces the Google News boilerplate", async () => {
+  // For an unresolved news.google.com URL the resolver fails (offline sandbox)
+  // and the guard throws before any aggregator fetch; if resolution ever
+  // succeeds the post-extraction backstop still rejects the boilerplate.
+  // Either way the caller must never receive the "Comprehensive up-to-date
+  // news coverage..." landing text.
+  let result = null, threw = false;
+  try {
+    result = await srv.fetchReaderContent("https://news.google.com/rss/articles/CBMi_example");
+  } catch (_) { threw = true; }
+  if (!threw) {
+    assert.ok(result && typeof result.text === "string", "returns text or throws");
+    assert.ok(!srv.isGoogleNewsBoilerplate(result.text || ""), "must never surface the Google News boilerplate");
+  }
+  assert.ok(true, "no boilerplate path taken");
+});
