@@ -192,6 +192,7 @@ async function jinaExtract(url, timeoutMs = 20000) {
 
 // ===== Website and Video Transcript Extraction — free, no API key needed =====
 
+const { createExtractor } = require("./lib/extractor");
 const SCRAPE_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -454,6 +455,19 @@ const readerRateLimiter = createRateLimiter({
   windowMs: Number(process.env.READER_RATE_WINDOW_MS) || 60000,
 });
 
+// Governed central extractor (Phase 1 of the BI-grade pipeline). Routes article
+// extraction through the server-side Jina reader so text is retrievable where a
+// direct Render fetch cannot (Google consent wall, publisher egress blocks).
+const extractor = createExtractor({
+  validateSourceUrl,
+  assertPublicHost,
+  readStreamWithCap,
+  SCRAPE_USER_AGENT,
+  READER_MAX_BYTES,
+  READER_TIMEOUT_MS,
+  readerRateLimiter,
+});
+
 // Option A fallback for Google News links. A server-side fetch can never follow
 // news.google.com to the real publisher (it hits the consent wall or a JS shell
 // served as a 200). But the *viewer* page — the same article id with /rss/ stripped
@@ -528,6 +542,17 @@ async function tryGoogleViewerFallback(googleUrl) {
   return result;
 }
 
+function normalizeExtracted(extracted, fallbackUrl) {
+  return {
+    title: extracted.title || (extracted.attribution && extracted.attribution.source) || "",
+    text: extracted.text,
+    url: extracted.url || fallbackUrl,
+    excerpt: extracted.excerpt || (extracted.text ? extracted.text.slice(0, 400) : ""),
+    attribution: extracted.attribution,
+    via: "extractor",
+  };
+}
+
 async function fetchReaderContent(url, opts = {}) {
   const maxBytes = Number(opts.maxBytes) || READER_MAX_BYTES;
   const timeoutMs = Number(opts.timeoutMs) || READER_TIMEOUT_MS;
@@ -535,24 +560,28 @@ async function fetchReaderContent(url, opts = {}) {
   if (!url || typeof url !== "string") throw new Error("A valid source URL is required");
 
   let target = validateSourceUrl(url.slice(0, 2000));
-  // Suggested-Update proposal URLs arrive as news.google.com/rss/articles/...
-  // redirects that return only a generic Google News landing page ("Comprehensive
-  // up-to-date news coverage..."). Resolve them to the real publisher URL first
-  // (the same resolver scrapeUrl uses) so the reader fetches the actual article
-  // body instead of the aggregator interstitial. Falls back to the original URL
-  // if resolution fails; the redirect loop below still re-validates every hop.
+  const licenseClass = opts.licenseClass || "news-fair-use";
+  const sourceId = opts.sourceId || null;
+
+  // Google News links: try to resolve to the real publisher URL first.
   if (/news\.google\.com/i.test(target)) {
     try {
       const real = await resolveGoogleNewsUrl(target, opts.title || "", opts.domain || "");
       if (real) target = real;
     } catch (_) { /* keep the original URL */ }
   }
-  // If resolution could not move the URL off news.google.com, try Option A:
-  // read the Google News viewer page itself as a best-effort partial preview.
-  // If even that yields nothing, return an explicit `unresolved` result (not a
-  // thrown error) so the client can offer manual entry (Option D) instead of a
-  // dead-end message.
+
+  // Still a Google News link (resolution failed): attempt governed Jina
+  // extraction — Jina follows the Google redirect and renders JS server-side,
+  // so it often retrieves what a direct fetch cannot. Fall back to the viewer
+  // partial preview (Option A), then to the manual-entry marker.
   if (/news\.google\.com/i.test(target)) {
+    try {
+      const viaJina = await extractor.extractArticle(target, { licenseClass, sourceId });
+      if (viaJina && viaJina.text && viaJina.text.trim().length >= 120) {
+        return normalizeExtracted(viaJina, target);
+      }
+    } catch (_) { /* fall through to viewer fallback */ }
     const viewer = await tryGoogleViewerFallback(target);
     if (viewer) return viewer;
     return {
@@ -562,6 +591,27 @@ async function fetchReaderContent(url, opts = {}) {
       message: "Could not resolve this Google News link to its original source",
     };
   }
+
+  // Real (non-Google) publisher URL: governed central extraction via Jina. This
+  // is what fixes the pasted-URL "Could not retrieve the source" failure — the
+  // extraction happens on Jina's infrastructure, not Render's restricted egress.
+  try {
+    const extracted = await extractor.extractArticle(target, { licenseClass, sourceId });
+    if (extracted && extracted.restricted) {
+      return {
+        restricted: true,
+        attribution: extracted.attribution,
+        url: target,
+        message: "Source is restricted; only metadata is available",
+      };
+    }
+    if (extracted && extracted.text && extracted.text.trim().length >= 120) {
+      return normalizeExtracted(extracted, target);
+    }
+  } catch (_) { /* fall through to legacy direct fetch */ }
+
+  // Legacy direct server fetch — retained as a resilient fallback (and the
+  // sandbox/test path). Mirrors the original SSRF-hardened behaviour.
   await assertPublicHost(new URL(target).hostname);
 
   const seen = new Set();
@@ -645,6 +695,8 @@ app.get("/api/reader", async (req, res) => {
     const result = await fetchReaderContent(url, {
       title: typeof req.query.title === "string" ? req.query.title : "",
       domain: typeof req.query.domain === "string" ? req.query.domain : "",
+      licenseClass: typeof req.query.licenseClass === "string" ? req.query.licenseClass : undefined,
+      sourceId: typeof req.query.sourceId === "string" ? req.query.sourceId : undefined,
     });
     res.json(result);
   } catch (err) {
