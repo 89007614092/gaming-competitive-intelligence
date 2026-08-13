@@ -1,0 +1,115 @@
+{
+  "_status": "PARKED — Phase 2 feed-pipeline seed (gaming governance allowlist). NOT consumed by the current scan, which uses the AI-regulation allowlist in data/sources.json. Kept for the BI-grade pipeline (Phase 2), where it will replace the Google-News-scoped crawler.",
+  "sources": [
+    {
+      "id": "gamesindustry",
+      "name": "GamesIndustry.biz",
+      "type": "rss",
+      "endpoint": "https://www.gamesindustry.biz/feeds",
+      "sectorTags": ["gaming", "platform"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1h",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "polygon",
+      "name": "Polygon",
+      "type": "rss",
+      "endpoint": "https://www.polygon.com/rss/index.xml",
+      "sectorTags": ["gaming", "platform"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1h",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "venturebeat-games",
+      "name": "VentureBeat Games",
+      "type": "rss",
+      "endpoint": "https://venturebeat.com/category/games/feed/",
+      "sectorTags": ["gaming", "ai-llm"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1h",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "theverge",
+      "name": "The Verge",
+      "type": "rss",
+      "endpoint": "https://www.theverge.com/rss/index.xml",
+      "sectorTags": ["gaming", "platform", "ai-llm"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1h",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "gdconf",
+      "name": "GDC / Game Developers Conference",
+      "type": "rss",
+      "endpoint": "https://gdconf.com/feeds",
+      "sectorTags": ["gaming"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1d",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "devgamm",
+      "name": "DevGAMM",
+      "type": "rss",
+      "endpoint": "https://devgamm.com/feeds",
+      "sectorTags": ["gaming"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1d",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "reuters",
+      "name": "Reuters",
+      "type": "rss",
+      "endpoint": "https://www.reutersagency.com/feed/",
+      "sectorTags": ["enterprise", "ai-llm"],
+      "licenseClass": "news-fair-use",
+      "cadence": "30m",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "uk-cma",
+      "name": "UK Competition & Markets Authority",
+      "type": "rss",
+      "endpoint": "https://www.gov.uk/government/organisations/competition-and-markets-authority.atom",
+      "sectorTags": ["enterprise"],
+      "licenseClass": "open",
+      "cadence": "30m",
+      "enabled": true,
+      "trustTier": 1
+    },
+    {
+      "id": "esa",
+      "name": "Entertainment Software Association",
+      "type": "html",
+      "endpoint": "https://www.theesa.com/news/",
+      "sectorTags": ["gaming", "enterprise"],
+      "licenseClass": "news-fair-use",
+      "cadence": "1d",
+      "enabled": true,
+      "trustTier": 2
+    },
+    {
+      "id": "nintendo-ir",
+      "name": "Nintendo Investor Relations",
+      "type": "html",
+      "endpoint": "https://www.nintendo.co.jp/ir/",
+      "sectorTags": ["gaming", "platform", "enterprise"],
+      "licenseClass": "open",
+      "cadence": "1d",
+      "enabled": true,
+      "trustTier": 1
+    }
+  ]
+}

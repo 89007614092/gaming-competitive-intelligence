@@ -2,9 +2,10 @@
 // Phase 0 — source registry validation + the seeded allowlist.
 const test = require("node:test");
 const assert = require("node:assert");
+const fs = require("fs");
+const path = require("path");
 const {
   validateSourcesData,
-  loadDefaultSources,
   getEnabledSources,
   bySector,
   byLicenseClass,
@@ -44,10 +45,17 @@ test("validateSourcesData requires a sources array", () => {
   assert.strictEqual(validateSourcesData(null).valid, false);
 });
 
-test("loadDefaultSources loads and validates the seeded allowlist", () => {
-  const data = loadDefaultSources();
-  assert.ok(Array.isArray(data.sources));
-  assert.ok(data.sources.length >= 5, "seed should contain several curated sources");
+// NOTE: the LIVE data/sources.json is the AI-regulation allowlist consumed by the
+// running scan (server.js loadSourceRegistry), which uses a different schema
+// (domain/terms/category). The Phase-2 governance seed (new schema) is parked at
+// data/sources.gaming-phase2.json. We validate THAT here so the test stays
+// meaningful without conflicting with the live scan's file.
+test("validates the parked gaming governance seed", () => {
+  const seedPath = path.join(__dirname, "..", "data", "sources.gaming-phase2.json");
+  const data = JSON.parse(fs.readFileSync(seedPath, "utf8"));
+  const { valid, errors } = validateSourcesData(data);
+  assert.ok(valid, "governance seed should satisfy the schema: " + errors.join("; "));
+  assert.ok(Array.isArray(data.sources) && data.sources.length >= 5, "seed should contain several curated sources");
   assert.strictEqual(getEnabledSources(data).length, data.sources.length, "all seed sources enabled");
   assert.ok(bySector(data, "gaming").length >= 1, "should map to the gaming sector");
   assert.ok(byLicenseClass(data, "open").length >= 1, "should include at least one open-licensed source");
