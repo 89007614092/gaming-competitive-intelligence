@@ -365,6 +365,40 @@ body {
   margin-bottom: 0.3rem;
 }
 
+/* Item 2: greyed competitor node (visible only via a secondary sector) */
+.spider-node-group.sector-greyed { opacity: 0.55; }
+.spider-node-group.sector-greyed .spider-node { fill: #cbd5e1 !important; }
+.spider-node-group.sector-greyed .spider-label { fill: #94a3b8 !important; }
+
+/* Item 3: click-to-expand stat-card lists (view-only) */
+.stat-card.expandable { cursor: pointer; position: relative; }
+.stat-card.expandable:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
+.stat-expand-cue { color: var(--text-muted, #94a3b8); font-size: 0.78em; margin-left: 0.25rem; }
+.stat-expand-list {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  top: calc(100% - 0.4rem);
+  z-index: 30;
+  display: none;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  max-height: 260px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+.stat-card.expanded .stat-expand-list { display: block; }
+.stat-expand-list li { padding: 0.18rem 0; border-bottom: 1px solid var(--border); }
+.stat-expand-list li:last-child { border-bottom: none; }
+.stat-expand-list .stat-expand-empty { color: var(--text-muted, #94a3b8); font-style: italic; }
+
 /* === Section === */
 .section { margin-bottom: 2rem; }
 
