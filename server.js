@@ -473,6 +473,12 @@ async function fetchReaderContent(url, opts = {}) {
       if (real) target = real;
     } catch (_) { /* keep the original URL */ }
   }
+  // If resolution could not move the URL off news.google.com, the fetch would
+  // only return the generic aggregator landing page. Surface a clear error
+  // instead of silently showing boilerplate to the user.
+  if (/news\.google\.com/i.test(target)) {
+    throw new Error("Could not resolve this Google News link to its original source");
+  }
   await assertPublicHost(new URL(target).hostname);
 
   const seen = new Set();
@@ -519,6 +525,11 @@ async function fetchReaderContent(url, opts = {}) {
   const buf = await readStreamWithCap(response, maxBytes);
   const html = buf.toString("utf8");
   const text = extractText(html);
+  // Defense-in-depth: even if the URL wasn't recognised as a Google News
+  // redirect, reject the aggregator boilerplate so the user never sees it.
+  if (isGoogleNewsBoilerplate(text)) {
+    throw new Error("Could not resolve this Google News link to its original source");
+  }
   const finalUrl = response.url || current;
   const title = extractTitle(html) || new URL(finalUrl).hostname;
   return { title, text, url: finalUrl, excerpt: text.slice(0, 400) };
@@ -561,6 +572,7 @@ app.get("/api/reader", async (req, res) => {
       : 502; // timeout, redirect loop, unsupported type, blocked/private host, DNS failure
     const message = code === 400 ? "A valid source URL is required"
       : code === 413 ? "The source response exceeded the size limit"
+      : /original source/i.test(msg) ? "Could not resolve this Google News link to its original source"
       : "Could not retrieve the source";
     res.status(code).json({ error: message });
   }
@@ -2001,6 +2013,10 @@ function detectKnowledgeCategory(text, sourceCategory) {
 async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerChains) {
   if (resolvedUrlMap.has(googleUrl)) return resolvedUrlMap.get(googleUrl);
   resolverStats.attempts++; // a real (non-cached) resolution is being attempted
+  // A publisher NAME (e.g. "Reuters") is not a domain; DDG's `site:` and GDELT's
+  // `domain:` filters only match real domains, so a name makes every variant
+  // fail. Treat a name-only value as "no domain" and resolve by title alone.
+  const effectiveDomain = domain && domain.includes(".") ? domain : "";
   const cacheAndReturn = (real) => {
     if (!real) return null;
     resolverStats.ok++; // a real publisher URL was successfully resolved
@@ -2015,7 +2031,7 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerCh
   //    if Jina is unavailable or rate-limited.
   if (activeSearchProvider() === "jina") {
     try {
-      const hit = (await jinaSearch(`${title}${domain ? ` site:${domain}` : ""}`, 5))[0];
+      const hit = (await jinaSearch(`${title}${effectiveDomain ? ` site:${effectiveDomain}` : ""}`, 5))[0];
       if (hit && hit.url) return cacheAndReturn(hit.url);
     } catch (e) {
       // HTTP 401/402 from Jina's search endpoint are expected on a keyless/free
@@ -2034,7 +2050,7 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerCh
       if (wait > 0) await new Promise(r => setTimeout(r, wait));
       chains.lastDdg = Date.now();
       if (!queryTitle) return null;
-      const site = domain ? ` site:${domain}` : "";
+      const site = effectiveDomain ? ` site:${effectiveDomain}` : "";
       const q = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${queryTitle}${site}`)}`;
       try {
         const res = await fetchTextResource(q, "text/html,application/xhtml+xml,text/plain", 6000, nextResolverUa());
@@ -2057,7 +2073,7 @@ async function resolveGoogleNewsUrl(googleUrl, title, domain, chains = scannerCh
   // 2) GDELT DOC API (secondary): real publisher URLs directly. Reached only when
   //    DDG fails, so rarely exercised — but it gives the scan a second (third)
   //    chance to fetch a real preview in production.
-  const gdeltUrl = await resolveViaGdelt(title, domain, chains);
+  const gdeltUrl = await resolveViaGdelt(title, effectiveDomain, chains);
   return cacheAndReturn(gdeltUrl);
 }
 
