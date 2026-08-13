@@ -100,3 +100,120 @@ test("fetchReaderContent never surfaces the Google News boilerplate", async () =
   }
   assert.ok(true, "no boilerplate path taken");
 });
+
+// ---- followGoogleRedirect (primary Google News resolver) -------------------
+// Public IP-literal "publishers" are used so the publisher-host assertPublicHost
+// check passes deterministically without depending on sandbox DNS resolution.
+const PUB = "https://8.8.8.8/article";
+
+function mockFetch(handler) {
+  const original = globalThis.fetch;
+  globalThis.fetch = handler;
+  return () => { globalThis.fetch = original; };
+}
+function redirectResp(loc) {
+  return { status: 302, headers: { get: (h) => (String(h).toLowerCase() === "location" ? loc : null) } };
+}
+function finalResp() {
+  return { status: 200, headers: { get: () => null } };
+}
+
+test("followGoogleRedirect returns the publisher on a single 302", async () => {
+  const restore = mockFetch(async (url) =>
+    String(url).includes("news.google.com") ? redirectResp(PUB) : finalResp());
+  try {
+    const out = await srv.followGoogleRedirect("https://news.google.com/rss/articles/ABC");
+    assert.strictEqual(out, PUB, "should follow the 302 to the publisher");
+  } finally { restore(); }
+});
+
+test("followGoogleRedirect follows an internal multi-hop chain to the publisher", async () => {
+  const restore = mockFetch(async (url) => {
+    if (String(url).includes("/articles/A"))
+      return redirectResp("https://news.google.com/rss/articles/B");
+    if (String(url).includes("/articles/B"))
+      return redirectResp(PUB);
+    return finalResp();
+  });
+  try {
+    const out = await srv.followGoogleRedirect("https://news.google.com/rss/articles/A");
+    assert.strictEqual(out, PUB, "should traverse two hops and land on the publisher");
+  } finally { restore(); }
+});
+
+test("followGoogleRedirect returns null when the chain ends at the aggregator", async () => {
+  const restore = mockFetch(async (url) =>
+    String(url).includes("news.google.com") ? finalResp() : finalResp());
+  try {
+    const out = await srv.followGoogleRedirect("https://news.google.com/rss/articles/ABC");
+    assert.strictEqual(out, null, "a 200 interstitial with no Location is not a resolution");
+  } finally { restore(); }
+});
+
+test("followGoogleRedirect returns null on a redirect loop", async () => {
+  const restore = mockFetch(async (url) => {
+    if (String(url).includes("/articles/A"))
+      return redirectResp("https://news.google.com/rss/articles/B");
+    return redirectResp("https://news.google.com/rss/articles/A"); // B -> A -> loop
+  });
+  try {
+    const out = await srv.followGoogleRedirect("https://news.google.com/rss/articles/A");
+    assert.strictEqual(out, null, "a detected redirect loop must not hang or recurse");
+  } finally { restore(); }
+});
+
+test("followGoogleRedirect rejects a private-host publisher (SSRF guard)", async () => {
+  const restore = mockFetch(async (url) =>
+    String(url).includes("news.google.com") ? redirectResp("http://127.0.0.1/secret") : finalResp());
+  try {
+    const out = await srv.followGoogleRedirect("https://news.google.com/rss/articles/ABC");
+    assert.strictEqual(out, null, "a 302 to a loopback host must never be returned");
+  } finally { restore(); }
+});
+
+test("followGoogleRedirect returns null for a non-Google-News URL", async () => {
+  const restore = mockFetch(async () => finalResp());
+  try {
+    const out = await srv.followGoogleRedirect("https://example.com/some-article");
+    assert.strictEqual(out, null, "only news.google.com links are followed");
+  } finally { restore(); }
+});
+
+test("followGoogleRedirect returns null for an invalid URL", async () => {
+  const restore = mockFetch(async () => finalResp());
+  try {
+    const out = await srv.followGoogleRedirect("not-a-url");
+    assert.strictEqual(out, null, "validateSourceUrl failure must be swallowed");
+  } finally { restore(); }
+});
+
+// ---- Session-only negative cache -------------------------------------------
+test("resolveGoogleNewsUrl skips re-resolution for a URL that just failed", async () => {
+  srv.resolverNegativeCache.clear();
+  let fetchCount = 0;
+  const restore = mockFetch(async (url) => {
+    fetchCount++;
+    const u = String(url);
+    if (u.includes("news.google.com")) return finalResp();      // followGoogleRedirect -> null
+    if (u.includes("jina.ai")) return { status: 200, headers: { get: () => null }, text: async () => "no results" };
+    if (u.includes("duckduckgo.com")) return { status: 200, headers: { get: () => null }, text: async () => "no uddg param" };
+    if (u.includes("gdeltproject.org")) return { status: 200, headers: { get: () => null }, text: async () => "not json {" };
+    return { status: 200, headers: { get: () => null }, text: async () => "" };
+  });
+  const url = "https://news.google.com/rss/articles/NEGCACHE_" + Date.now();
+  try {
+    const first = await srv.resolveGoogleNewsUrl(url, "Some Title", "example.com");
+    assert.strictEqual(first, null, "all resolvers exhausted -> null");
+    const afterFirst = fetchCount;
+    assert.ok(afterFirst > 0, "first call actually attempted resolution");
+    // The URL must now be in the session negative cache...
+    assert.strictEqual(srv.resolverNegativeCache.has(url), true, "failed URL recorded in negative cache");
+    const second = await srv.resolveGoogleNewsUrl(url, "Some Title", "example.com");
+    assert.strictEqual(second, null, "second call also returns null");
+    assert.strictEqual(fetchCount, afterFirst, "second call did NOT re-fetch (negative cache short-circuits)");
+  } finally {
+    restore();
+    srv.resolverNegativeCache.delete(url);
+  }
+});
+
