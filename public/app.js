@@ -1942,7 +1942,14 @@ function renderSpiderDiagram(data, container) {
     const nodeParts = [];
 
     if (!isCenter && node.sectors.length > 1) {
-      const ringColors = node.sectors.map(item => sectorColors[item]?.color || "#94a3b8");
+      // Only draw ring arcs for sectors that are still visible. Hiding a
+      // sector removes its colour from the ring (e.g. hiding "Platform /
+      // Distribution" leaves Valve's ring blue-only — a full ring of the one
+      // remaining colour). The node is only rendered here if at least one
+      // sector is visible, so ringColors is never empty.
+      const ringColors = node.sectors
+        .filter(s => !spiderViewState.hiddenSectors.has(s))
+        .map(item => sectorColors[item]?.color || "#94a3b8");
       const circumference = 2 * Math.PI * (radius + 4);
       const segment = circumference / ringColors.length;
       ringColors.forEach((color, colorIndex) => {

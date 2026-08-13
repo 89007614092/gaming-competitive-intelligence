@@ -373,7 +373,7 @@ body {
 /* Item 3: click-to-expand stat-card lists (view-only) */
 .stat-card.expandable { cursor: pointer; position: relative; }
 .stat-card.expandable:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
-.stat-expand-cue { color: var(--text-muted, #94a3b8); font-size: 0.78em; margin-left: 0.25rem; }
+.stat-expand-cue { color: var(--text-muted, #94a3b8); font-size: 0.78em; margin-left: 0.25rem; vertical-align: middle; position: relative; top: -1px; }
 .stat-expand-list {
   position: absolute;
   left: 1rem;
