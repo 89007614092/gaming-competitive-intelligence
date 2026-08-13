@@ -1936,17 +1936,15 @@ function renderSpiderDiagram(data, container) {
     if (!pos) return;
     const isCenter = node.id === centerNode.id;
     const primarySector = node.sectors[0];
-    const sector = sectorColors[primarySector] || { color: "#64748b" };
-    const primaryHidden = !isCenter && node.sectors && node.sectors.length && spiderViewState.hiddenSectors.has(node.sectors[0]);
     const radius = isCenter ? 34 : node.sectors.length >= 3 ? 21 : node.sectors.length >= 2 ? 18 : 16;
     const nodeParts = [];
 
-    if (!isCenter && node.sectors.length > 1) {
-      // Only draw ring arcs for sectors that are still visible. Hiding a
-      // sector removes its colour from the ring (e.g. hiding "Platform /
-      // Distribution" leaves Valve's ring blue-only — a full ring of the one
-      // remaining colour). The node is only rendered here if at least one
-      // sector is visible, so ringColors is never empty.
+    if (!isCenter) {
+      // Every node (single- and multi-sector) gets a ring of its visible
+      // sector colours. Hiding a sector removes its colour from the ring
+      // (e.g. hiding "Platform / Distribution" leaves Valve's ring blue-only
+      // — a full ring of the one remaining colour). The node is only rendered
+      // here if at least one sector is visible, so ringColors is never empty.
       const ringColors = node.sectors
         .filter(s => !spiderViewState.hiddenSectors.has(s))
         .map(item => sectorColors[item]?.color || "#94a3b8");
@@ -1957,12 +1955,11 @@ function renderSpiderDiagram(data, container) {
       });
     }
 
-    const greyNote = primaryHidden ? `\n\n(primary sector hidden — shown via secondary sector)` : "";
-    nodeParts.push(`<circle cx="${pos.x}" cy="${pos.y}" r="${radius}" fill="${sector.color}" stroke="#fff" stroke-width="3" class="spider-node" style="filter:url(#nodeShadow)">
-      <title>${escapeXml(node.name)}${node.description ? `\n\n${escapeXml(node.description)}` : ""}${greyNote}</title>
+    nodeParts.push(`<circle cx="${pos.x}" cy="${pos.y}" r="${radius}" fill="#1e293b" stroke="#fff" stroke-width="3" class="spider-node" style="filter:url(#nodeShadow)">
+      <title>${escapeXml(node.name)}${node.description ? `\n\n${escapeXml(node.description)}` : ""}</title>
     </circle>`);
     nodeParts.push(buildSpiderLabel(node.name, pos.x, isCenter ? pos.y + 54 : pos.y + radius + 20, isCenter));
-    svgParts.push(`<g class="spider-node-group${primaryHidden ? " sector-greyed" : ""}" data-id="${node.id}" data-sector="${primarySector}" tabindex="0" role="button" aria-label="${escapeXml(node.name)}">${nodeParts.join("")}</g>`);
+    svgParts.push(`<g class="spider-node-group" data-id="${node.id}" data-sector="${primarySector}" tabindex="0" role="button" aria-label="${escapeXml(node.name)}">${nodeParts.join("")}</g>`);
   });
 
   svgParts.push(`<text x="${cx}" y="${cy - 48}" text-anchor="middle" font-size="11" fill="#6b7280" letter-spacing="1.5">CENTRE</text>`);

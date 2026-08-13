@@ -365,10 +365,7 @@ body {
   margin-bottom: 0.3rem;
 }
 
-/* Item 2: greyed competitor node (visible only via a secondary sector) */
-.spider-node-group.sector-greyed { opacity: 0.55; }
-.spider-node-group.sector-greyed .spider-node { fill: #cbd5e1 !important; }
-.spider-node-group.sector-greyed .spider-label { fill: #94a3b8 !important; }
+/* Item 2: neutral node centers — no primary/secondary grey-out (ring carries sector colours) */
 
 /* Item 3: click-to-expand stat-card lists (view-only) */
 .stat-card.expandable { cursor: pointer; position: relative; }
