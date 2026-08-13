@@ -693,6 +693,21 @@
             <section class="reader-article-pane">
               <h4 class="reader-pane-label">Article (read-only)</h4>
               <div class="reader-article" id="readerArticle"></div>
+              <div class="reader-manual-entry" id="readerManualEntry" style="display:none;">
+                <p class="reader-manual-note">We couldn't automatically retrieve this article &mdash; Google News links can't be read by the server. You can still review it manually:</p>
+                <ol class="reader-manual-steps">
+                  <li>Open the original article using the link above (it redirects to the publisher in your browser).</li>
+                  <li>Then paste either the article <strong>URL</strong> or its <strong>full text</strong> below.</li>
+                </ol>
+                <div class="reader-manual-row">
+                  <label class="reader-field" for="readerManualUrl">Paste the article URL:</label>
+                  <input type="url" class="text-input reader-manual-url" id="readerManualUrl" placeholder="https://example.com/article" />
+                  <button class="btn btn-sm" id="readerManualLoad" type="button">Load from URL</button>
+                </div>
+                <label class="reader-field reader-field-block" for="readerManualText">Or paste the article text:</label>
+                <textarea class="text-input reader-manual-text" id="readerManualText" rows="10" placeholder="Paste the article body here…"></textarea>
+                <button class="btn btn-sm" id="readerManualUseText" type="button">Use pasted text</button>
+              </div>
             </section>
             <section class="reader-summary-pane">
               <h4 class="reader-pane-label">Summary (feeds the proposed entry)</h4>

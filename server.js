@@ -454,6 +454,80 @@ const readerRateLimiter = createRateLimiter({
   windowMs: Number(process.env.READER_RATE_WINDOW_MS) || 60000,
 });
 
+// Option A fallback for Google News links. A server-side fetch can never follow
+// news.google.com to the real publisher (it hits the consent wall or a JS shell
+// served as a 200). But the *viewer* page — the same article id with /rss/ stripped
+// from the path — still carries the headline and a short description in its HTML
+// and meta tags. We attempt one best-effort read of that page and return whatever
+// readable text we can as a PARTIAL preview, so the reader shows something useful
+// instead of a dead-end error. Returns a result object, or null if nothing usable
+// was extracted (e.g. consent wall, boilerplate, empty response).
+async function tryGoogleViewerFallback(googleUrl) {
+  if (googleViewerCache.has(googleUrl)) return googleViewerCache.get(googleUrl);
+  if (googleViewerNegativeCache.has(googleUrl)) return null;
+  let viewerUrl;
+  try {
+    const u = new URL(googleUrl);
+    u.pathname = u.pathname.replace(/^\/rss\//i, "/"); // /rss/articles/<id> -> /articles/<id>
+    viewerUrl = u.toString();
+  } catch {
+    googleViewerNegativeCache.add(googleUrl);
+    return null;
+  }
+  const seen = new Set();
+  let current = viewerUrl;
+  let result = null;
+  for (let hop = 0; hop <= READER_MAX_REDIRECTS; hop++) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    const host = new URL(current).hostname;
+    // Can't pass Google's consent/auth wall server-side — genuine dead end.
+    if (/(^|\.)(consent|accounts)\.google\.com$/i.test(host)) break;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), READER_TIMEOUT_MS);
+    try {
+      const res = await fetch(current, {
+        headers: {
+          "User-Agent": SCRAPE_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,text/plain,application/xml",
+          // Best-effort consent bypass; ignored when Google serves it by IP region.
+          Cookie: "CONSENT=YES+cb.0",
+        },
+        redirect: "manual",
+        signal: controller.signal,
+      });
+      if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+        const next = new URL(res.headers.get("location"), current).toString();
+        const nextHost = new URL(next).hostname;
+        if (/(^|\.)(consent|accounts)\.google\.com$/i.test(nextHost)) break;
+        current = next;
+        continue;
+      }
+      if (!res.ok) break;
+      const ct = res.headers.get("content-type") || "";
+      if (!/(text\/html|application\/xhtml\+xml|text\/plain|application\/xml|text\/xml)/i.test(ct)) break;
+      const buf = await readStreamWithCap(res, READER_MAX_BYTES);
+      const html = buf.toString("utf8");
+      const text = extractText(html);
+      if (isGoogleNewsBoilerplate(text)) break; // only the aggregator shell
+      const clean = text.trim();
+      if (clean.length < 120) break;            // not enough to be useful
+      const finalUrl = res.url || current;
+      const title = extractTitle(html) || new URL(finalUrl).hostname;
+      result = { title, text: clean, url: googleUrl, excerpt: clean.slice(0, 400), partial: true, resolvedVia: "google-viewer" };
+      break;
+    } catch (err) {
+      if (err && err.name === "AbortError") break;
+      break;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (result) googleViewerCache.set(googleUrl, result);
+  else googleViewerNegativeCache.add(googleUrl);
+  return result;
+}
+
 async function fetchReaderContent(url, opts = {}) {
   const maxBytes = Number(opts.maxBytes) || READER_MAX_BYTES;
   const timeoutMs = Number(opts.timeoutMs) || READER_TIMEOUT_MS;
@@ -473,11 +547,20 @@ async function fetchReaderContent(url, opts = {}) {
       if (real) target = real;
     } catch (_) { /* keep the original URL */ }
   }
-  // If resolution could not move the URL off news.google.com, the fetch would
-  // only return the generic aggregator landing page. Surface a clear error
-  // instead of silently showing boilerplate to the user.
+  // If resolution could not move the URL off news.google.com, try Option A:
+  // read the Google News viewer page itself as a best-effort partial preview.
+  // If even that yields nothing, return an explicit `unresolved` result (not a
+  // thrown error) so the client can offer manual entry (Option D) instead of a
+  // dead-end message.
   if (/news\.google\.com/i.test(target)) {
-    throw new Error("Could not resolve this Google News link to its original source");
+    const viewer = await tryGoogleViewerFallback(target);
+    if (viewer) return viewer;
+    return {
+      unresolved: true,
+      reason: "google-news",
+      url: target,
+      message: "Could not resolve this Google News link to its original source",
+    };
   }
   await assertPublicHost(new URL(target).hostname);
 
@@ -1727,6 +1810,14 @@ const resolvedUrlMap = new Map();
 // or network change may succeed, and we don't want to freeze a permanent miss.
 // Cleared whenever a successful resolution lands for the same URL.
 const resolverNegativeCache = new Set();
+// Session-only caches for the Google News *viewer* fallback (Option A). When a
+// news.google.com link can't be resolved to a publisher, we make one best-effort
+// attempt to read the viewer page itself. Positive results are cached so repeated
+// reader opens are instant; misses are recorded so we don't re-hammer Google on
+// every open. Both are session-only (reset on restart) — same reasoning as
+// resolverNegativeCache.
+const googleViewerCache = new Map();        // url -> {title,text,url,partial,resolvedVia}
+const googleViewerNegativeCache = new Set(); // urls whose viewer page yielded nothing
 // Serialize DuckDuckGo/GDELT URL resolutions so we never hit the engines in
 // parallel (which triggers rate limiting) and enforce a minimum gap between
 // calls. We keep TWO independent chain sets so a busy News tab can never starve
@@ -2056,6 +2147,12 @@ async function followGoogleRedirect(googleUrl) {
       }
       const next = new URL(res.headers.get("location"), current).toString();
       const nextHost = new URL(next).hostname;
+      // A server-side fetch never receives a real publisher redirect from Google
+      // News — instead it lands on consent.google.com / accounts.google.com (the
+      // GDPR/region consent wall) or loops inside the aggregator. Treat those as
+      // "resolution impossible" rather than mistaking the consent host for the
+      // publisher (which would fetch the consent interstitial as "the article").
+      if (/(^|\.)(consent|accounts)\.google\.com$/i.test(nextHost)) return null;
       // Only follow hops that stay inside the trusted aggregator; anything else is
       // the publisher. Match the aggregator as a whole host (boundary-anchored) so
       // a look-alike like "xnews.google.com" or "news.google.com.evil" is NOT
