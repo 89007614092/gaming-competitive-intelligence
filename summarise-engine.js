@@ -14,7 +14,7 @@ const path = require("path");
 // a far tighter daily cap than the old 8B's 14.4K RPD / 500K TPD, but much more
 // capable. Run the background scan on a cheaper separate model (OPEN_MODEL_NAME_SCAN)
 // to protect the Q&A quota. Override with OPEN_MODEL_NAME. gpt-oss emits internal
-// reasoning tokens unless reasoning_effort:"none" is set (see runApiModelGeneration /
+// reasoning tokens unless reasoning_effort:"low" is set (see runApiModelGeneration /
 // runModelChat / nudgeForUserSources).
 const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "openai/gpt-oss-120b";
 const OPEN_MODEL_API_KEY = process.env.OPEN_MODEL_API_KEY || "";
@@ -57,8 +57,10 @@ let qaRateLimitedUntil = 0;
 let scanRateLimitedUntil = 0;
 
 // gpt-oss models (openai/gpt-oss-20b, openai/gpt-oss-120b, …) emit internal
-// reasoning tokens unless explicitly disabled; left on, they bloat the answer
-// text with chain-of-thought and waste token quota. Disable for every lane.
+// gpt-oss models emit reasoning tokens by default; for our extract-and-cite
+// Q&A task that is wasteful (bloat + quota burn), so we pin reasoning_effort to
+// "low" (valid enum on Groq/OpenAI; "none" is NOT accepted and 400s). "low"
+// keeps a clean, fast answer without spending tokens on chain-of-thought.
 function modelNeedsNoReasoning(model) {
   return /gpt-oss/.test(model || "");
 }
@@ -321,7 +323,7 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   const nudgeBody = { model: DEFAULT_MODEL, messages: nudgeMessages, max_tokens: 1800, temperature: 0 };
-  if (modelNeedsNoReasoning(DEFAULT_MODEL)) nudgeBody.reasoning_effort = "none";
+  if (modelNeedsNoReasoning(DEFAULT_MODEL)) nudgeBody.reasoning_effort = "low";
   try {
     const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
       method: "POST",
@@ -401,7 +403,7 @@ async function runApiModelGeneration(question, evidence) {
         max_tokens: 1800,
         temperature: 0,
       };
-      if (modelNeedsNoReasoning(DEFAULT_MODEL)) qaBody.reasoning_effort = "none";
+      if (modelNeedsNoReasoning(DEFAULT_MODEL)) qaBody.reasoning_effort = "low";
       const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
@@ -500,7 +502,7 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const chatBody = { model: modelName, messages, max_tokens: maxTokens, temperature };
-        if (modelNeedsNoReasoning(modelName)) chatBody.reasoning_effort = "none";
+        if (modelNeedsNoReasoning(modelName)) chatBody.reasoning_effort = "low";
         const resp = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
