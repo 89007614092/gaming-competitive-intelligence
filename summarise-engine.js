@@ -7,10 +7,16 @@ const path = require("path");
 // free-tier RAM and caused cold-start "warming up" failures, so we call a hosted
 // open-weight model instead. The Render instance stays tiny and the same
 // inline-citation prompt runs on a far larger model than could ever fit locally.
-// Default to the 8B "instant" model: on Groq's free tier it carries a 500K
-// tokens/day cap (vs 100K for llama-3.3-70b), which is what this app's
-// background enrichment + Q&A workload needs. Override with OPEN_MODEL_NAME.
-const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "llama-3.1-8b-instant";
+// Default model: OpenAI's open-weight gpt-oss-120b (MoE, ~120B active params),
+// served by Groq over the OpenAI-compatible endpoint. Chosen as the drop-in
+// successor to the decommissioned llama-3.1-8b-instant (Groq retires it 2026-08-16).
+// On Groq's free tier gpt-oss-120b carries ~30 RPM / 1,000 RPD / 8K TPM / 200K TPD —
+// a far tighter daily cap than the old 8B's 14.4K RPD / 500K TPD, but much more
+// capable. Run the background scan on a cheaper separate model (OPEN_MODEL_NAME_SCAN)
+// to protect the Q&A quota. Override with OPEN_MODEL_NAME. gpt-oss emits internal
+// reasoning tokens unless reasoning_effort:"none" is set (see runApiModelGeneration /
+// runModelChat / nudgeForUserSources).
+const DEFAULT_MODEL = process.env.OPEN_MODEL_NAME || "openai/gpt-oss-120b";
 const OPEN_MODEL_API_KEY = process.env.OPEN_MODEL_API_KEY || "";
 const OPEN_MODEL_BASE_URL = (process.env.OPEN_MODEL_BASE_URL || "https://api.groq.com/openai/v1").replace(/\/+$/, "");
 // Dedicated credentials/queue for the background "Suggested Updates" scan so it
@@ -49,6 +55,13 @@ let scanQueue = Promise.resolve();
 // Epoch-ms timestamps until which a given lane's model calls are paused.
 let qaRateLimitedUntil = 0;
 let scanRateLimitedUntil = 0;
+
+// gpt-oss models (openai/gpt-oss-20b, openai/gpt-oss-120b, …) emit internal
+// reasoning tokens unless explicitly disabled; left on, they bloat the answer
+// text with chain-of-thought and waste token quota. Disable for every lane.
+function modelNeedsNoReasoning(model) {
+  return /gpt-oss/.test(model || "");
+}
 
 function readJson(fileName) {
   return JSON.parse(fs.readFileSync(path.join(DATA_DIR, fileName), "utf8"));
@@ -244,8 +257,9 @@ function formatContext(evidence, question) {
 //   OPEN_MODEL_API_KEY   (required) API key for the Q&A (user-facing) lane
 //   OPEN_MODEL_BASE_URL  default https://api.groq.com/openai/v1
 //                        (OpenRouter: https://openrouter.ai/api/v1)
-//   OPEN_MODEL_NAME      default llama-3.1-8b-instant
-//                        (OpenRouter examples: meta-llama/llama-3.3-70b-instruct,
+//   OPEN_MODEL_NAME      default openai/gpt-oss-120b
+//                        (successor to the decommissioned llama-3.1-8b-instant;
+//                         OpenRouter examples: meta-llama/llama-3.3-70b-instruct,
 //                         qwen/qwen2.5-72b-instruct, mistralai/mixtral-8x7b-instruct)
 //   OPEN_MODEL_API_KEY_SCAN  optional 2nd key for the background scan lane
 //                            (default: same as OPEN_MODEL_API_KEY)
@@ -306,11 +320,13 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
   ];
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
+  const nudgeBody = { model: DEFAULT_MODEL, messages: nudgeMessages, max_tokens: 1800, temperature: 0 };
+  if (modelNeedsNoReasoning(DEFAULT_MODEL)) nudgeBody.reasoning_effort = "none";
   try {
     const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${OPEN_MODEL_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: DEFAULT_MODEL, messages: nudgeMessages, max_tokens: 1800, temperature: 0 }),
+      body: JSON.stringify(nudgeBody),
       signal: controller.signal,
     });
     if (!resp.ok) return currentAnswer;
@@ -379,18 +395,20 @@ async function runApiModelGeneration(question, evidence) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000);
     try {
+      const qaBody = {
+        model: DEFAULT_MODEL,
+        messages,
+        max_tokens: 1800,
+        temperature: 0,
+      };
+      if (modelNeedsNoReasoning(DEFAULT_MODEL)) qaBody.reasoning_effort = "none";
       const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${OPEN_MODEL_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: DEFAULT_MODEL,
-          messages,
-          max_tokens: 1800,
-          temperature: 0,
-        }),
+        body: JSON.stringify(qaBody),
         signal: controller.signal,
       });
   if (!resp.ok) {
@@ -481,10 +499,12 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
+        const chatBody = { model: modelName, messages, max_tokens: maxTokens, temperature };
+        if (modelNeedsNoReasoning(modelName)) chatBody.reasoning_effort = "none";
         const resp = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model: modelName, messages, max_tokens: maxTokens, temperature }),
+          body: JSON.stringify(chatBody),
           signal: controller.signal,
         });
         if (!resp.ok) {
