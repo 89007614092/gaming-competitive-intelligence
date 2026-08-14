@@ -193,6 +193,8 @@ async function jinaExtract(url, timeoutMs = 20000) {
 // ===== Website and Video Transcript Extraction — free, no API key needed =====
 
 const { createExtractor } = require("./lib/extractor");
+const retention = require("./lib/retention");
+const { computeRetentionState, rollToExcerpt } = retention;
 const SCRAPE_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -685,12 +687,38 @@ app.get("/api/reader", async (req, res) => {
     catch { return res.status(403).json({ error: "Cross-origin requests are not allowed" }); }
 
     const url = req.query.url;
+    const id = typeof req.query.id === "string" ? req.query.id : "";
+    const refresh = req.query.refresh === "1" || req.query.refresh === "true";
+
     if (!url || typeof url !== "string") {
-      return res.status(400).json({ error: "A url query parameter is required" });
+      if (!id) return res.status(400).json({ error: "A url query parameter is required" });
     }
     const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
     if (!readerRateLimiter(ip)) {
       return res.status(429).json({ error: "Too many requests, please slow down" });
+    }
+
+    // Phase 3 — store viewer: serve stored content without a live fetch when we
+    // already have it and the caller hasn't explicitly asked to refresh.
+    if (id && !refresh) {
+      const prop = (proposedChanges.items || []).find(i => i.id === id);
+      if (prop && (prop.body || prop.preview)) {
+        return res.json({
+          fromStore: true,
+          title: prop.title || "",
+          text: prop.body || prop.preview || "",
+          styledSummary: prop.styledSummary || null,
+          url: prop.url || url || "",
+          publisher: prop.publisher || "",
+          snippet: prop.snippet || "",
+          retentionState: prop.retentionState || "full",
+          partial: false,
+        });
+      }
+    }
+
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "A url query parameter is required to fetch from source" });
     }
     const result = await fetchReaderContent(url, {
       title: typeof req.query.title === "string" ? req.query.title : "",
@@ -698,6 +726,11 @@ app.get("/api/reader", async (req, res) => {
       licenseClass: typeof req.query.licenseClass === "string" ? req.query.licenseClass : undefined,
       sourceId: typeof req.query.sourceId === "string" ? req.query.sourceId : undefined,
     });
+    // Persist the resolved body back into the shared store so the next open is
+    // instant and no longer depends on the (often-failing) Google resolution.
+    if (id && result && result.text && result.text.trim().length >= 120) {
+      try { writeStoreBody(id, result.text); } catch (_) { /* non-fatal */ }
+    }
     res.json(result);
   } catch (err) {
     // Generic error mapping — never leak internals (hosts, stack traces).
@@ -710,6 +743,34 @@ app.get("/api/reader", async (req, res) => {
       : /original source/i.test(msg) ? "Could not resolve this Google News link to its original source"
       : "Could not retrieve the source";
     res.status(code).json({ error: message });
+  }
+});
+
+// Write manually-supplied content (pasted article text, or a corrected URL)
+// back into the shared store so it persists across reloads. Reuses the admin
+// gate used by the other mutating proposal endpoints (a no-op when
+// ADMIN_API_KEY is unset, preserving current behaviour). No outbound fetch —
+// we only store what the user provided.
+app.post("/api/reader/store", requireAdmin, (req, res) => {
+  try {
+    const id = req.body && req.body.id;
+    if (!id) return res.status(400).json({ error: "id is required" });
+    const prop = (proposedChanges.items || []).find(i => i.id === id);
+    if (!prop) return res.status(404).json({ error: "Proposal not found" });
+    const text = req.body && typeof req.body.text === "string" ? req.body.text : "";
+    const url = req.body && typeof req.body.url === "string" ? req.body.url : null;
+    if (text) {
+      prop.body = text;
+      if (!prop.preview) prop.preview = text.slice(0, 4000);
+    }
+    if (url) prop.url = url;
+    prop.manuallyStored = true;
+    prop.retentionState = computeRetentionState(prop, Date.now(), loadLegalHoldIds());
+    prop.retentionReviewedAt = new Date().toISOString();
+    saveProposed();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1947,6 +2008,60 @@ function saveProposed() {
   } catch (_) { /* non-fatal */ }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3: retention sweep + shared-store write-back
+// ---------------------------------------------------------------------------
+// Legal-hold ids (comma-separated env) are never purged or rolled, regardless
+// of age. Empty by default.
+function loadLegalHoldIds() {
+  const raw = process.env.RETENTION_LEGAL_HOLD_IDS || "";
+  return raw.split(",").map(s => s.trim()).filter(Boolean);
+}
+
+// Persist extracted article text back into a store item (after a live fetch or
+// a manual paste), refreshing its retention state. No-op if the item is gone.
+function writeStoreBody(id, text) {
+  if (!id || !text) return;
+  const prop = (proposedChanges.items || []).find(i => i.id === id);
+  if (!prop) return;
+  prop.body = text;
+  // Keep `preview` (the short review-panel snippet) as-is; only the canonical
+  // reader body is updated here.
+  prop.retentionState = computeRetentionState(prop, Date.now(), loadLegalHoldIds());
+  prop.retentionReviewedAt = new Date().toISOString();
+  saveProposed();
+}
+
+// Scheduled pass: tag every store item with its retention state from
+// retentionClass + ingestedAt (+ legal-hold override), rolling/purging as the
+// policy dictates. Returns how many items changed. Synchronous + in-memory;
+// persists only when something actually changed.
+function runRetentionSweep(now = Date.now()) {
+  const legalHold = loadLegalHoldIds();
+  let changed = 0;
+  for (const item of (proposedChanges.items || [])) {
+    const prev = item.retentionState;
+    const state = computeRetentionState(item, now, legalHold);
+    item.retentionState = state;
+    item.retentionReviewedAt = new Date(now).toISOString();
+    if (state === "excerpt" && prev !== "excerpt") {
+      // Roll full body to a 300-word excerpt; keep the short preview intact.
+      if (item.body) item.body = rollToExcerpt(item.body, retention.EXCERPT_MAX_WORDS);
+      if (item.preview && item.preview.length > retention.EXCERPT_MAX_WORDS * 8) {
+        item.preview = rollToExcerpt(item.preview, retention.EXCERPT_MAX_WORDS);
+      }
+      changed++;
+    } else if (state === "purged" && item.status === "pending") {
+      // Expire (don't hard-delete) so it leaves the review queue but stays
+      // recoverable from the JSON file.
+      item.status = "expired";
+      changed++;
+    }
+  }
+  if (changed) saveProposed();
+  return { changed, reviewedAt: new Date(now).toISOString() };
+}
+
 // ---- Text helpers: English filter + keyword/anchor overlap matching ----
 const STOPWORDS = new Set(
   "the a an and or of to in for on with by from as at is are was were be been being this that these those it its their his her our your we you they he she new latest update via per into about within across after before between during over under".split(" ")
@@ -3178,7 +3293,10 @@ const SOURCE_SCAN_TICK_MS = config.SOURCE_SCAN_TICK_MS;
 // is required by a test harness. `require.main === module` is true only when the
 // file is executed directly (e.g. `node server.js`).
 if (require.main === module) {
-  setInterval(() => { runSourceScan({ force: false }).catch(() => {}); }, SOURCE_SCAN_TICK_MS);
+  setInterval(() => {
+    runSourceScan({ force: false }).catch(() => {});
+    try { runRetentionSweep(); } catch (_) { /* non-fatal */ }
+  }, SOURCE_SCAN_TICK_MS);
 }
 
 // Boot scan, guarded. Render's free tier spins the container down when idle, so
@@ -3195,6 +3313,7 @@ if (require.main === module) {
     return;
   }
   runSourceScan({ force: false }).catch(() => {});
+  try { runRetentionSweep(); } catch (_) { /* non-fatal */ }
   }, 30000);
 }
 

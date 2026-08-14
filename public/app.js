@@ -3486,10 +3486,17 @@ async function openReaderSplit(card, url) {
   // "Reuters" are not domains and would make source resolution fail; the
   // server resolves by article title in that case.
   const domain = rawDomain.includes(".") ? rawDomain : "";
-  const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}`;
+  const cardId = card.getAttribute("data-id") || "";
+  const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(cardId)}`;
+
+  split.dataset.readerUrl = url;
+  split.dataset.cardId = cardId;
+  const badge = document.getElementById("readerStoreBadge");
+  if (badge) badge.style.display = "none";
 
   await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, manualEl);
   bindReaderManualEntry();
+  bindReaderRefresh();
 }
 
 // Fetch a reader URL and render the result. On a Google News link that the
@@ -3512,6 +3519,26 @@ async function loadReaderUrl(targetUrl, articleEl, statusEl, manualEl) {
       return;
     }
     const data = await res.json();
+    // Phase 3 — store viewer: the server returned stored content without a live
+    // fetch. Render it directly and surface the retention state.
+    if (data.fromStore) {
+      showReaderStoreBadge(data.retentionState);
+      articleEl.dataset.partial = "";
+      articleEl.textContent = data.text && data.text.trim()
+        ? data.text
+        : "(No readable text could be extracted from this page.)";
+      if (statusEl) {
+        if (data.retentionState === "excerpt") {
+          statusEl.textContent = "Stored excerpt — full text rolled to a 300-word excerpt per the retention policy. Use “Refresh from source” for the live article.";
+          statusEl.style.display = "block";
+          statusEl.classList.remove("reader-status-error");
+        } else {
+          statusEl.style.display = "none";
+          statusEl.classList.remove("reader-status-error");
+        }
+      }
+      return;
+    }
     // Server exhausted every resolver AND the Google News viewer fallback: offer
     // the user a way to supply the URL / full text themselves.
     if (data.unresolved) {
@@ -3546,6 +3573,40 @@ function showReaderManualEntry(manualEl, statusEl) {
   manualEl.style.display = "block";
 }
 
+// Toggle the "stored copy" badge in the article pane header. Only non-full
+// retention states (excerpt) get a visible label; "full" is the default.
+function showReaderStoreBadge(state) {
+  const badge = document.getElementById("readerStoreBadge");
+  if (!badge) return;
+  if (!state || state === "full") { badge.style.display = "none"; return; }
+  badge.style.display = "inline-block";
+  badge.textContent = state === "excerpt" ? "Stored · excerpt" : "Stored";
+}
+
+// Re-fetch the live source for the current item (bypasses the store cache).
+async function refreshReader() {
+  const split = document.getElementById("readerSplitView");
+  const articleEl = document.getElementById("readerArticle");
+  const statusEl = document.getElementById("readerStatus");
+  if (!split) return;
+  const url = split.dataset.readerUrl;
+  const id = split.dataset.cardId;
+  if (!url) return;
+  if (statusEl) { statusEl.textContent = "Refreshing from source…"; statusEl.style.display = "block"; statusEl.classList.remove("reader-status-error"); }
+  const badge = document.getElementById("readerStoreBadge");
+  if (badge) badge.style.display = "none";
+  const qs = `url=${encodeURIComponent(url)}&id=${encodeURIComponent(id || "")}&refresh=1`;
+  await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, document.getElementById("readerManualEntry"));
+}
+
+// Bind the refresh button once.
+function bindReaderRefresh() {
+  const btn = document.getElementById("readerRefresh");
+  if (!btn || btn.dataset.bound === "1") return;
+  btn.dataset.bound = "1";
+  btn.addEventListener("click", refreshReader);
+}
+
 // Wire the manual-entry controls once. Pasting a real publisher URL re-runs the
 // reader fetch; pasting full text drops it straight into the article pane.
 function bindReaderManualEntry() {
@@ -3576,6 +3637,17 @@ function bindReaderManualEntry() {
     articleEl.dataset.partial = "";
     manualEl.style.display = "none";
     if (statusEl) statusEl.style.display = "none";
+    // Phase 3 — write the pasted text back into the shared store so it persists
+    // across reloads (keyed by the current proposal id).
+    const split = document.getElementById("readerSplitView");
+    const id = split && split.dataset.cardId;
+    if (id) {
+      fetch(`${API_BASE}/reader/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, text: t }),
+      }).catch(() => {});
+    }
   });
 }
 
