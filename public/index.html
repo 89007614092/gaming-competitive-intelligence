@@ -686,12 +686,13 @@
           <div class="reader-split-head">
             <button class="btn btn-sm" id="readerBack" type="button">&larr; Back</button>
             <div class="reader-split-title">Read the article &amp; write a summary</div>
+            <button class="btn btn-sm" id="readerRefresh" type="button" title="Re-fetch the live source">Refresh</button>
             <a class="proposal-source-link" id="readerOriginalLink" href="#" target="_blank" rel="noopener">Open original &#x2197;</a>
           </div>
           <div class="reader-split-status" id="readerStatus" style="display:none;"></div>
           <div class="reader-split-panes">
             <section class="reader-article-pane">
-              <h4 class="reader-pane-label">Article (read-only)</h4>
+              <h4 class="reader-pane-label">Article (read-only) <span id="readerStoreBadge" class="reader-store-badge" style="display:none;"></span></h4>
               <div class="reader-article" id="readerArticle"></div>
               <div class="reader-manual-entry" id="readerManualEntry" style="display:none;">
                 <p class="reader-manual-note">We couldn't automatically retrieve this article &mdash; Google News links can't be read by the server. You can still review it manually:</p>

@@ -4722,6 +4722,13 @@ body {
 .reader-summary { flex: 1; resize: none; font-size: 13.5px; line-height: 1.55; }
 .reader-actions { display: flex; gap: 8px; margin-top: 10px; }
 .reader-split-status.reader-status-error { background: var(--danger-light, #fee2e2); color: var(--danger); }
+.reader-store-badge {
+  display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  background: var(--surface-alt, #f1f5f9); color: var(--text-muted); vertical-align: middle;
+  border: 1px solid var(--border);
+}
+#readerRefresh { margin-left: auto; }
 .reader-manual-entry {
   margin-top: 12px; padding: 14px; border: 1px dashed var(--border);
   border-radius: var(--radius); background: var(--surface-alt, #f8fafc); font-size: 13px; line-height: 1.5;
