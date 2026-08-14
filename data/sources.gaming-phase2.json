@@ -1,5 +1,5 @@
 {
-  "_status": "PARKED — Phase 2 feed-pipeline seed (gaming governance allowlist). NOT consumed by the current scan, which uses the AI-regulation allowlist in data/sources.json. Kept for the BI-grade pipeline (Phase 2), where it will replace the Google-News-scoped crawler.",
+  "_status": "PARKED — gaming governance allowlist seed. NOT consumed by the current scan. The live scan uses data/sources.json (AI-regulation). Per the product guardrail, any future Phase 2/3 must ADD gaming+AI as a second lane and MERGE it with the AI-regulation sources — never replace them. Kept for the future BI-grade pipeline.",
   "sources": [
     {
       "id": "gamesindustry",

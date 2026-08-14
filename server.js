@@ -2639,6 +2639,9 @@ function classifyItem(source, item, index) {
     publishedLabel: item.publishedAt ? formatLabel(item.publishedAt) : "Recent",
     category: source.category,
     createdAt: new Date().toISOString(),
+    ingestedAt: new Date().toISOString(),
+    // Phase 3 retention groundwork: regulatory (3y) vs use-case (living dataset).
+    retentionClass: source.category === "use-case" ? "use-case" : "regulatory",
     status: "pending",
   };
 
