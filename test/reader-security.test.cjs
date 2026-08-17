@@ -130,6 +130,26 @@ test("fetchReaderContent returns a partial viewer preview when the publisher is 
   } finally { restore(); }
 });
 
+test("fetchReaderContent degrades to unresolved (manual entry) for an unextractable real-publisher URL", async () => {
+  // Jina returns too little text to be usable AND the legacy direct fetch also
+  // fails. The reader must surface the {unresolved} marker (so the client shows
+  // the manual-entry panel) rather than throwing a dead-end 502 "Could not
+  // retrieve the source" with no escape hatch.
+  const restore = mockFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("r.jina.ai")) {
+      return { status: 200, ok: true, headers: { get: () => "text/plain" }, text: async () => "too short" };
+    }
+    throw new Error("network down"); // legacy direct fetch fails
+  });
+  try {
+    const result = await srv.fetchReaderContent("https://www.reuters.com/technology/some-article");
+    assert.strictEqual(result && result.unresolved, true,
+      "failed real-URL extraction must return the unresolved marker, not throw a 502");
+    assert.strictEqual(result.reason, "extraction-failed");
+  } finally { restore(); }
+});
+
 // ---- followGoogleRedirect (primary Google News resolver) -------------------
 // Public IP-literal "publishers" are used so the publisher-host assertPublicHost
 // check passes deterministically without depending on sandbox DNS resolution.

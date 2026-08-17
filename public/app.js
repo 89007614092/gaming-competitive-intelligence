@@ -3623,7 +3623,9 @@ function bindReaderManualEntry() {
     const u = (urlInput.value || "").trim();
     if (!u) { urlInput.focus(); return; }
     if (statusEl) { statusEl.textContent = "Loading from URL…"; statusEl.style.display = "block"; statusEl.classList.remove("reader-status-error"); }
-    await loadReaderUrl(`${API_BASE}/reader?url=${encodeURIComponent(u)}`, articleEl, statusEl, manualEl);
+    const split = document.getElementById("readerSplitView");
+    const cardId = (split && split.dataset.cardId) || "";
+    await loadReaderUrl(`${API_BASE}/reader?url=${encodeURIComponent(u)}&id=${encodeURIComponent(cardId)}`, articleEl, statusEl, manualEl);
     // Collapse the manual panel once real content arrives.
     if (articleEl.textContent && articleEl.textContent.trim() && !articleEl.dataset.partial) {
       manualEl.style.display = "none";
