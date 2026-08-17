@@ -469,6 +469,7 @@ const extractor = createExtractor({
   READER_MAX_BYTES,
   READER_TIMEOUT_MS,
   readerRateLimiter,
+  JINA_API_KEY: config.JINA_API_KEY,
 });
 
 // Option A fallback for Google News links. A server-side fetch can never follow
@@ -723,6 +724,15 @@ app.get("/api/reader", async (req, res) => {
     if (id && !refresh) {
       const prop = (proposedChanges.items || []).find(i => i.id === id);
       if (prop && (prop.body || prop.preview)) {
+        // Lazy summarisation: items fetched before summaries were wired (or whose
+        // summary was skipped by a rate-limit) get an AI summary on open so the
+        // reader pane is never left as raw text. Best-effort; never blocks render.
+        if (prop.body && !prop.styledSummary) {
+          try {
+            await summariseStoredItem(prop, { force: true });
+            saveProposed();
+          } catch (_) { /* non-fatal */ }
+        }
         return res.json({
           fromStore: true,
           title: prop.title || "",
