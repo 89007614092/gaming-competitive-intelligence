@@ -194,6 +194,7 @@ async function jinaExtract(url, timeoutMs = 20000) {
 // ===== Website and Video Transcript Extraction — free, no API key needed =====
 
 const { createExtractor } = require("./lib/extractor");
+const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
 const { computeRetentionState, rollToExcerpt } = retention;
 const SCRAPE_USER_AGENT =
@@ -470,6 +471,11 @@ const extractor = createExtractor({
   READER_TIMEOUT_MS,
   readerRateLimiter,
   JINA_API_KEY: config.JINA_API_KEY,
+  // Phase 4 extractor seam: default to Jina (free, already integrated). Set
+  // EXTRACTOR_PROVIDER=firecrawl + FIRECRAWL_API_KEY to swap providers without
+  // touching call sites — see lib/extractor.js for the adapter contract.
+  provider: process.env.EXTRACTOR_PROVIDER || "jina",
+  FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY || "",
 });
 
 // Option A fallback for Google News links. A server-side fetch can never follow
@@ -602,12 +608,10 @@ async function fetchReaderContent(url, opts = {}) {
   try {
     const extracted = await extractor.extractArticle(target, { licenseClass, sourceId });
     if (extracted && extracted.restricted) {
-      return {
-        restricted: true,
-        attribution: extracted.attribution,
-        url: target,
-        message: "Source is restricted; only metadata is available",
-      };
+      // Let the single licence-gate boundary (applyLicenseGate, in /api/reader)
+      // shape the response — it stamps gated/gateReason and the standardised
+      // license class so the client's restricted notice + badge fire reliably.
+      return extracted;
     }
     if (extracted && extracted.text && extracted.text.trim().length >= 120) {
       return normalizeExtracted(extracted, target);
@@ -733,7 +737,7 @@ app.get("/api/reader", async (req, res) => {
             saveProposed();
           } catch (_) { /* non-fatal */ }
         }
-        return res.json({
+        const storeObj = {
           fromStore: true,
           title: prop.title || "",
           text: prop.body || prop.preview || "",
@@ -743,17 +747,32 @@ app.get("/api/reader", async (req, res) => {
           snippet: prop.snippet || "",
           retentionState: prop.retentionState || "full",
           partial: false,
-        });
+          licenseClass: prop.licenseClass || "open",
+          sourceDomain: prop.sourceDomain || "",
+          ingestedAt: prop.ingestedAt || null,
+          attribution: prop.attribution || undefined,
+        };
+        return res.json(applyLicenseGate(storeObj, { internal: true }));
       }
     }
 
     if (!url || typeof url !== "string") {
       return res.status(400).json({ error: "A url query parameter is required to fetch from source" });
     }
+    // Resolve the governance license class for this fetch. Prefer an explicit
+    // request override; otherwise derive it from the linked proposal so the
+    // attribution badge reflects the source's TRUE class (open / news-fair-use
+    // / …) instead of the extractor's news-fair-use default. This keeps the
+    // licence gate honest end-to-end (the store path already does this).
+    let resolvedLicenseClass = typeof req.query.licenseClass === "string" ? req.query.licenseClass : undefined;
+    if (!resolvedLicenseClass && id) {
+      const sp = (proposedChanges.items || []).find(i => i.id === id);
+      if (sp && sp.licenseClass) resolvedLicenseClass = sp.licenseClass;
+    }
     const result = await fetchReaderContent(url, {
       title: typeof req.query.title === "string" ? req.query.title : "",
       domain: typeof req.query.domain === "string" ? req.query.domain : "",
-      licenseClass: typeof req.query.licenseClass === "string" ? req.query.licenseClass : undefined,
+      licenseClass: resolvedLicenseClass,
       sourceId: typeof req.query.sourceId === "string" ? req.query.sourceId : undefined,
     });
     // Persist the resolved body back into the shared store so the next open is
@@ -763,7 +782,13 @@ app.get("/api/reader", async (req, res) => {
     }
     // Surface any AI summary we just generated so the reader pane can show it
     // immediately (the manual paste-URL path stores the body via writeStoreBody).
-    const out = { ...result };
+    const out = applyLicenseGate({
+      ...result,
+      licenseClass: result.licenseClass
+        || resolvedLicenseClass
+        || (result.attribution && result.attribution.licenseClass)
+        || "open",
+    }, { internal: true });
     if (id) {
       const sp = (proposedChanges.items || []).find(i => i.id === id);
       if (sp && sp.styledSummary) out.styledSummary = sp.styledSummary;
@@ -2052,6 +2077,12 @@ async function writeStoreBody(id, text) {
   if (!id || !text) return;
   const prop = (proposedChanges.items || []).find(i => i.id === id);
   if (!prop) return;
+  // Governance: never persist full text for restricted or api-restricted
+  // sources. `restricted` = metadata + link + snippet only (no paywall
+  // circumvention); `api-restricted` = honour the source API TTL (don't hold
+  // full text beyond it). Open / news-fair-use may be stored.
+  const cls = prop.licenseClass || "open";
+  if (cls === "restricted" || cls === "api-restricted") return;
   prop.body = text;
   // Keep `preview` (the short review-panel snippet) as-is; only the canonical
   // reader body is updated here.
@@ -2837,6 +2868,7 @@ function classifyItem(source, item, index) {
     publishedAt: item.publishedAt,
     publishedLabel: item.publishedAt ? formatLabel(item.publishedAt) : "Recent",
     category: source.category,
+    licenseClass: source.licenseClass || "open",
     createdAt: new Date().toISOString(),
     ingestedAt: new Date().toISOString(),
     // Phase 3 retention groundwork: regulatory (3y) vs use-case (living dataset).
