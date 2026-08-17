@@ -3,7 +3,6 @@
     "content-labelling": {
       "id": "content-labelling",
       "title": "Content Labelling & Transparency",
-      "icon": "🏷️",
       "description": "Under Article 50 of the EU AI Act, commercial providers and deployers of generative media must make synthetic content explicitly identifiable. Failure risks fines of up to €15 million or 3% of global annual turnover. The compliance framework requires visible labelling, invisible watermarking, and cryptographic metadata.",
       "severity": "critical",
       "regulations": ["EU AI Act Art. 50", "EU AI Transparency Code of Practice", "DMA", "UK ICO Transparency Principle"],
@@ -70,7 +69,6 @@
     "ai-npcs": {
       "id": "ai-npcs",
       "title": "AI NPCs & Synthetic Characters",
-      "icon": "🤖",
       "description": "AI-powered NPCs using LLMs for dynamic dialogue, long-term memory, and emergent behaviour create risks around content moderation, narrative consistency, consumer backlash, and legal liability. The UKJT identifies that AI chatbot statements may be treated as statements of the deploying business under English law.",
       "severity": "high",
       "regulations": ["EU AI Act", "UKJT AI Liability Statement", "UK Consumer Protection Act 1987", "EU Product Liability Directive 2024/2853"],
@@ -121,7 +119,6 @@
     "copyright-ip": {
       "id": "copyright-ip",
       "title": "Copyright & Training Data",
-      "icon": "©️",
       "description": "The EU AI Act requires GPAI providers to comply with copyright-related obligations and publish training data summaries. Many publishers are increasingly focused on whether their content is used to train AI systems. Studios training on unlicensed content face IP leakage, infringement claims, and marketplace governance issues.",
       "severity": "critical",
       "regulations": ["EU AI Act GPAI Obligations", "EU Copyright Directive", "UK Copyright Law", "C2PA Standard"],
@@ -171,7 +168,6 @@
     "high-risk-classification": {
       "id": "high-risk-classification",
       "title": "High-Risk AI Classification",
-      "icon": "⚠️",
       "description": "The EU AI Act creates a formal category of High-Risk AI Systems covering employment, recruitment, education, creditworthiness, critical infrastructure, law enforcement, and biometrics. These systems require risk-management, data governance, human oversight, accuracy testing, and record retention.",
       "severity": "critical",
       "regulations": ["EU AI Act (Regulation 2024/1689)", "UK Sector-Led Regulation", "EU Product Liability Directive 2024/2853"],
@@ -221,7 +217,6 @@
     "liability-defects": {
       "id": "liability-defects",
       "title": "AI Liability & Product Defects",
-      "icon": "⚖️",
       "description": "Under the new EU Product Liability Directive (2024/2853), software including AI explicitly qualifies as a product, irrespective of supply mode. Manufacturers that design a product developing unexpected behaviours remain liable. AI systems' ability to self-learn is relevant to defect assessment. UK common law negligence is being adapted to AI through UKJT guidance.",
       "severity": "critical",
       "regulations": ["EU Product Liability Directive 2024/2853", "UKJT AI Liability Statement (July 2026)", "UK Consumer Protection Act 1987"],
@@ -271,7 +266,6 @@
     "consumer-backlash": {
       "id": "consumer-backlash",
       "title": "Consumer Backlash & Reputation",
-      "icon": "📢",
       "description": "Consumer acceptance is becoming as important as legal compliance. GDC 2026 survey found 52% of 2,300 industry professionals view generative AI negatively. Large studios face materially greater reputational risk than independent developers. 'Gameslop' — perceived AI-assembled content with limited creative oversight — risks reducing consumer trust, damaging discoverability, and lowering industry quality standards.",
       "severity": "high",
       "regulations": ["No specific regulation — reputational and commercial risk"],
@@ -321,7 +315,6 @@
     "environmental": {
       "id": "environmental",
       "title": "Environmental & Sustainability",
-      "icon": "🌍",
       "description": "Consumer concerns increasingly extend to data-centre energy consumption, water usage, GPU demand, and carbon emissions from AI model training and deployment. Consumers expect AI efficiency gains to be reinvested into quality rather than volume.",
       "severity": "medium",
       "regulations": ["EU CSRD (Corporate Sustainability Reporting)", "UK ESG requirements", "Emerging AI-specific environmental standards"],
@@ -358,7 +351,6 @@
     "cross-border": {
       "id": "cross-border",
       "title": "Cross-Border Compliance",
-      "icon": "🌐",
       "description": "The EU and UK are increasingly two distinct AI regulatory jurisdictions. Companies face dual-track compliance: EU's rules-based AI Act with binding obligations vs. UK's principles-based, sector-led approach. For Chinese technology companies, European market access depends on product-level compliance design.",
       "severity": "critical",
       "regulations": ["EU AI Act", "UK ICO Framework", "UK GDPR", "China AI Governance", "DMA cross-border provisions"],
@@ -422,7 +414,6 @@
     "timeline-deadlines": {
       "id": "timeline-deadlines",
       "title": "Key Deadlines & Upcoming Regulation",
-      "icon": "📅",
       "description": "Critical compliance deadlines through 2030 that affect AI products, services, and go-to-market strategies. Non-compliance with EU AI Act provisions triggers fines up to €35 million or 7% of global annual turnover (prohibited practices), or €15 million / 3% (transparency obligations).",
       "severity": "critical",
       "regulations": ["EU AI Act (2024/1689)", "EU PLD 2024/2853", "UK ICO Roadmap", "DMA"],
@@ -484,7 +475,6 @@
     "prohibited-practices": {
       "id": "prohibited-practices",
       "title": "Prohibited AI Practices & Penalties",
-      "icon": "🚫",
       "description": "The EU AI Act prohibits certain AI practices with penalties up to €35 million or 7% of global annual turnover. Other violations (transparency, GPAI obligations) carry fines up to €15 million or 3%. The UK currently has no equivalent statutory prohibition list, but harmful uses may be addressed through existing law.",
       "severity": "critical",
       "regulations": ["EU AI Act Prohibited Practices", "UK Consumer Law", "UK Equality Law", "UK GDPR"],
@@ -520,7 +510,6 @@
     "current-game-ai-risks": {
       "id": "current-game-ai-risks",
       "title": "Current Game AI Deployment Risks",
-      "icon": "🎮",
       "description": "Evidence from shipped and community-built game AI shows that risk differs substantially by implementation. Conventional authored AI mainly raises quality, fairness, accessibility, and product-liability questions; generative dialogue, voice, player profiling, and generated assets add content, privacy, copyright, transparency, and moderation exposure.",
       "severity": "high",
       "regulations": ["EU AI Act Article 50", "UK GDPR", "EU GDPR", "EU Product Liability Directive 2024/2853", "Copyright and Performers' Rights"],

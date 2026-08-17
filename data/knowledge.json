@@ -7,7 +7,6 @@
   "categories": {
     "regulations": {
       "label": "Regulatory Frameworks",
-      "icon": "⚖️",
       "subsections": [
         {
           "title": "EU AI Act — Transparency & Watermarking (Article 50)",
@@ -76,7 +75,6 @@
     },
     "competitors": {
       "label": "Competitor AI Ecosystem",
-      "icon": "🏢",
       "subsections": [
         {
           "title": "Black Forest Labs (Freiburg, Germany)",
@@ -193,7 +191,6 @@
     },
     "technology": {
       "label": "AI & Gaming Technology",
-      "icon": "🔬",
       "subsections": [
         {
           "title": "Runtime Generative AI — The Next Frontier",
@@ -254,7 +251,6 @@
     },
     "case-studies": {
       "label": "Case Studies",
-      "icon": "📋",
       "subsections": [
         {
           "title": "Dead Meat — Runtime AI Interrogation (Meaning Machine, London)",
@@ -293,7 +289,6 @@
     },
     "tencent-products": {
       "label": "Tencent Products & Strategy",
-      "icon": "🎮",
       "subsections": [
         {
           "title": "Tencent AI Foundation Models — Hunyuan & TokenHub",
@@ -343,7 +338,6 @@
     },
     "strategic-insights": {
       "label": "Strategic Insights",
-      "icon": "💡",
       "subsections": [
         {
           "title": "AAA Industry Disruption — The End of Fixed Games",
@@ -400,7 +394,6 @@
     },
     "current-game-ai": {
       "label": "Current Game AI Uses",
-      "icon": "🎮",
       "subsections": [
         {
           "title": "Decision Systems — GOAP, Behavior Trees, Utility AI and Perception",
@@ -452,7 +445,6 @@
     },
     "regulatory-timeline": {
       "label": "Regulatory Timeline",
-      "icon": "📅",
       "subsections": [
         {
           "title": "EU AI Act — 2 August 2026",

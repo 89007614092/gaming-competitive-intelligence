@@ -1271,8 +1271,8 @@ function newsCardHtml(a, i, saved) {
           <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
         </div>
         <div class="news-card-actions">
-          <button class="news-folder-btn${inFolders ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="Save to folder" title="Save to folder"><span class="news-folder-caret">&#9662;</span></button>
-          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}"></button>
+          <button class="news-folder-btn${inFolders ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="Save to folder" title="Save to folder">&#128193;<span class="news-folder-caret">&#9662;</span></button>
+          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
         </div>
       </div>
       <div class="news-tag-row">
@@ -1295,8 +1295,8 @@ function renderNewsCards(articles, filter, savedView = false) {
   if (!filtered.length) {
     if (savedView) {
       feed.innerHTML = activeFolderFilter
-        ? '<div class="empty-state"><p>This folder is empty.</p><p>Open an article’s “Save to folder” menu to add it here.</p></div>'
-        : '<div class="empty-state"><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates — or use “Save to folder” — to keep it here for later.</p></div>';
+        ? '<div class="empty-state"><div class="empty-icon">&#128193;</div><p>This folder is empty.</p><p>Open an article’s “Save to folder” menu to add it here.</p></div>'
+        : '<div class="empty-state"><div class="empty-icon">&#9734;</div><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates — or use “Save to folder” — to keep it here for later.</p></div>';
     } else {
       feed.innerHTML = '<div class="empty-state"><p>No articles match this filter</p></div>';
     }

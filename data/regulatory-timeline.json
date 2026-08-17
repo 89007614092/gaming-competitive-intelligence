@@ -82,7 +82,7 @@
     {
       "date": "2026-08-02",
       "label": "2 Aug 2026",
-      "title": "EU: Major AI Act Obligations Become Operational ⚠️",
+      "title": "EU: Major AI Act Obligations Become Operational",
       "jurisdiction": "EU",
       "category": "Critical Deadline",
       "description": "The most significant operational deadline. Most AI Act obligations become applicable: transparency duties, provider obligations, deployer obligations, and enforcement mechanisms. Article 50 transparency requirements operational for newly deployed systems. Chatbots must identify as AI, synthetic content must carry machine-readable labelling, deepfake disclosure processes must be operational. Directly impacts products such as MagicDawn, GVoice, AI Voice Studio.",
@@ -137,7 +137,7 @@
     {
       "date": "2027-12-02",
       "label": "2 Dec 2027",
-      "title": "EU: Annex III High-Risk AI Systems Become Applicable ⚠️",
+      "title": "EU: Annex III High-Risk AI Systems Become Applicable",
       "jurisdiction": "EU",
       "category": "Critical Deadline",
       "description": "Requirements for many Annex III high-risk AI systems become applicable. Covers standalone high-risk systems in employment (recruitment), education (assessment), public services, financial services (credit scoring), and certain law-enforcement applications. Note: this does NOT postpone prohibited-practice rules, GPAI obligations, transparency requirements, or AI-literacy requirements.",
@@ -148,7 +148,7 @@
     {
       "date": "2028-08-02",
       "label": "2 Aug 2028",
-      "title": "EU: Annex I Product-Embedded High-Risk AI — Full Application ⚠️",
+      "title": "EU: Annex I Product-Embedded High-Risk AI — Full Application",
       "jurisdiction": "EU",
       "category": "Critical Deadline",
       "description": "High-risk AI embedded within regulated products covered by Annex I legislation becomes fully subject to AI Act requirements. Includes AI integrated into regulated machinery, transport systems, medical products, and industrial technologies. The EU compliance framework reaches near-full implementation.",
