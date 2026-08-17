@@ -4027,6 +4027,22 @@ body {
 .rm-high .rm-dot { background: #e65100; }
 .rm-medium .rm-dot { background: #f9a825; }
 
+/* Severity dots used in filter buttons, timeline + risk badges (emoji-free;
+   reuses the existing warning-sign palette so dots match the coloured severity tags) */
+.sev-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+.sev-dot.sev-critical { background: #c62828; }
+.sev-dot.sev-high { background: #e65100; }
+.sev-dot.sev-medium { background: #f9a825; }
+.sev-dot.sev-low { background: #2e7d32; }
+
 .rm-level-head h4 {
   margin: 0;
   font-size: 0.95rem;

@@ -17,7 +17,6 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <div class="logo">
-        <span class="logo-icon">&#x1F3AE;</span>
         <span class="logo-text">Insights Tool</span>
       </div>
       <nav class="nav" id="tabNav">
@@ -54,13 +53,13 @@
       </nav>
       <div class="sidebar-footer">
         <button class="suggested-updates-btn" id="suggestedUpdatesBtn" type="button" style="display:none;">
-          <span class="su-icon">&#x1F4E5;</span> Suggested updates <span class="su-count" id="suggestedUpdatesCount">0</span>
+          Suggested updates <span class="su-count" id="suggestedUpdatesCount">0</span>
         </button>
         <div class="api-status" id="apiStatus">
           <span class="status-dot"></span>
           <span class="status-label">Checking API...</span>
         </div>
-        <button class="settings-btn" id="settingsBtn">&#x2699; Settings</button>
+        <button class="settings-btn" id="settingsBtn">Settings</button>
       </div>
     </aside>
 
@@ -102,7 +101,7 @@
         <!-- Search within News + Search -->
         <div class="news-search-bar">
           <input type="text" id="searchInput" placeholder="Search articles, e.g., NetEase AI game engine partnership 2026" class="search-input" />
-          <button class="btn btn-primary" id="searchBtn"><span class="btn-icon">&#x1F50D;</span> Search</button>
+          <button class="btn btn-primary" id="searchBtn">Search</button>
           <select id="searchLimit" class="select-input">
             <option value="5">5 results</option>
             <option value="10" selected>10 results</option>
@@ -231,7 +230,7 @@
             class="search-input"
           />
           <button class="btn btn-primary" id="kbSearchBtn">
-            <span class="btn-icon">&#x1F50D;</span> Search
+            Search
           </button>
           <button class="btn btn-sm" id="kbClearBtn">Clear</button>
         </div>
@@ -241,8 +240,8 @@
 
         <!-- Timeline Toggle (shown only for timeline category) -->
         <div class="timeline-toggle-bar" id="timelineToggleBar" style="display:none;">
-          <button class="btn btn-sm timeline-view-btn active" data-timeline-view="list">&#x1F4CB; List View</button>
-          <button class="btn btn-sm timeline-view-btn" data-timeline-view="visual">&#x1F4C5; Timeline View</button>
+          <button class="btn btn-sm timeline-view-btn active" data-timeline-view="list">List View</button>
+          <button class="btn btn-sm timeline-view-btn" data-timeline-view="visual">Timeline View</button>
         </div>
 
         <!-- Content Area -->
@@ -312,7 +311,7 @@
         <div class="spider-controls">
           <div class="spider-legend" id="tencentProductsLegend"></div>
           <div class="spider-tips">
-            <span class="tip">&#x1F4A1; Hover nodes for product details &middot; Coloured by sector</span>
+            <span class="tip">Hover nodes for product details &middot; Coloured by sector</span>
           </div>
         </div>
 
@@ -328,7 +327,7 @@
           <h3 id="tencentProductsDetailName"></h3>
           <div id="tencentProductsDetailSectors"></div>
           <p id="tencentProductsDetailDesc" class="detail-desc"></p>
-          <a id="tencentProductsDetailLink" class="tp-detail-link" target="_blank" rel="noopener" style="display:none;">&#x1F517; Visit product page</a>
+          <a id="tencentProductsDetailLink" class="tp-detail-link" target="_blank" rel="noopener" style="display:none;">Visit product page</a>
         </div>
       </section>
 
@@ -346,10 +345,10 @@
 
         <div class="timeline-filters" id="timelineFilters">
           <button class="btn btn-sm timeline-filter-btn active" data-filter="all">All</button>
-          <button class="btn btn-sm timeline-filter-btn" data-filter="EU">&#x1F1EA&#x1F1FA EU</button>
-          <button class="btn btn-sm timeline-filter-btn" data-filter="UK">&#x1F1EC&#x1F1E7 UK</button>
-          <button class="btn btn-sm timeline-filter-btn" data-filter="Both">&#x1F310 Both</button>
-          <button class="btn btn-sm timeline-filter-btn" data-filter="Critical Deadline">&#x26A0; Critical</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="EU">EU</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="UK">UK</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="Both">Both</button>
+          <button class="btn btn-sm timeline-filter-btn" data-filter="Critical Deadline"><span class="sev-dot sev-critical"></span>Critical</button>
         </div>
 
         <div class="regulatory-timeline-content" id="regulatoryTimelineContentSection">
@@ -476,7 +475,6 @@
         <div class="risk-methodology">
           <details class="risk-methodology-details" open>
             <summary class="risk-methodology-summary">
-              <span class="rm-icon">📊</span>
               <span class="rm-title">How risk levels are evaluated</span>
               <span class="rm-hint">What Critical, High &amp; Medium mean — and how each rating is assigned</span>
             </summary>
@@ -558,9 +556,9 @@
         <!-- Filters -->
         <div class="risks-filters" id="risksFilters">
           <button class="btn btn-sm risks-filter-btn active" data-filter="all">All</button>
-          <button class="btn btn-sm risks-filter-btn" data-filter="critical">🔴 Critical</button>
-          <button class="btn btn-sm risks-filter-btn" data-filter="high">🟠 High</button>
-          <button class="btn btn-sm risks-filter-btn" data-filter="medium">🟡 Medium</button>
+          <button class="btn btn-sm risks-filter-btn" data-filter="critical"><span class="sev-dot sev-critical"></span>Critical</button>
+          <button class="btn btn-sm risks-filter-btn" data-filter="high"><span class="sev-dot sev-high"></span>High</button>
+          <button class="btn btn-sm risks-filter-btn" data-filter="medium"><span class="sev-dot sev-medium"></span>Medium</button>
         </div>
 
         <!-- Sub-tab Navigation -->
@@ -677,7 +675,6 @@
       </div>
       <div class="review-panel-body">
         <div class="review-empty" id="reviewPanelEmpty" style="display:none;">
-          <div class="empty-icon">&#x2705;</div>
           <p>Nothing to review. The app's content already matches the monitored official sources.</p>
         </div>
         <div class="review-list" id="reviewPanelList"></div>

@@ -850,7 +850,7 @@ async function loadNews(forceRefresh = false) {
     const data = await res.json();
 
     if (!data.success) {
-      feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>${data.error || "Failed to fetch news"}</p></div>`;
+      feed.innerHTML = `<div class="empty-state"><p>${data.error || "Failed to fetch news"}</p></div>`;
       return;
     }
 
@@ -858,7 +858,7 @@ async function loadNews(forceRefresh = false) {
 
     const updatedEl = document.getElementById("lastUpdated");
     if (data.cached) {
-      updatedEl.innerHTML = '<span style="color:#d97706;">&#x26A0; Cached results</span> &mdash; ' +
+      updatedEl.innerHTML = '<span style="color:#d97706;">Cached results</span> &mdash; ' +
         new Date(data.searchedAt).toLocaleString();
     } else {
       updatedEl.textContent = "Last updated: " + new Date(data.searchedAt).toLocaleTimeString();
@@ -872,7 +872,7 @@ async function loadNews(forceRefresh = false) {
     updateCompetitorMonitorCard();
 
     if (!data.articles?.length) {
-      feed.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F4ED;</div><p>No articles found. Try refreshing or check the Search tab for custom queries.</p></div>';
+      feed.innerHTML = '<div class="empty-state"><p>No articles found. Try refreshing or check the Search tab for custom queries.</p></div>';
       return;
     }
 
@@ -900,7 +900,7 @@ async function loadNews(forceRefresh = false) {
       renderNewsCards(allArticles, null);
     }
   } catch (err) {
-    feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${err.message}</p></div>`;
+    feed.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
   }
 }
 
@@ -1271,8 +1271,8 @@ function newsCardHtml(a, i, saved) {
           <a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(a.title || "Untitled")}</a>
         </div>
         <div class="news-card-actions">
-          <button class="news-folder-btn${inFolders ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="Save to folder" title="Save to folder">&#128193;<span class="news-folder-caret">&#9662;</span></button>
-          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
+          <button class="news-folder-btn${inFolders ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="Save to folder" title="Save to folder"><span class="news-folder-caret">&#9662;</span></button>
+          <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}"></button>
         </div>
       </div>
       <div class="news-tag-row">
@@ -1295,8 +1295,8 @@ function renderNewsCards(articles, filter, savedView = false) {
   if (!filtered.length) {
     if (savedView) {
       feed.innerHTML = activeFolderFilter
-        ? '<div class="empty-state"><div class="empty-icon">&#128193;</div><p>This folder is empty.</p><p>Open an article’s “Save to folder” menu to add it here.</p></div>'
-        : '<div class="empty-state"><div class="empty-icon">&#9734;</div><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates — or use “Save to folder” — to keep it here for later.</p></div>';
+        ? '<div class="empty-state"><p>This folder is empty.</p><p>Open an article’s “Save to folder” menu to add it here.</p></div>'
+        : '<div class="empty-state"><p>No saved articles yet.</p><p>Star an article in Recent News &amp; Updates — or use “Save to folder” — to keep it here for later.</p></div>';
     } else {
       feed.innerHTML = '<div class="empty-state"><p>No articles match this filter</p></div>';
     }
@@ -1397,7 +1397,7 @@ async function doSearch() {
 
     if (!data.success) {
       searchResultsData = [];
-      feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>${escapeHtml(data.error || "Search failed")}</p></div>`;
+      feed.innerHTML = `<div class="empty-state"><p>${escapeHtml(data.error || "Search failed")}</p></div>`;
       return;
     }
 
@@ -1412,7 +1412,7 @@ async function doSearch() {
     renderSearchResultsToFeed();
   } catch (err) {
     searchResultsData = [];
-    feed.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${escapeHtml(err.message)}</p></div>`;
+    feed.innerHTML = `<div class="empty-state"><p>Error: ${escapeHtml(err.message)}</p></div>`;
   }
 }
 
@@ -1433,7 +1433,7 @@ function renderSearchResultsToFeed() {
   const feed = document.getElementById("newsFeed");
   if (!feed) return;
   if (!searchResultsData.length) {
-    feed.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F50E;</div><p>No results found. Try a different query.</p></div>';
+    feed.innerHTML = '<div class="empty-state"><p>No results found. Try a different query.</p></div>';
     return;
   }
   feed.innerHTML = searchResultsData.map((a, i) => newsCardHtml(a, i, isNewsArticleSaved(a))).join("");
@@ -1492,7 +1492,7 @@ function renderKBCategories() {
   let html = '<button class="kb-cat-btn active" data-cat="">All</button>';
   for (const [key, cat] of Object.entries(kbData.categories)) {
     const active = kbActiveCategory === key ? " active" : "";
-    html += `<button class="kb-cat-btn${active}" data-cat="${key}">${cat.icon} ${cat.label}</button>`;
+    html += `<button class="kb-cat-btn${active}" data-cat="${key}">${cat.icon ? cat.icon + " " : ""}${cat.label}</button>`;
   }
   container.innerHTML = html;
 
@@ -1515,7 +1515,7 @@ function renderKBContent(searchQuery = null) {
   timelineToggleBar.style.display = showTimelineToggle ? "flex" : "none";
 
   if (!categories || !Object.keys(categories).length) {
-    content.innerHTML = '<div class="kb-no-results"><div class="empty-icon">&#x1F50E;</div><p>No matching content found</p></div>';
+    content.innerHTML = '<div class="kb-no-results"><p>No matching content found</p></div>';
     return;
   }
 
@@ -1532,7 +1532,7 @@ function renderKBContent(searchQuery = null) {
     html += `
     <div class="kb-section">
       <div class="kb-section-header" data-section="${key}">
-        <span style="font-size:1.2rem;">${cat.icon}</span>
+        ${cat.icon ? '<span style="font-size:1.2rem;">' + cat.icon + '</span>' : ""}
         <span class="kb-section-title">${cat.label}</span>
         <span class="kb-section-count">${subsections.length} entries</span>
         <span class="kb-section-arrow">&#x25BC;</span>
@@ -1763,7 +1763,7 @@ async function loadSpiderWeb() {
     renderSpiderLegend(spiderData);
     renderSpiderDiagram(spiderData, container);
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Error: ${err.message}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
   }
 }
 
@@ -2073,7 +2073,7 @@ function showSpiderDetail(nodeId) {
   // Add source link if available
   if (node.url) {
     const domain = new URL(node.url).hostname.replace(/^www\./, "");
-    html += `<a href="${node.url}" target="_blank" rel="noopener" class="spider-detail-link">&#x1F517; ${domain}</a>`;
+    html += `<a href="${node.url}" target="_blank" rel="noopener" class="spider-detail-link">${domain}</a>`;
   }
 
   sectorsEl.innerHTML = html;
@@ -2573,7 +2573,7 @@ async function loadCurrentUseCases() {
     renderCurrentUseCases();
   } catch (err) {
     if (grid) {
-      grid.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Failed to load: ${err.message}</p></div>`;
+      grid.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
     }
   }
 }
@@ -2729,7 +2729,7 @@ async function loadGamingTrends() {
       renderGamingTrends();
     }
   } catch (err) {
-    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">&#x26A0;</div><p>Failed to load: ${err.message}</p></div>`;
+    grid.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
   }
 }
 
@@ -2742,7 +2742,7 @@ function renderGamingTrends() {
   if (ecosystem && data.ecosystemContext) {
     const ctx = data.ecosystemContext;
     ecosystem.innerHTML = `
-      <h3>&#x1F30D; ${ctx.title}</h3>
+      <h3>${ctx.title}</h3>
       <div class="ecosystem-sections">
         ${ctx.sections.map(s => `
           <div class="ecosystem-card">
@@ -2845,7 +2845,7 @@ function renderGamingTrends() {
   grid.innerHTML = data.trends.map((trend, idx) => `
     <div class="trend-card" id="trend-${trend.id}">
       <div class="trend-card-header" data-trend="${trend.id}">
-        <span class="trend-card-icon">${trend.icon}</span>
+        ${trend.icon ? '<span class="trend-card-icon">' + trend.icon + '</span>' : ""}
         <div class="trend-card-info">
           <div class="trend-card-title">${trend.shortTitle}</div>
           <div class="trend-card-summary">${trend.summary}</div>
@@ -2872,7 +2872,7 @@ function renderGamingTrends() {
         </div>` : ""}
         <div class="trend-card-actions">
           <button class="trend-search-btn" data-trend="${trend.id}" data-keywords="${encodeURIComponent(trend.searchKeywords)}">
-            &#x1F50D; Search for latest
+            Search for latest
           </button>
         </div>
         <div class="trend-search-results" id="search-results-${trend.id}"></div>
@@ -2922,7 +2922,7 @@ function renderGamingTrends() {
 
         statusDiv.style.display = "none";
         btn.disabled = false;
-        btn.innerHTML = "&#x1F50D; Search for latest";
+        btn.innerHTML = "Search for latest";
 
         if (!json.success) {
           resultsDiv.innerHTML = `<p class="hint" style="margin-top:0.5rem;">Search failed: ${json.error}</p>`;
@@ -2947,7 +2947,7 @@ function renderGamingTrends() {
       } catch (err) {
         statusDiv.style.display = "none";
         btn.disabled = false;
-        btn.innerHTML = "&#x1F50D; Search for latest";
+        btn.innerHTML = "Search for latest";
         resultsDiv.innerHTML = `<p class="hint" style="margin-top:0.5rem;">Error: ${err.message}</p>`;
         resultsDiv.classList.add("visible");
       }
@@ -3020,7 +3020,7 @@ function renderRegulatoryTimeline(filter) {
         <div class="timeline-date">${e.label}</div>
         <h3>
           ${e.title}
-          <span class="timeline-badge ${badgeClass}">${e.category === "Critical Deadline" ? "⚠ Critical" : e.jurisdiction}</span>
+          <span class="timeline-badge ${badgeClass}">${e.category === "Critical Deadline" ? '<span class="sev-dot sev-critical"></span>Critical' : e.jurisdiction}</span>
           <span class="event-cat">${e.category}</span>
         </h3>
         <p>${e.description}</p>
@@ -3232,7 +3232,7 @@ function renderRisks(filter = "all") {
     catHtml += `
       <div class="risk-category-card" data-severity="${cat.severity}">
         <div class="risk-category-header">
-          <span class="risk-category-icon">${cat.icon}</span>
+          ${cat.icon ? '<span class="risk-category-icon">' + cat.icon + '</span>' : ""}
           <div class="risk-category-title-area">
             <h3 class="risk-category-title">${cat.title}</h3>
             <span class="risk-severity-tag ${sevClass}">${sevLabel}</span>
@@ -3265,7 +3265,7 @@ function renderRisks(filter = "all") {
                 ${(r.sources || []).map(src =>
                   `<a href="${src.url}" target="_blank" rel="noopener" class="risk-source-link">↗ ${src.label}</a>`
                 ).join("")}
-                ${r.kbCrossReference ? `<span class="risk-xref">📚 KB: ${r.kbCrossReference}</span>` : ""}
+                ${r.kbCrossReference ? `<span class="risk-xref">KB: ${r.kbCrossReference}</span>` : ""}
               </div>
             </div>`;
           }).join("")}
