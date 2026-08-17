@@ -3,6 +3,7 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
+const summariseEngine = require("./summarise-engine");
 const {
   DEFAULT_MODEL,
   OPEN_MODEL_NAME_SCAN,
@@ -15,7 +16,7 @@ const {
   isModelReady,
   isScanModelReady,
   isScanRateLimited,
-} = require("./summarise-engine");
+} = summariseEngine;
 const config = require("./config");
 
 const app = express();
@@ -748,9 +749,16 @@ app.get("/api/reader", async (req, res) => {
     // Persist the resolved body back into the shared store so the next open is
     // instant and no longer depends on the (often-failing) Google resolution.
     if (id && result && result.text && result.text.trim().length >= 120) {
-      try { writeStoreBody(id, result.text); } catch (_) { /* non-fatal */ }
+      try { await writeStoreBody(id, result.text); } catch (_) { /* non-fatal */ }
     }
-    res.json(result);
+    // Surface any AI summary we just generated so the reader pane can show it
+    // immediately (the manual paste-URL path stores the body via writeStoreBody).
+    const out = { ...result };
+    if (id) {
+      const sp = (proposedChanges.items || []).find(i => i.id === id);
+      if (sp && sp.styledSummary) out.styledSummary = sp.styledSummary;
+    }
+    res.json(out);
   } catch (err) {
     // Generic error mapping — never leak internals (hosts, stack traces).
     const msg = err && err.message ? err.message : "";
@@ -770,24 +778,15 @@ app.get("/api/reader", async (req, res) => {
 // gate used by the other mutating proposal endpoints (a no-op when
 // ADMIN_API_KEY is unset, preserving current behaviour). No outbound fetch —
 // we only store what the user provided.
-app.post("/api/reader/store", requireAdmin, (req, res) => {
+app.post("/api/reader/store", requireAdmin, async (req, res) => {
   try {
     const id = req.body && req.body.id;
     if (!id) return res.status(400).json({ error: "id is required" });
-    const prop = (proposedChanges.items || []).find(i => i.id === id);
-    if (!prop) return res.status(404).json({ error: "Proposal not found" });
     const text = req.body && typeof req.body.text === "string" ? req.body.text : "";
     const url = req.body && typeof req.body.url === "string" ? req.body.url : null;
-    if (text) {
-      prop.body = text;
-      if (!prop.preview) prop.preview = text.slice(0, 4000);
-    }
-    if (url) prop.url = url;
-    prop.manuallyStored = true;
-    prop.retentionState = computeRetentionState(prop, Date.now(), loadLegalHoldIds());
-    prop.retentionReviewedAt = new Date().toISOString();
-    saveProposed();
-    res.json({ success: true });
+    const result = await storeManualContent(id, text, url);
+    if (result.error === "not found") return res.status(404).json({ error: "Proposal not found" });
+    res.json({ success: true, styledSummary: result.styledSummary });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2039,7 +2038,7 @@ function loadLegalHoldIds() {
 
 // Persist extracted article text back into a store item (after a live fetch or
 // a manual paste), refreshing its retention state. No-op if the item is gone.
-function writeStoreBody(id, text) {
+async function writeStoreBody(id, text) {
   if (!id || !text) return;
   const prop = (proposedChanges.items || []).find(i => i.id === id);
   if (!prop) return;
@@ -2048,7 +2047,30 @@ function writeStoreBody(id, text) {
   // reader body is updated here.
   prop.retentionState = computeRetentionState(prop, Date.now(), loadLegalHoldIds());
   prop.retentionReviewedAt = new Date().toISOString();
+  // Best-effort: generate an AI summary so a freshly-fetched article isn't left
+  // as raw text (covers the manual paste-URL / Refresh reader paths).
+  await summariseStoredItem(prop, { force: true });
   saveProposed();
+}
+
+// Persist manually-supplied content (pasted article text, or a corrected URL)
+// back into the shared store AND generate an AI summary so the item isn't left
+// as raw text. Reuses the admin gate via the route. Returns { prop, styledSummary }
+// or { error } when the proposal id is unknown.
+async function storeManualContent(id, text, url) {
+  const prop = (proposedChanges.items || []).find(i => i.id === id);
+  if (!prop) return { error: "not found" };
+  if (text) {
+    prop.body = text;
+    if (!prop.preview) prop.preview = text.slice(0, 4000);
+  }
+  if (url) prop.url = url;
+  prop.manuallyStored = true;
+  prop.retentionState = computeRetentionState(prop, Date.now(), loadLegalHoldIds());
+  prop.retentionReviewedAt = new Date().toISOString();
+  await summariseStoredItem(prop, { force: true });
+  saveProposed();
+  return { prop, styledSummary: prop.styledSummary || null };
 }
 
 // Scheduled pass: tag every store item with its retention state from
@@ -2704,13 +2726,17 @@ function existingRecordContent(matched) {
 // pass the existing entry so the rewrite reads as a delta. Returns null on any
 // failure so the caller keeps the heuristic category and a pending/rate-limited
 // status — the raw excerpt is NEVER presented as the finished suggestion.
-async function enrichWithModel(prop, excerpt) {
+async function enrichWithModel(prop, excerpt, opts = {}) {
+  const allowReject = opts.allowReject !== false; // scan lane honours rejections; manual lane forces a summary
   const text = (excerpt || stripHtml(prop.snippet || prop.description || "")).trim();
   if (!text) return null;
   const existing = prop.matchedRecord
     ? `EXISTING APP ENTRY (title: ${prop.matchedRecord.title}):\n${existingRecordContent(prop.matchedRecord).slice(0, 700) || "(content unavailable)"}\n\n`
     : "";
-  const system = `You rewrite AI-regulation/policy news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-3 sentences; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}`;
+  // Manual submissions are analyst-curated, so we tell the model to always
+  // produce a styledSummary and never reject them as non-substantive.
+  const forceNote = allowReject ? "" : "\n\nThis item was manually submitted by an analyst for the AI & gaming competitive-intelligence knowledge base. It is always substantive — produce a styledSummary and do NOT set rejected:true.";
+  const system = `You rewrite AI-regulation/policy news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-3 sentences; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}${forceNote}`;
   const user = `Classify why this update is proposed and rewrite the source excerpt into ONE knowledge-base entry in house style.${existing}
 NEW SOURCE (${prop.publisher || "unknown"}): ${prop.title}
 ${text}
@@ -2722,12 +2748,18 @@ Return ONLY valid JSON:
   "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
   "rejected": true ONLY if this is a job posting, a hiring/careers page, an event invitation, or otherwise not a substantive AI-regulation/policy development. If rejected, set styledSummary to "" and updateCategory to null.
 }`;
-  const raw = await runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
+  const raw = await summariseEngine.runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
   if (raw && raw.rateLimited) return { rateLimited: true };
   if (!raw) return null;
   try {
     const obj = extractJson(raw);
-    if (obj && obj.rejected === true) return { rejected: true }; // Option B: model judged this non-substantive
+    if (obj && obj.rejected === true) {
+      // Forced (manual) path: still use a summary if the model provided one.
+      if (!allowReject && obj.styledSummary && obj.styledSummary.trim()) {
+        return { styledSummary: obj.styledSummary.slice(0, 600).trim() };
+      }
+      return { rejected: true }; // Option B: model judged this non-substantive
+    }
     if (!obj || typeof obj.styledSummary !== "string" || !obj.styledSummary.trim()) return null;
     return {
       updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
@@ -2737,6 +2769,29 @@ Return ONLY valid JSON:
   } catch {
     return null;
   }
+}
+
+// Generate an AI styledSummary for a stored (manual) item when one is missing.
+// Reuses the scan enrichment prompt so manual items match the app's house style
+// and AI-regulation framing. Forced (non-rejecting) because the analyst pasted
+// this deliberately — we never want to drop a manually-submitted article to raw
+// text. Never clobbers an existing good summary and respects the engine cooldown.
+async function summariseStoredItem(prop, { force = true } = {}) {
+  if (!prop || prop.styledSummary) return null;          // already have one; never clobber
+  if (isScanRateLimited()) return null;                  // engine cooldown — skip; text still stored
+  const text = (prop.body || prop.preview || stripHtml(prop.snippet || "")).trim();
+  if (text.length < 80) return null;                     // not enough to summarise
+  try {
+    const enriched = await enrichWithModel(prop, text, { allowReject: !force });
+    if (enriched && enriched.styledSummary) {
+      prop.styledSummary = enriched.styledSummary;
+      prop.enrichStatus = "done";
+      if (enriched.updateCategory) prop.updateCategory = enriched.updateCategory;
+      if (enriched.updateReason) prop.updateReason = enriched.updateReason;
+      return enriched.styledSummary;
+    }
+  } catch (_) { /* best effort */ }
+  return null;
 }
 
 // Drop obvious recruitment / non-substantive content before the scan model is
@@ -3733,6 +3788,9 @@ module.exports = {
   fetchReaderContent,
   readStreamWithCap,
   createRateLimiter,
+  summariseStoredItem,
+  storeManualContent,
+  writeStoreBody,
 
   // Resolver chains — exported so tests can assert the News-tab enrichment and
   // the background scanner use independent chains (no cross-contention).
