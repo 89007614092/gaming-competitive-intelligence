@@ -3493,6 +3493,10 @@ async function openReaderSplit(card, url) {
   split.dataset.cardId = cardId;
   const badge = document.getElementById("readerStoreBadge");
   if (badge) badge.style.display = "none";
+  const licBadge = document.getElementById("readerLicenseBadge");
+  if (licBadge) licBadge.style.display = "none";
+  const attr = document.getElementById("readerAttribution");
+  if (attr) { attr.style.display = "none"; attr.innerHTML = ""; }
 
   await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, manualEl);
   bindReaderManualEntry();
@@ -3523,6 +3527,16 @@ async function loadReaderUrl(targetUrl, articleEl, statusEl, manualEl) {
     // whenever the server provides one — covers the manual paste-URL path.
     const summaryBox = document.getElementById("readerSummary");
     if (summaryBox && data.styledSummary) summaryBox.value = data.styledSummary;
+    // Phase 4 — licence gate surfacing. If the gate withheld the full text
+    // (restricted class), show the honest "metadata only" notice and stop — we
+    // never expose full text for restricted sources. Otherwise render the
+    // source + license-class badge and mandatory credit line.
+    if (data.gated && data.gateReason === "restricted") {
+      renderReaderAttribution(data);
+      showReaderRestrictedNotice(articleEl, statusEl);
+      return;
+    }
+    renderReaderAttribution(data);
     // Phase 3 — store viewer: the server returned stored content without a live
     // fetch. Render it directly and surface the retention state.
     if (data.fromStore) {
@@ -3587,6 +3601,83 @@ function showReaderStoreBadge(state) {
   badge.textContent = state === "excerpt" ? "Stored · excerpt" : "Stored";
 }
 
+// Phase 4 — attribution UI. Mirror of LICENSE_LABELS in lib/licenseGate.js so
+// the reader badge matches the server's governance classes.
+const READER_LICENSE_LABELS = {
+  "open": "Open",
+  "news-fair-use": "News · fair use",
+  "api-restricted": "API-restricted",
+  "restricted": "Restricted",
+};
+
+function safeHttpUrl(u) {
+  if (typeof u !== "string") return "";
+  return /^https?:\/\//i.test(u) ? u : "";
+}
+
+// Render the source + license-class badge and the mandatory credit line from a
+// gated /api/reader response. Builds DOM nodes (never innerHTML of untrusted
+// data) so external source URLs cannot inject markup.
+function renderReaderAttribution(data) {
+  const badge = document.getElementById("readerLicenseBadge");
+  const credit = document.getElementById("readerAttribution");
+  if (!badge) return;
+  const cls = (data && (data.licenseClass || (data.attribution && data.attribution.licenseClass))) || "open";
+  badge.style.display = "inline-block";
+  badge.dataset.cls = cls;
+  badge.textContent = READER_LICENSE_LABELS[cls] || cls;
+  if (!credit) return;
+  const a = (data && data.attribution) || {};
+  credit.innerHTML = "";
+  if (!(a.title || a.source || a.url)) { credit.style.display = "none"; return; }
+  credit.style.display = "block";
+  const prefix = document.createElement("span");
+  prefix.className = "reader-credit-prefix";
+  prefix.textContent = "Source: ";
+  credit.appendChild(prefix);
+  const url = safeHttpUrl(a.url);
+  if (url) {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = a.source || a.title || a.url;
+    link.title = a.url;
+    credit.appendChild(link);
+  } else {
+    const txt = document.createElement("span");
+    txt.textContent = a.source || a.title || "";
+    credit.appendChild(txt);
+  }
+  if (a.retrievedAt) {
+    try {
+      const when = document.createElement("span");
+      when.className = "reader-credit-when";
+      when.textContent = " · retrieved " + new Date(a.retrievedAt).toLocaleString();
+      credit.appendChild(when);
+    } catch (_) { /* keep silently */ }
+  }
+  // Mandatory credit line for anything that is not fully open.
+  if (cls !== "open") {
+    const note = document.createElement("div");
+    note.className = "reader-credit-note";
+    note.textContent = "Quoted under " + (READER_LICENSE_LABELS[cls] || cls) +
+      ". The full text is governed by its source licence; a link and attribution are required.";
+    credit.appendChild(note);
+  }
+}
+
+// Restricted sources: the licence gate stripped the body. Show an honest
+// "metadata only" notice instead of a misleading "no text extracted" message.
+function showReaderRestrictedNotice(articleEl, statusEl) {
+  if (articleEl) { articleEl.textContent = ""; articleEl.dataset.partial = "1"; }
+  if (statusEl) {
+    statusEl.textContent = "Full text withheld — this source is licensed as Restricted (metadata, link and snippet only; no paywall circumvention).";
+    statusEl.style.display = "block";
+    statusEl.classList.remove("reader-status-error");
+  }
+}
+
 // Re-fetch the live source for the current item (bypasses the store cache).
 async function refreshReader() {
   const split = document.getElementById("readerSplitView");
@@ -3599,6 +3690,10 @@ async function refreshReader() {
   if (statusEl) { statusEl.textContent = "Refreshing from source…"; statusEl.style.display = "block"; statusEl.classList.remove("reader-status-error"); }
   const badge = document.getElementById("readerStoreBadge");
   if (badge) badge.style.display = "none";
+  const licBadge = document.getElementById("readerLicenseBadge");
+  if (licBadge) licBadge.style.display = "none";
+  const attr = document.getElementById("readerAttribution");
+  if (attr) { attr.style.display = "none"; attr.innerHTML = ""; }
   const qs = `url=${encodeURIComponent(url)}&id=${encodeURIComponent(id || "")}&refresh=1`;
   await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, document.getElementById("readerManualEntry"));
 }
@@ -3791,6 +3886,7 @@ async function renderReviewPanel() {
         <div class="proposal-head">
           <span class="proposal-action proposal-action-${p.detectedAction}">${actionLabel[p.detectedAction] || p.detectedAction}</span>
           <span class="proposal-source">${escapeHtml(p.publisher || p.source || "")}</span>
+          <span class="proposal-license-badge proposal-license-${p.licenseClass || "open"}" data-cls="${p.licenseClass || "open"}">${READER_LICENSE_LABELS[p.licenseClass] || p.licenseClass || "Open"}</span>
           <span class="proposal-date">${escapeHtml(p.publishedLabel || "")}</span>
         </div>
         <div class="proposal-title">${escapeHtml(p.title)}</div>
