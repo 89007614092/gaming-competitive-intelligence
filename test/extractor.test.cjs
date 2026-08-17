@@ -116,3 +116,48 @@ test("extractArticle does not negative-cache a Jina 403 (anonymous throttle)", a
     assert.strictEqual(calls, 2, "a 403 is NOT negative-cached, so a retry re-fetches Jina");
   } finally { restore(); }
 });
+
+test("extractArticle sends the Jina API key as a Bearer token when configured", async () => {
+  // The reader path must authenticate to Jina (config.JINA_API_KEY on Render)
+  // or popular domains stay throttled (anonymous 403) and retrieval fails.
+  const original = globalThis.fetch;
+  let sentAuth = null;
+  globalThis.fetch = async (u, opts) => {
+    sentAuth = opts && opts.headers && (opts.headers.Authorization || (opts.headers.get && opts.headers.get("Authorization"))) || null;
+    return jinaResp(LONG);
+  };
+  try {
+    const ex = createExtractor({
+      validateSourceUrl: (u) => u,
+      assertPublicHost: async () => {},
+      readStreamWithCap: async (res) => Buffer.from(await res.text()),
+      readerRateLimiter: () => true,
+      JINA_API_KEY: "test-key-123",
+    });
+    const r = await ex.extractArticle("https://reuters.com/article");
+    assert.ok(r && r.text, "should still extract when key is sent");
+    assert.strictEqual(sentAuth, "Bearer test-key-123", "Jina request must carry the Authorization header");
+  } finally { globalThis.fetch = original; }
+});
+
+test("extractArticle stays anonymous (no Authorization header) when no key is set", async () => {
+  // Without a key the request must NOT send an Authorization header — the
+  // previous bug was that the key was never forwarded, so this must remain false
+  // when the env var is absent.
+  const original = globalThis.fetch;
+  let sentAuth = "unset";
+  globalThis.fetch = async (u, opts) => {
+    sentAuth = opts && opts.headers && (opts.headers.Authorization || (opts.headers.get && opts.headers.get("Authorization"))) || null;
+    return jinaResp(LONG);
+  };
+  try {
+    const ex = createExtractor({
+      validateSourceUrl: (u) => u,
+      assertPublicHost: async () => {},
+      readStreamWithCap: async (res) => Buffer.from(await res.text()),
+      readerRateLimiter: () => true,
+    });
+    await ex.extractArticle("https://example.com/article");
+    assert.strictEqual(sentAuth, null, "no Authorization header when JINA_API_KEY is absent");
+  } finally { globalThis.fetch = original; }
+});
