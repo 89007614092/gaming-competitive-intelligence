@@ -2917,7 +2917,7 @@ function integrateProposal(prop, edit, target, targetCategoryKey) {
       });
     } else if (target === "knowledge") {
       const key = sanitizeCategoryKey(targetCategoryKey) || sanitizeCategoryKey(prop.targetCategory) || "regulations";
-      if (!data.categories[key]) data.categories[key] = { label: CATEGORY_LABELS[key] || key, icon: "🟢", subsections: [] };
+      if (!data.categories[key]) data.categories[key] = { label: CATEGORY_LABELS[key] || key, icon: "", subsections: [] };
       data.categories[key].subsections = data.categories[key].subsections || [];
       data.categories[key].subsections.unshift({ title: prop.title, content: edit, sources: [{ label: publisher, url }] });
     } else if (target === "use-cases") {
