@@ -101,3 +101,18 @@ test("extractArticle returns null when the body is too short", async () => {
     assert.strictEqual(r, null, "sub-threshold text is rejected");
   } finally { restore(); }
 });
+
+test("extractArticle does not negative-cache a Jina 403 (anonymous throttle)", async () => {
+  // A 403 from Jina (AbuseAlleviation / anonymous-throttle) is account-level,
+  // not URL-level. Poisoning the per-URL negative cache with it would blacklist
+  // the URL for the whole session; instead a later call must retry Jina.
+  let calls = 0;
+  const { ex, restore } = makeExtractor(async () => { calls++; return jinaResp("nope", { status: 403 }); });
+  try {
+    const first = await ex.extractArticle("https://example.com/throttled");
+    assert.strictEqual(first, null, "403 yields no extraction");
+    const second = await ex.extractArticle("https://example.com/throttled");
+    assert.strictEqual(second, null);
+    assert.strictEqual(calls, 2, "a 403 is NOT negative-cached, so a retry re-fetches Jina");
+  } finally { restore(); }
+});

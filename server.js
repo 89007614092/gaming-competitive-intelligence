@@ -614,7 +614,9 @@ async function fetchReaderContent(url, opts = {}) {
 
   // Legacy direct server fetch — retained as a resilient fallback (and the
   // sandbox/test path). Mirrors the original SSRF-hardened behaviour.
-  await assertPublicHost(new URL(target).hostname);
+  let legacyResult;
+  try {
+    await assertPublicHost(new URL(target).hostname);
 
   const seen = new Set();
   let current = target;
@@ -667,7 +669,24 @@ async function fetchReaderContent(url, opts = {}) {
   }
   const finalUrl = response.url || current;
   const title = extractTitle(html) || new URL(finalUrl).hostname;
-  return { title, text, url: finalUrl, excerpt: text.slice(0, 400) };
+    legacyResult = { title, text, url: finalUrl, excerpt: text.slice(0, 400) };
+  } catch (err) {
+    // Jina extraction AND the direct fetch both failed. Treat clearly invalid
+    // input (bad scheme, blocked host, unsupported type, too many redirects,
+    // HTTP error) as a hard error so the route can still 400/413 it; for a
+    // genuine extraction failure, return a structured {unresolved} marker so
+    // the reader shows the manual-entry panel instead of a dead-end 502.
+    if (/valid source URL|Only HTTP|Local|Blocked address|Unsupported source content type|Too many redirects|Redirect loop|Source returned HTTP/i.test(err.message)) {
+      throw err;
+    }
+    return {
+      unresolved: true,
+      reason: "extraction-failed",
+      url: target,
+      message: "We couldn't automatically retrieve the article text from this source. You can review it manually by pasting the URL or the full text below.",
+    };
+  }
+  return legacyResult;
 }
 
 // Defense-in-depth against CSRF-style abuse: reject cross-origin callers.
