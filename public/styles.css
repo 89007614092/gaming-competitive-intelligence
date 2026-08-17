@@ -4734,6 +4734,7 @@ body {
   border-radius: var(--radius); background: var(--surface-alt, #f8fafc); font-size: 13px; line-height: 1.5;
 }
 .reader-manual-note { margin: 0 0 8px; color: var(--text); }
+.reader-manual-hint { margin: 0 0 10px; }
 .reader-manual-steps { margin: 0 0 12px; padding-left: 18px; color: var(--text-muted); }
 .reader-manual-steps li { margin-bottom: 2px; }
 .reader-manual-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
