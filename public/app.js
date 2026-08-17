@@ -3519,6 +3519,10 @@ async function loadReaderUrl(targetUrl, articleEl, statusEl, manualEl) {
       return;
     }
     const data = await res.json();
+    // Surface a generated AI summary in the reader's summary pane (right side)
+    // whenever the server provides one — covers the manual paste-URL path.
+    const summaryBox = document.getElementById("readerSummary");
+    if (summaryBox && data.styledSummary) summaryBox.value = data.styledSummary;
     // Phase 3 — store viewer: the server returned stored content without a live
     // fetch. Render it directly and surface the retention state.
     if (data.fromStore) {
@@ -3632,7 +3636,7 @@ function bindReaderManualEntry() {
       if (statusEl) statusEl.style.display = "none";
     }
   });
-  if (useBtn) useBtn.addEventListener("click", () => {
+  if (useBtn) useBtn.addEventListener("click", async () => {
     const t = (textInput.value || "").trim();
     if (!t) { textInput.focus(); return; }
     articleEl.textContent = t;
@@ -3640,15 +3644,21 @@ function bindReaderManualEntry() {
     manualEl.style.display = "none";
     if (statusEl) statusEl.style.display = "none";
     // Phase 3 — write the pasted text back into the shared store so it persists
-    // across reloads (keyed by the current proposal id).
+    // across reloads (keyed by the current proposal id), and surface the AI
+    // summary the server generates for it in the reader's summary pane.
     const split = document.getElementById("readerSplitView");
     const id = split && split.dataset.cardId;
     if (id) {
-      fetch(`${API_BASE}/reader/store`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, text: t }),
-      }).catch(() => {});
+      try {
+        const r = await fetch(`${API_BASE}/reader/store`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, text: t }),
+        });
+        const j = await r.json().catch(() => ({}));
+        const summaryBox = document.getElementById("readerSummary");
+        if (summaryBox && j.styledSummary) summaryBox.value = j.styledSummary;
+      } catch (_) { /* non-fatal */ }
     }
   });
 }
