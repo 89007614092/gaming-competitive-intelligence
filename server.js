@@ -295,10 +295,10 @@ function validateSourceUrl(input) {
 async function fetchTextResource(url, accept = "text/html,application/xhtml+xml,text/plain", timeoutMs = 20000, userAgent = SCRAPE_USER_AGENT) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const validated = validateSourceUrl(url);
-  const parsedHost = new URL(validated).hostname;
-  await assertPublicHost(parsedHost); // resolve + reject private/loopback before fetching
   try {
+    const validated = validateSourceUrl(url);
+    const parsedHost = new URL(validated).hostname;
+    await assertPublicHost(parsedHost); // resolve + reject private/loopback before fetching
     const response = await fetch(validated, {
       headers: { "User-Agent": userAgent, Accept: accept },
       redirect: "follow",
@@ -1817,8 +1817,16 @@ async function fetchArticleSubhead(article) {
 // (see /api/news/subhead below).
 async function enrichTopArticles(articles, limit = 6, concurrency = 5, perArticleTimeoutMs = 15000) {
   const top = articles.slice(0, limit);
-  const withTimeout = (p, ms) =>
-    Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error("enrich-timeout")), ms))]);
+  // Clear the timeout as soon as the race settles so the fire-and-forget
+  // enrichment can never leak a 15s timer (and hold the event loop open) after
+  // a news request — behaviour is unchanged, the race still caps at `ms`.
+  const withTimeout = (p, ms) => {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("enrich-timeout")), ms);
+    });
+    return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+  };
   for (let i = 0; i < top.length; i += concurrency) {
     const batch = top.slice(i, i + concurrency);
     await Promise.all(batch.map(async (a) => {
