@@ -1558,6 +1558,89 @@ async function searchGoogleNewsRss(query, topicLabel, limit = 6, candidateCompet
   return parseNewsRss(resource.text, topicLabel, query, limit, candidateCompetitors);
 }
 
+// --- Bing News RSS support ---------------------------------------------------
+// Bing News RSS is the live fallback when Google News RSS is blocked from the
+// deployment's datacenter IP (Google returns 503 with zero items while Bing
+// returns 200 with 10-12). Bing's feed differs from Google's in two ways:
+//   1. The publisher name is in a namespaced <News:Source> tag (not <source>).
+//   2. <link> is a bing.com/news/apiclick.aspx redirector carrying the real
+//      publisher URL in its percent-encoded "url" query param, so links must be
+//      unwrapped to direct publisher URLs before they are surfaced.
+
+function isBingRedirector(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return /(^|\.)bing\.com$/i.test(parsed.hostname) && parsed.pathname.toLowerCase().includes("apiclick");
+  } catch (_) {
+    return false;
+  }
+}
+
+function unwrapBingNewsLink(url) {
+  const raw = String(url || "").trim();
+  if (!raw || !isBingRedirector(raw)) return raw;
+  try {
+    const parsed = new URL(raw);
+    const target = parsed.searchParams.get("url");
+    if (!target) return raw;
+    let decoded = target;
+    // URLSearchParams already percent-decodes once; unwind a possible second layer.
+    if (/%[0-9a-f]{2}/i.test(decoded)) {
+      try { decoded = decodeURIComponent(decoded); } catch (_) { /* keep decoded as-is */ }
+    }
+    if (!/^https?:\/\//i.test(decoded)) return raw;
+    return decoded;
+  } catch (_) {
+    return raw;
+  }
+}
+
+function parseBingNewsRss(xml, topicLabel, query, limit = 6, candidateCompetitors = []) {
+  const articles = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+  let match;
+
+  while ((match = itemRegex.exec(xml)) !== null && articles.length < limit) {
+    const item = match[1];
+    const title = extractXmlTag(item, "title");
+    const rawUrl = extractXmlTag(item, "link");
+    const description = extractXmlTag(item, "description");
+    const publishedAt = extractXmlTag(item, "pubDate");
+    const sourceName = extractXmlTag(item, "News:Source") || extractXmlTag(item, "source");
+
+    const url = unwrapBingNewsLink(rawUrl);
+    if (!title || !url || isBingRedirector(url)) continue;
+    if (NEWS_EXCLUDED_DOMAINS.some(domain => url.toLowerCase().includes(domain))) continue;
+
+    const articleText = `${title} ${description}`.toLowerCase();
+    const matchedCompetitor = candidateCompetitors.find(company =>
+      newsCompetitorAliases(company).some(alias => articleText.includes(alias.toLowerCase()))
+    );
+
+    articles.push({
+      title,
+      url,
+      description,
+      competitorKeyword: matchedCompetitor?.name || topicLabel,
+      topicCategory: topicLabel,
+      competitorName: matchedCompetitor?.name || null,
+      searchQuery: query,
+      sourceName,
+      publishedAt: publishedAt && !Number.isNaN(Date.parse(publishedAt))
+        ? new Date(publishedAt).toISOString()
+        : null,
+    });
+  }
+
+  return articles;
+}
+
+async function searchBingNewsRss(query, topicLabel, limit = 6, candidateCompetitors = []) {
+  const url = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=RSS`;
+  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
+  return parseBingNewsRss(resource.text, topicLabel, query, limit, candidateCompetitors);
+}
+
 function buildCompetitorNewsQueries(competitors) {
   const batches = [];
   for (let index = 0; index < competitors.length; index += 5) {
@@ -1571,22 +1654,27 @@ function buildCompetitorNewsQueries(competitors) {
   return batches;
 }
 
-async function getLiveNewsArticles(selectedCompetitors = []) {
+// Build the full fan-out of topic + competitor searches for a given feed fn.
+function buildNewsSearches(searchFn, selectedCompetitors = []) {
   const topicSearches = NEWS_TOPICS.flatMap(topic =>
-    topic.queries.map(query => searchGoogleNewsRss(query, topic.label, 6))
+    topic.queries.map(query => searchFn(query, topic.label, 6))
   );
   const competitorSearches = buildCompetitorNewsQueries(selectedCompetitors).map(batch =>
-    searchGoogleNewsRss(batch.query, "Competitor News", 8, batch.competitors)
+    searchFn(batch.query, "Competitor News", 8, batch.competitors)
   );
-  const searches = [...topicSearches, ...competitorSearches];
-  const settled = await Promise.allSettled(searches);
+  return [...topicSearches, ...competitorSearches];
+}
+
+// Run a fan-out, dedupe by URL (or title), sort newest-first, cap the result.
+async function runNewsFanOut(searchFn, selectedCompetitors = [], limit = 40) {
+  const settled = await Promise.allSettled(buildNewsSearches(searchFn, selectedCompetitors));
   const seen = new Set();
   const articles = [];
 
   for (const result of settled) {
     if (result.status !== "fulfilled") continue;
     for (const article of result.value) {
-      // Google News may surface the same story in several queries.
+      // The same story may surface in several queries.
       const key = article.url || article.title.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1600,7 +1688,19 @@ async function getLiveNewsArticles(selectedCompetitors = []) {
     return dateB - dateA;
   });
 
-  return articles.slice(0, 40);
+  return articles.slice(0, limit);
+}
+
+// Google News RSS is primary; Bing News RSS is the live fallback that fires only
+// when Google returns zero articles (Google 503s from the deployment's IP). The
+// returned `source` label tells the caller which feed actually produced the list.
+async function getLiveNewsArticles(selectedCompetitors = []) {
+  const googleArticles = await runNewsFanOut(searchGoogleNewsRss, selectedCompetitors);
+  if (googleArticles.length > 0) {
+    return { articles: googleArticles, source: "Google News RSS" };
+  }
+  const bingArticles = await runNewsFanOut(searchBingNewsRss, selectedCompetitors);
+  return { articles: bingArticles, source: "Bing News RSS" };
 }
 
 // --- News subhead enrichment -------------------------------------------------
@@ -1755,19 +1855,20 @@ app.get("/api/news", async (req, res) => {
 
   try {
     const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
-    const liveArticles = await getLiveNewsArticles(monitoredCompetitors);
+    const { articles: liveArticles, source: liveSource } = await getLiveNewsArticles(monitoredCompetitors);
 
     // Single response path for both live and cached fallback. The News tab
     // responds immediately with RSS descriptions; subheads are filled in by the
     // client on scroll (and warmed in the background for the next load).
     let articles = liveArticles;
+    let source = liveSource;
     let live = true;
     let searchedAt = new Date().toISOString();
 
     if (articles.length > 0) {
       cacheNews(newsSelectionKey(monitoredCompetitors), {
         generatedAt: searchedAt,
-        source: "Google News RSS",
+        source: liveSource,
         count: liveArticles.length,
         articles: liveArticles,
       });
@@ -1775,6 +1876,7 @@ app.get("/api/news", async (req, res) => {
       const fallback = getNewsFallback(monitoredCompetitors);
       if (fallback?.articles?.length) {
         articles = fallback.articles;
+        source = fallback.source || "Cached";
         live = false;
         searchedAt = fallback.generatedAt;
       }
@@ -1798,6 +1900,7 @@ app.get("/api/news", async (req, res) => {
       searchedAt,
       live,
       cached: !live,
+      source,
     };
     res.json(payload);
 
@@ -3893,6 +3996,12 @@ module.exports = {
   tavilySubhead,
   isGoogleNewsBoilerplate,
   pickSubheadCandidate,
+
+  // Bing News RSS fallback (Google-News-blocked path)
+  isBingRedirector,
+  unwrapBingNewsLink,
+  parseBingNewsRss,
+  searchBingNewsRss,
 
   // Reader proxy (Suggested Updates split-screen reader) — hardened, text-only.
   validateSourceUrl,

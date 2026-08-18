@@ -383,3 +383,76 @@ test("nudgeForUserSources: network failure is best-effort (returns original answ
     globalThis.fetch = original;
   }
 });
+
+// --- Bing News RSS fallback (Google-News-blocked path) ---
+
+test("unwrapBingNewsLink unwraps Bing apiclick redirector to publisher URL", () => {
+  const redirector = "http://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=abc&url=https%3a%2f%2fwww.lawgazette.co.uk%2fnews%2feu-ai-act%2f5127695.article&c=1&mkt=en-gb";
+  assert.strictEqual(
+    srv.unwrapBingNewsLink(redirector),
+    "https://www.lawgazette.co.uk/news/eu-ai-act/5127695.article"
+  );
+});
+
+test("unwrapBingNewsLink passes through non-Bing and non-apiclick URLs", () => {
+  assert.strictEqual(srv.unwrapBingNewsLink("https://example.com/story"), "https://example.com/story");
+  assert.strictEqual(srv.unwrapBingNewsLink("https://www.bing.com/news/search?q=ai&format=RSS"), "https://www.bing.com/news/search?q=ai&format=RSS");
+  // apiclick with no url param must fall through unchanged (never drop an item)
+  assert.strictEqual(srv.unwrapBingNewsLink("http://www.bing.com/news/apiclick.aspx?ref=x"), "http://www.bing.com/news/apiclick.aspx?ref=x");
+  assert.strictEqual(srv.unwrapBingNewsLink(""), "");
+});
+
+test("isBingRedirector detects only apiclick links", () => {
+  assert.strictEqual(srv.isBingRedirector("https://www.bing.com/news/apiclick.aspx?url=https%3a%2f%2fx.com"), true);
+  assert.strictEqual(srv.isBingRedirector("https://bing.com/news/apiclick.aspx"), true);
+  assert.strictEqual(srv.isBingRedirector("https://www.bing.com/news/search?q=ai&format=RSS"), false);
+  assert.strictEqual(srv.isBingRedirector("https://example.com/news/apiclick.aspx"), false);
+});
+
+test("parseBingNewsRss extracts namespaced source, unwraps links, excludes blocked domains", () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:News="http://www.example.com/news">
+  <channel>
+    <item>
+      <title>EU AI Act deadline nears</title>
+      <link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;aid=&amp;tid=abc&amp;url=https%3a%2f%2fwww.lawgazette.co.uk%2fnews%2feu-ai-act%2f5127695.article&amp;c=1&amp;mkt=en-gb</link>
+      <description>Regulators finalize compliance rules.</description>
+      <pubDate>Mon, 17 Aug 2026 06:43:00 GMT</pubDate>
+      <News:Source>The Law Society Gazette</News:Source>
+    </item>
+    <item>
+      <title>AI misuse reports surge</title>
+      <link>https://en.wikipedia.org/wiki/AI</link>
+      <description>Should be excluded by domain.</description>
+      <pubDate>Mon, 17 Aug 2026 05:00:00 GMT</pubDate>
+      <News:Source>Wikipedia</News:Source>
+    </item>
+    <item>
+      <title>No link item</title>
+      <description>Dropped for missing link.</description>
+      <News:Source>Somewhere</News:Source>
+    </item>
+  </channel>
+</rss>`;
+  const out = srv.parseBingNewsRss(xml, "AI Regulation", "AI regulation", 20);
+  assert.strictEqual(out.length, 1, "only the non-excluded item with a link should survive");
+  const article = out[0];
+  assert.strictEqual(article.title, "EU AI Act deadline nears");
+  assert.strictEqual(article.sourceName, "The Law Society Gazette");
+  assert.strictEqual(article.url, "https://www.lawgazette.co.uk/news/eu-ai-act/5127695.article");
+  assert.strictEqual(article.topicCategory, "AI Regulation");
+  assert.strictEqual(article.publishedAt, "2026-08-17T06:43:00.000Z");
+});
+
+test("parseBingNewsRss falls back to plain <source> when <News:Source> absent", () => {
+  const xml = `<rss version="2.0"><channel><item>
+    <title>AI policy shift</title>
+    <link>https://www.computing.co.uk/news/ai-policy</link>
+    <description>Plain source fallback.</description>
+    <source>Computing</source>
+  </item></channel></rss>`;
+  const out = srv.parseBingNewsRss(xml, "AI Regulation", "AI regulation", 10);
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].sourceName, "Computing");
+  assert.strictEqual(out[0].url, "https://www.computing.co.uk/news/ai-policy");
+});
