@@ -3329,6 +3329,77 @@ app.get("/healthz", (req, res) => {
   });
 });
 
+// Read-only diagnostic probe. Admin-gated (same-origin + optional shared secret).
+// Fetches an arbitrary public URL server-side and reports METADATA ONLY — HTTP
+// status, content-type, byte length, RSS <item> count, and the final URL after
+// redirects. It never returns the response body. It uses a raw fetch (NOT
+// fetchTextResource) so a 403/404 is SURFACED as `status` rather than thrown,
+// which is exactly what we need to answer "is Bing News RSS reachable from
+// Render?" without guessing. Reuses validateSourceUrl + assertPublicHost for
+// SSRF safety (rejects localhost/IP-literal/private/reserved hosts + DNS recheck).
+app.get("/api/_diag/fetch", requireAdmin, async (req, res) => {
+  try {
+    try { assertSameOrigin(req); }
+    catch { return res.status(403).json({ error: "Cross-origin requests are not allowed" }); }
+
+    const url = String(req.query.url || "").trim();
+    if (!url) return res.status(400).json({ error: "A `url` query parameter is required" });
+
+    let validated, parsedHost;
+    try {
+      validated = validateSourceUrl(url);
+      parsedHost = new URL(validated).hostname;
+      await assertPublicHost(parsedHost);
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    let response;
+    try {
+      response = await fetch(validated, {
+        headers: {
+          "User-Agent": SCRAPE_USER_AGENT,
+          Accept: "application/rss+xml,application/xml,text/xml,text/html;q=0.9,*/*;q=0.8",
+        },
+        redirect: "follow",
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      if (e.name === "AbortError") return res.status(504).json({ error: "Timed out", url: validated });
+      return res.status(502).json({ error: "Fetch failed: " + e.message, url: validated });
+    }
+
+    // Re-validate the FINAL host after redirects (a 302 to a private IP must be blocked).
+    let finalHostOk = true;
+    try { await assertPublicHost(new URL(response.url).hostname); } catch { finalHostOk = false; }
+
+    const body = await response.text().catch(() => "");
+    clearTimeout(timeout);
+
+    const contentType = response.headers.get("content-type") || "";
+    const itemCount = (body.match(/<item[\s>]/gi) || []).length;
+
+    res.json({
+      ok: true,
+      requested: validated,
+      finalUrl: response.url,
+      status: response.status,
+      statusText: response.statusText,
+      contentType,
+      bytes: Buffer.byteLength(body, "utf8"),
+      itemCount,
+      redirected: response.redirected,
+      finalHostOk,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Trigger a crawl of the allowlist. The scan can now take a while (it fetches
 // each proposed article to build a real preview), so we run it in the background
 // and return immediately. The client polls /api/proposed-changes separately.
