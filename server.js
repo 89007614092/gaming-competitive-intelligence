@@ -1153,13 +1153,28 @@ const NEWS_EXCLUDED_DOMAINS = [
 // ===== API ROUTES =====
 
 // POST /api/search — Tavily web search (requires TAVILY_API_KEY)
+// Cache POST /api/search results by normalized query+limit so repeated
+// identical searches hit Tavily at most once per TTL window. Saves the
+// 1k/mo Tavily budget on repeat queries and drops latency to ~instant.
+// (Step 2c Fix #2)
+const searchResultsCache = new Map(); // key -> { ts, payload }
+const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
 app.post("/api/search", async (req, res) => {
   try {
     const { query, limit = 10 } = req.body;
     if (!query) return res.status(400).json({ error: "Query is required" });
 
+    const cacheKey = `${String(query).trim().toLowerCase()}::${limit}`;
+    const hit = searchResultsCache.get(cacheKey);
+    if (hit && Date.now() - hit.ts < SEARCH_CACHE_TTL_MS) {
+      return res.json({ ...hit.payload, cached: true });
+    }
+
     const results = await tavilySearch(query, limit);
-    res.json({ success: true, data: results, total: results.length });
+    const payload = { success: true, data: results, total: results.length };
+    if (searchResultsCache.size > 500) searchResultsCache.clear();
+    searchResultsCache.set(cacheKey, { ts: Date.now(), payload });
+    res.json({ ...payload, cached: false });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

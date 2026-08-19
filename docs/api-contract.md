@@ -280,7 +280,9 @@ Pinned: `subhead:string`. Errors: `400`/`404`/`502` with `{ "error": "…" }`.
 { "success": true, "data": [ { "title": "…", "url": "…", … } ], "total": 0 }
 ```
 
-Pinned: `success:true`, `data:array`, `total:number` (`=== data.length`).
+Pinned: `success:true`, `data:array`, `total:number` (`=== data.length`), `cached:boolean`.
+Repeat identical `query`+`limit` within a 2-min TTL are served from an in-memory
+cache (`cached:true`) without a second Tavily call — protects the 1k/mo budget.
 Missing query → `400` `{ "error": "Query is required" }`.
 
 ---

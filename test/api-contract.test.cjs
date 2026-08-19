@@ -291,6 +291,34 @@ test("POST /api/search returns the search envelope (success)", async () => {
   } finally { restore(); }
 });
 
+test("POST /api/search caches repeated identical queries (Step 2c Fix #2)", async () => {
+  let tavilyCalls = 0;
+  const restore = stubFetch(async (url) => {
+    if (String(url).includes("api.tavily.com")) {
+      tavilyCalls += 1;
+      return {
+        ok: true, status: 200,
+        json: async () => ({ results: [{ title: "Cached result", url: "https://example.com/c", content: "body" }] }),
+      };
+    }
+    throw new Error("network down");
+  });
+  try {
+    // Unique query string so it cannot collide with the other search test's cache entry.
+    const q = "Step2c-unique-search-query-xyz";
+    const first = await request(server, "POST", "/api/search", { query: q, limit: 3 });
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(first.body.cached, false, "first call fetches live");
+    const second = await request(server, "POST", "/api/search", { query: q, limit: 3 });
+    assert.strictEqual(second.status, 200);
+    assert.strictEqual(second.body.cached, true, "repeat within TTL served from cache");
+    assert.strictEqual(tavilyCalls, 1, "Tavily hit once, not twice");
+    assert.strictEqual(second.body.total, first.body.total, "same envelope on cache hit");
+  } finally {
+    restore();
+  }
+});
+
 // A minimal valid Google News RSS feed so the LIVE path is exercised without any
 // network. Two items: one with a pubDate (-> ISO string) and one without
 // (-> null), pinning both branches of the publishedAt sentinel.
