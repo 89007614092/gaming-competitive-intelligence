@@ -1424,6 +1424,12 @@ const newsCacheBySelection = new Map();
 // entries after a short TTL so a stale selection stops being served forever.
 const NEWS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
 const NEWS_CACHE_MAX = 50;
+// Step 2c: serve a fresh-enough cached result instead of re-running the ~9s RSS
+// fan-out on every load. NEWS_SERVE_TTL_MS caps how stale a served result may be;
+// NEWS_REFRESH_MS is the window under which a served result is still flagged
+// `live` (and past which a background refresh is triggered).
+const NEWS_SERVE_TTL_MS = 2 * 60 * 1000; // 2 min
+const NEWS_REFRESH_MS = 60 * 1000;       // 1 min
 function cacheNews(selectionKey, value) {
   newsCacheBySelection.set(selectionKey, value);
   if (newsCacheBySelection.size > NEWS_CACHE_MAX) {
@@ -1829,11 +1835,60 @@ app.get("/api/news/subhead", async (req, res) => {
   }
 });
 
+// Step 2c — coalesced background news refresh. When a served cache entry is
+// older than NEWS_REFRESH_MS we refresh it in the background; the in-flight Set
+// ensures concurrent stale requests share a single fan-out, not one each.
+const newsRefreshing = new Set();
+function triggerNewsBackgroundRefresh(key, competitors) {
+  if (newsRefreshing.has(key)) return;
+  newsRefreshing.add(key);
+  getLiveNewsArticles(competitors)
+    .then(({ articles, source }) => {
+      if (articles.length) {
+        cacheNews(key, {
+          generatedAt: new Date().toISOString(),
+          source,
+          count: articles.length,
+          articles,
+        });
+        // Warm subheads for the next load, mirroring the live path.
+        enrichTopArticles(articles, 6, 5, 15000).catch(() => {});
+      }
+    })
+    .catch(() => {})
+    .finally(() => newsRefreshing.delete(key));
+}
+
 app.get("/api/news", async (req, res) => {
   res.set("Cache-Control", "no-store, max-age=0");
 
   try {
     const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
+    const key = newsSelectionKey(monitoredCompetitors);
+    // An explicit user Refresh always bypasses the serve-cache and pulls live.
+    const forceRefresh = Boolean(req.query.refresh);
+
+    // Serve from cache when fresh enough — skips the ~9s RSS fan-out. (Step 2c)
+    const cached = newsCacheBySelection.get(key);
+    const cachedAgeMs = cached ? Date.now() - Date.parse(cached.generatedAt || 0) : Infinity;
+    if (!forceRefresh && cached?.articles?.length && cachedAgeMs < NEWS_SERVE_TTL_MS) {
+      const isLive = cachedAgeMs < NEWS_REFRESH_MS;
+      res.json({
+        success: true,
+        count: cached.articles.length,
+        articles: cached.articles,
+        topics: NEWS_TOPICS.map(topic => topic.label),
+        monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
+        searchedAt: cached.generatedAt,
+        live: isLive,
+        cached: !isLive,
+        source: cached.source,
+      });
+      // Stale-while-revalidate: refresh in the background once past the window.
+      if (cachedAgeMs >= NEWS_REFRESH_MS) triggerNewsBackgroundRefresh(key, monitoredCompetitors);
+      return;
+    }
+
     const { articles: liveArticles, source: liveSource } = await getLiveNewsArticles(monitoredCompetitors);
 
     // Single response path for both live and cached fallback. The News tab

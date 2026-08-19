@@ -354,3 +354,77 @@ test("GET /api/news returns the news envelope (live Google RSS)", async () => {
     restore();
   }
 });
+
+// --- Step 2c: serve-from-cache + ?refresh bypass ---------------------------------
+
+// Benign response for non-RSS URLs (Tavily / article-host enrichment fetches)
+// so the fire-and-forget subhead warming never throws. Only news.google.com
+// fetches count toward `newsFetches`, isolating the fan-out from enrichment.
+function benignNonNews() {
+  return {
+    ok: true, status: 200, url: "https://example.com/x",
+    headers: { get: () => "text/html" },
+    text: async () => "<html><head><meta property=\"og:description\" content=\"lead\"></head><body>lead</body></html>",
+  };
+}
+
+test("GET /api/news serves from cache on repeat (no extra live fan-out)", async () => {
+  let newsFetches = 0;
+  const restore = stubFetch(async (url) => {
+    if (String(url).includes("news.google.com")) {
+      newsFetches++;
+      return {
+        ok: true, status: 200, url: String(url),
+        headers: { get: (h) => (h.toLowerCase() === "content-type" ? "application/rss+xml" : null) },
+        text: async () => googleNewsRss([
+          { title: "Cacheable article", url: "https://example.com/cache-1", desc: "Cache me.", pubDate: "Mon, 18 Aug 2026 12:00:00 GMT", source: "Example News" },
+        ]),
+      };
+    }
+    return benignNonNews();
+  });
+  try {
+    // Force a live fetch first to populate the cache with known data.
+    const r1 = await request(server, "GET", "/api/news?refresh=1");
+    assert.strictEqual(r1.status, 200);
+    assertNewsEnvelope(r1.body);
+    const afterPopulate = newsFetches;
+    assert.ok(afterPopulate >= 1, "refresh must trigger a live fan-out");
+    // A plain call must now serve from cache without another news fan-out.
+    const r2 = await request(server, "GET", "/api/news");
+    assert.strictEqual(r2.status, 200);
+    assertNewsEnvelope(r2.body);
+    assert.strictEqual(newsFetches, afterPopulate, "repeat /api/news should serve from cache");
+  } finally {
+    restore();
+  }
+});
+
+test("GET /api/news?refresh forces a fresh fan-out each time", async () => {
+  let newsFetches = 0;
+  const restore = stubFetch(async (url) => {
+    if (String(url).includes("news.google.com")) {
+      newsFetches++;
+      return {
+        ok: true, status: 200, url: String(url),
+        headers: { get: (h) => (h.toLowerCase() === "content-type" ? "application/rss+xml" : null) },
+        text: async () => googleNewsRss([
+          { title: "Refreshable article", url: "https://example.com/refresh-1", desc: "Fresh.", pubDate: "Mon, 18 Aug 2026 12:00:00 GMT", source: "Example News" },
+        ]),
+      };
+    }
+    return benignNonNews();
+  });
+  try {
+    const r1 = await request(server, "GET", "/api/news?refresh=1");
+    assert.strictEqual(r1.status, 200);
+    const after1 = newsFetches;
+    const r2 = await request(server, "GET", "/api/news?refresh=2");
+    assert.strictEqual(r2.status, 200);
+    // Each ?refresh runs a full live fan-out; the serve-cache is bypassed, so
+    // the total is exactly two fan-outs (not one + a cached serve).
+    assert.strictEqual(newsFetches, after1 * 2, "each ?refresh forces a fresh fan-out (no serve-cache)");
+  } finally {
+    restore();
+  }
+});

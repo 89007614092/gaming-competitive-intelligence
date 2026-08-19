@@ -259,6 +259,11 @@ Pinned: `success:true`, `count:number`, `articles:array`, `topics:array`,
 `monitoredCompetitors:array` of `{id,name,custom}`, `searchedAt:string`,
 `live:boolean`, `cached:boolean` (`=== !live`), `source:string`.
 
+Cache/refresh: a fresh-enough cached result is served immediately
+(stale-while-revalidate); `live` is `true` only when the served entry is younger
+than ~1 min, otherwise `cached:true`. The client's Refresh button sends
+`?refresh=<ts>`, which **forces a live fan-out** and bypasses the serve-cache.
+
 Error shape (empty live + empty cache): `503` `{ "error": "…" }`.
 
 ### `GET /api/news/subhead`
