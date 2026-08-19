@@ -117,6 +117,10 @@ test("GET /healthz returns the liveness envelope", async () => {
   assert.ok(isBool(body.scanning));
   assert.ok(isObj(body.scanBudget) && isNum(body.scanBudget.used) && isNum(body.scanBudget.limit));
   assert.ok(isObj(body.resolver));
+  // Deployment diagnostic fields (added so live probes can confirm the
+  // running SHA + news-seed load without reading the Render dashboard).
+  assert.ok(isStr(body.commit) && body.commit.length > 0, "commit must be a non-empty string");
+  assert.ok(isNum(body.newsSeedArticles), "newsSeedArticles must be a number");
 });
 
 test("GET /api/status returns provider strings", async () => {

@@ -1398,6 +1398,16 @@ try {
   bundledNewsCache = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "news-cache.json"), "utf8"));
 } catch (_) { /* no cache file yet */ }
 
+// Deployment diagnostic: capture the git SHA this process was built from so
+// /healthz can report exactly what is running (Render can otherwise serve a
+// cached/stale build without it being obvious). Best-effort; falls back to
+// "unknown" if .git is absent in the deployed slug.
+const DEPLOYED_COMMIT = (() => {
+  try {
+    return require("child_process").execSync("git rev-parse HEAD", { cwd: __dirname }).toString().trim() || "unknown";
+  } catch (_) { return "unknown"; }
+})();
+
 function newsCompetitorAliases(company) {
   return company.name
     .split(/\s*\/\s*|\s+x\s+/i)
@@ -3443,6 +3453,8 @@ app.get("/healthz", (req, res) => {
     : null;
   res.json({
     ok: true,
+    commit: DEPLOYED_COMMIT,
+    newsSeedArticles: (bundledNewsCache?.articles || []).length,
     uptimeSeconds: Math.round(process.uptime()),
     lastScanAt: sourceState.lastFullScan || null,
     scanning: sourceScanInFlight,
