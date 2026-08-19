@@ -333,11 +333,43 @@ function googleNewsRss(items) {
   return `<?xml version="1.0"?><rss version="2.0"><channel><title>Google News</title>${body}</channel></rss>`;
 }
 
+// Bing-shaped RSS fixture (namespaced <News:Source>, apiclick.aspx redirector
+// links) for the Track 1 race / Bing-fallback test.
+function bingNewsRss(items) {
+  const body = items.map((it) => `
+    <item>
+      <title>${it.title}</title>
+      <link>https://www.bing.com/news/apiclick.aspx?url=${encodeURIComponent(it.url)}</link>
+      <description>${it.desc || ""}</description>${it.pubDate ? `\n      <pubDate>${it.pubDate}</pubDate>` : ""}
+      <News:Source>${it.source}</News:Source>
+    </item>`).join("");
+  return `<?xml version="1.0"?><rss version="2.0" xmlns:News="http://schemas.microsoft.com/news/2006/News"><channel><title>Bing News</title>${body}</channel></rss>`;
+}
+
 // NOTE: /api/news fire-and-forgets `enrichTopArticles`, which used to leak one
 // 15s timer per enriched article (an un-cleared `Promise.race` timeout). That
 // leak is FIXED — `withTimeout` now clears the timer when the race settles — so
 // these tests no longer hold the process open after the suite. The tests below
 // only pin response shape; they are unaffected by the fix.
+test("GET /api/news serves the prewarmed seed on first hit (no blocking fan-out)", async () => {
+  // Every fetch fails — so any non-empty response MUST come from the in-memory
+  // pre-warm (Track 1.1), not a live fan-out. A `recent` searchedAt proves it
+  // came from the in-memory entry (backdated ~65s at boot), NOT the on-disk seed
+  // via getNewsFallback (which would carry the old file timestamp).
+  const restore = stubFetch(async () => { throw new Error("network down"); });
+  try {
+    const { status, body } = await request(server, "GET", "/api/news");
+    assert.strictEqual(status, 200);
+    assertNewsEnvelope(body);
+    assert.strictEqual(body.cached, true, "prewarmed entry is served as cached");
+    const ageMs = Date.now() - Date.parse(body.searchedAt);
+    assert.ok(ageMs >= 0 && ageMs < 10 * 60 * 1000, "served from recent in-memory pre-warm");
+    assert.ok(body.articles.length > 0, "seed articles present without a live fetch");
+  } finally {
+    restore();
+  }
+});
+
 test("GET /api/news returns the news envelope (cached fallback)", async () => {
   const restore = stubFetch(async () => { throw new Error("network down"); });
   try {
@@ -368,7 +400,9 @@ test("GET /api/news returns the news envelope (live Google RSS)", async () => {
     throw new Error("network down");
   });
   try {
-    const { status, body } = await request(server, "GET", "/api/news");
+    // ?refresh bypasses the serve-cache (incl. the boot pre-warm) so this test
+    // exercises the live Google path directly.
+    const { status, body } = await request(server, "GET", "/api/news?refresh=1");
     assert.strictEqual(status, 200);
     assertNewsEnvelope(body);
     assert.strictEqual(body.live, true);
@@ -452,6 +486,44 @@ test("GET /api/news?refresh forces a fresh fan-out each time", async () => {
     // Each ?refresh runs a full live fan-out; the serve-cache is bypassed, so
     // the total is exactly two fan-outs (not one + a cached serve).
     assert.strictEqual(newsFetches, after1 * 2, "each ?refresh forces a fresh fan-out (no serve-cache)");
+  } finally {
+    restore();
+  }
+});
+
+test("GET /api/news falls back to Bing when Google returns empty (Track 1 race)", async () => {
+  // Force a Google block (empty feed) and a working Bing feed. With ?refresh the
+  // serve-cache is bypassed so the live fan-out runs; both fan-outs race and the
+  // empty Google result yields to Bing. Unwrapped publisher URLs prove Bing
+  // parsing + the apiclick.aspx unwrap both work.
+  const restore = stubFetch(async (url) => {
+    if (String(url).includes("news.google.com")) {
+      return {
+        ok: true, status: 200, url: String(url),
+        headers: { get: (h) => (h.toLowerCase() === "content-type" ? "application/rss+xml" : null) },
+        text: async () => googleNewsRss([]),
+      };
+    }
+    if (String(url).includes("bing.com")) {
+      return {
+        ok: true, status: 200, url: String(url),
+        headers: { get: (h) => (h.toLowerCase() === "content-type" ? "application/rss+xml" : null) },
+        text: async () => bingNewsRss([
+          { title: "Bing-sourced AI gaming story", url: "https://example.com/bing-1", desc: "From Bing.", pubDate: "Mon, 18 Aug 2026 12:00:00 GMT", source: "Example News" },
+        ]),
+      };
+    }
+    return benignNonNews();
+  });
+  try {
+    const { status, body } = await request(server, "GET", "/api/news?refresh=1");
+    assert.strictEqual(status, 200);
+    assertNewsEnvelope(body);
+    assert.strictEqual(body.source, "Bing News RSS", "Bing fallback used when Google empty");
+    assert.ok(body.articles.length > 0, "Bing articles present");
+    assert.ok(body.articles.every((a) => !String(a.url).includes("bing.com/news/apiclick")),
+      "Bing redirector links are unwrapped to direct publisher URLs");
+    for (const a of body.articles) assertArticleShape(a);
   } finally {
     restore();
   }

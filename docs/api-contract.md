@@ -264,6 +264,11 @@ Cache/refresh: a fresh-enough cached result is served immediately
 than ~1 min, otherwise `cached:true`. The client's Refresh button sends
 `?refresh=<ts>`, which **forces a live fan-out** and bypasses the serve-cache.
 
+Cold-start: on a fresh process the bundled seed (`data/news-cache.json`) is
+pre-warmed into the serve-cache at boot, so the first request is served
+instantly as `cached:true` and a background refresh repopulates `live` data —
+no ~9s fan-out on the first hit after a deploy or spin-down.
+
 Error shape (empty live + empty cache): `503` `{ "error": "…" }`.
 
 ### `GET /api/news/subhead`
