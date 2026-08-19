@@ -316,8 +316,8 @@ Model-call and mutating routes need mocks and add little to "optimise without
 breaking", so they are documented/tested in a later tranche:
 
 - `POST /api/summarise`, `GET /api/summarise/status`
-- `POST /api/source-scan`, `POST /api/regulatory-scan`, `POST /api/knowledge-scan`
-- `POST /api/scrape`, `POST /api/gaming-trends/search`
+- `POST /api/source-scan`
+- `POST /api/gaming-trends/search`
 - `GET/POST /api/reader`, `POST /api/reader/store`
 - `POST /api/proposed-changes/:id/integrate`, `POST /api/proposed-changes/:id/dismiss`
 - `POST /api/news/custom-competitors`, `DELETE /api/news/custom-competitors/:id`
