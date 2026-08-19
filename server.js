@@ -1139,36 +1139,6 @@ function rankSourceSentences(text, title = "", limit = 4, focusQuery = "") {
   return rankSourceEvidence(text, title, focusQuery, limit).map(item => item.sentence);
 }
 
-function buildThematicFindings(evidenceItems) {
-  const definitions = [
-    { title: "Statistics & Market Signals", words: ["percent", "million", "billion", "revenue", "growth", "users", "players", "downloads", "market", "survey", "data"] },
-    { title: "Applied Use Cases & Player Impact", words: ["use", "game", "player", "npc", "character", "gameplay", "personalisation", "personalization", "experience", "content"] },
-    { title: "Technology & Product Capabilities", words: ["model", "technology", "system", "platform", "engine", "feature", "tool", "software", "ai", "automation"] },
-    { title: "Development & Production", words: ["developer", "studio", "development", "production", "workflow", "testing", "design", "asset", "code", "launch"] },
-    { title: "Risk, Policy & Governance", words: ["risk", "regulation", "law", "privacy", "safety", "copyright", "compliance", "policy", "security", "liability"] },
-  ];
-  const themes = definitions.map(definition => ({ ...definition, findings: [] }));
-  const other = { title: "Other Relevant Evidence", findings: [] };
-
-  evidenceItems.sort((a, b) => b.score - a.score).forEach(item => {
-    const lower = item.text.toLowerCase();
-    const scoredThemes = themes.map((theme, index) => {
-      let score = theme.words.filter(word => lower.includes(word)).length;
-      if (index === 0 && item.hasStatistic) score += 5;
-      if (index === 1 && item.hasUseCase) score += 4;
-      return { theme, score };
-    }).sort((a, b) => b.score - a.score);
-    const target = scoredThemes[0]?.score ? scoredThemes[0].theme : other;
-    if (target.findings.length < 5 && !target.findings.some(existing => isNearDuplicate(existing, item.citedText))) {
-      target.findings.push(item.citedText);
-    }
-  });
-
-  return [...themes, other]
-    .filter(theme => theme.findings.length)
-    .map(({ title, findings }) => ({ title, findings }));
-}
-
 // Domains to exclude from news results (encyclopedias, company homepages, etc.)
 const NEWS_EXCLUDED_DOMAINS = [
   "wikipedia.org",
