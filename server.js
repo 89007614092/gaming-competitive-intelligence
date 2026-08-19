@@ -196,6 +196,7 @@ async function jinaExtract(url, timeoutMs = 20000) {
 const { createExtractor } = require("./lib/extractor");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
+const { getDataset, clearDatasetCache } = require("./lib/datasets");
 const { computeRetentionState, rollToExcerpt } = retention;
 const SCRAPE_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -2332,21 +2333,25 @@ function buildExistingIndex() {
     if (!t.length) return;
     records.push({ dataset, recordId, title: title || "", tokens: new Set(t), strong: strongTermsIn(full) });
   };
-  try {
-    const tl = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8"));
+  // getDataset returns null (instead of throwing) if a data file is missing or
+  // corrupt, so a single broken file degrades that dataset's index instead of
+  // taking down the whole scan. mtime caching means repeat scans in one process
+  // reuse the parse instead of re-reading 3 files every time.
+  const tl = getDataset("regulatory-timeline");
+  if (tl) {
     (tl.events || []).forEach((e, i) =>
       push("timeline", `timeline:${i}`, e.title, `${e.title} ${e.description || ""} ${e.jurisdiction || ""} ${e.category || ""}`));
-  } catch (_) {}
-  try {
-    const kb = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "knowledge.json"), "utf8"));
+  }
+  const kb = getDataset("knowledge");
+  if (kb) {
     for (const [k, cat] of Object.entries(kb.categories || {})) {
       (cat.subsections || []).forEach((s, i) => push("knowledge", `knowledge:${k}:${i}`, s.title, `${s.title} ${s.content || ""}`));
     }
-  } catch (_) {}
-  try {
-    const uc = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8"));
+  }
+  const uc = getDataset("current-use-cases");
+  if (uc) {
     (uc.patterns || []).forEach((p, i) => push("use-cases", `uc:${i}`, p.title, `${p.title} ${p.content || ""} ${(p.games || []).join(" ")}`));
-  } catch (_) {}
+  }
   return records;
 }
 
@@ -3040,9 +3045,12 @@ function integrateProposal(prop, edit, target, targetCategoryKey) {
   }
 
   fs.writeFileSync(path.join(__dirname, "data", file), JSON.stringify(data, null, 2));
-  if (target === "timeline") regulatoryTimelineCache = null;
-  if (target === "knowledge") knowledgeCache = null;
-  if (target === "use-cases") currentUseCasesCache = null;
+  // Hard-invalidate the dataset cache so the next read is guaranteed fresh even
+  // if the write's mtime lands in the same tick as the prior cache entry. mtime
+  // auto-invalidation in getDataset is the backup; this is the belt-and-suspenders.
+  if (target === "timeline") clearDatasetCache("regulatory-timeline");
+  if (target === "knowledge") clearDatasetCache("knowledge");
+  if (target === "use-cases") clearDatasetCache("current-use-cases");
 }
 function sourceRegistryJurisdiction(prop) {
   const s = (loadSourceRegistry() || []).find(x => x.id === prop.source);
@@ -3627,16 +3635,12 @@ app.get("/api/status", (req, res) => {
 });
 
 // GET /api/knowledge — serve the structured knowledge base
-let knowledgeCache = null;
 app.get("/api/knowledge", (req, res) => {
   try {
     const { category, search } = req.query;
 
-    if (!knowledgeCache) {
-      knowledgeCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "knowledge.json"), "utf8")
-      );
-    }
+    const knowledgeCache = getDataset("knowledge");
+    if (!knowledgeCache) return res.status(500).json({ error: "Failed to load knowledge dataset" });
 
     // Curated base only — live/auto-sourced items are NOT injected here; they
     // surface via the proposed-changes review queue instead.
@@ -3681,14 +3685,10 @@ app.get("/api/knowledge", (req, res) => {
 });
 
 // GET /api/network — serve competitor network data
-let networkCache = null;
 app.get("/api/network", (req, res) => {
   try {
-    if (!networkCache) {
-      networkCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "network.json"), "utf8")
-      );
-    }
+    const networkCache = getDataset("network");
+    if (!networkCache) return res.status(500).json({ error: "Failed to load network dataset" });
     res.json({ success: true, data: networkCache });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3696,14 +3696,10 @@ app.get("/api/network", (req, res) => {
 });
 
 // GET /api/tencent-products — Tencent's AI/gaming product portfolio
-let tencentProductsCache = null;
 app.get("/api/tencent-products", (req, res) => {
   try {
-    if (!tencentProductsCache) {
-      tencentProductsCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "tencent-products.json"), "utf8")
-      );
-    }
+    const tencentProductsCache = getDataset("tencent-products");
+    if (!tencentProductsCache) return res.status(500).json({ error: "Failed to load tencent-products dataset" });
     res.json({ success: true, data: tencentProductsCache });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3711,14 +3707,10 @@ app.get("/api/tencent-products", (req, res) => {
 });
 
 // GET /api/current-use-cases — consolidated game-by-game AI implementations
-let currentUseCasesCache = null;
 app.get("/api/current-use-cases", (req, res) => {
   try {
-    if (!currentUseCasesCache) {
-      currentUseCasesCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "current-use-cases.json"), "utf8")
-      );
-    }
+    const currentUseCasesCache = getDataset("current-use-cases");
+    if (!currentUseCasesCache) return res.status(500).json({ error: "Failed to load current-use-cases dataset" });
     // Curated base only — live/auto-sourced items surface via the review queue.
     const data = {
       ...currentUseCasesCache,
@@ -3731,14 +3723,10 @@ app.get("/api/current-use-cases", (req, res) => {
 });
 
 // GET /api/gaming-trends — AI gaming trends (9 LLM use cases expanded)
-let gamingTrendsCache = null;
 app.get("/api/gaming-trends", (req, res) => {
   try {
-    if (!gamingTrendsCache) {
-      gamingTrendsCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "gaming-trends.json"), "utf8")
-      );
-    }
+    const gamingTrendsCache = getDataset("gaming-trends");
+    if (!gamingTrendsCache) return res.status(500).json({ error: "Failed to load gaming-trends dataset" });
     res.json({ success: true, data: gamingTrendsCache });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3759,14 +3747,10 @@ app.post("/api/gaming-trends/search", async (req, res) => {
 });
 
 // GET /api/regulatory-timeline — EU & UK AI regulatory deadlines
-let regulatoryTimelineCache = null;
 app.get("/api/regulatory-timeline", (req, res) => {
   try {
-    if (!regulatoryTimelineCache) {
-      regulatoryTimelineCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "regulatory-timeline.json"), "utf8")
-      );
-    }
+    const regulatoryTimelineCache = getDataset("regulatory-timeline");
+    if (!regulatoryTimelineCache) return res.status(500).json({ error: "Failed to load regulatory-timeline dataset" });
     // Curated base only — live/auto-sourced items surface via the review queue.
     const data = {
       ...regulatoryTimelineCache,
@@ -3888,14 +3872,10 @@ app.post("/api/knowledge-scan", async (req, res) => {
 });
 
 // GET /api/risks — cross-referenced risk analysis
-let risksCache = null;
 app.get("/api/risks", (req, res) => {
   try {
-    if (!risksCache) {
-      risksCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "risks.json"), "utf8")
-      );
-    }
+    const risksCache = getDataset("risks");
+    if (!risksCache) return res.status(500).json({ error: "Failed to load risks dataset" });
     res.json({ success: true, data: risksCache });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3903,14 +3883,10 @@ app.get("/api/risks", (req, res) => {
 });
 
 // GET /api/company-locations — UK & EU company and regulator locations
-let companyLocationsCache = null;
 app.get("/api/company-locations", (req, res) => {
   try {
-    if (!companyLocationsCache) {
-      companyLocationsCache = JSON.parse(
-        fs.readFileSync(path.join(__dirname, "data", "company-locations.json"), "utf8")
-      );
-    }
+    const companyLocationsCache = getDataset("company-locations");
+    if (!companyLocationsCache) return res.status(500).json({ error: "Failed to load company-locations dataset" });
     res.json({ success: true, data: companyLocationsCache });
   } catch (err) {
     res.status(500).json({ error: err.message });
