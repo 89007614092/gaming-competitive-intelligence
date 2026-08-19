@@ -374,6 +374,27 @@ test("GET /api/news serves the prewarmed seed on first hit (no blocking fan-out)
   }
 });
 
+test("GET /api/news serves the prewarmed seed even after long uptime (regression for serve-TTL expiry)", async () => {
+  // The live-verified bug: a deploy that sits idle (Render spin-up, health
+  // checks, or a slow first visitor) for >~55s would age the backdated seed
+  // past NEWS_SERVE_TTL_MS, expiry it, and fall through to a live fan-out. The
+  // seed flag must keep it serveable on the first hit regardless of uptime.
+  const realNow = Date.now;
+  Date.now = () => realNow() + 20 * 60 * 1000; // pretend 20 min have elapsed
+  const restore = stubFetch(async () => { throw new Error("network down"); });
+  try {
+    const { status, body } = await request(server, "GET", "/api/news");
+    assert.strictEqual(status, 200);
+    assertNewsEnvelope(body);
+    assert.strictEqual(body.cached, true, "seed still served as cached after long uptime");
+    assert.strictEqual(body.source, "Bing News RSS", "served from in-memory seed, not a live fetch");
+    assert.ok(body.articles.length > 0, "seed articles present");
+  } finally {
+    Date.now = realNow;
+    restore();
+  }
+});
+
 test("GET /api/news returns the news envelope (cached fallback)", async () => {
   const restore = stubFetch(async () => { throw new Error("network down"); });
   try {
