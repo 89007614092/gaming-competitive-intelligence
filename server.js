@@ -1409,6 +1409,25 @@ function newsSelectionKey(competitors) {
   return competitors.map(company => company.id).sort().join(",");
 }
 
+// Step 2c cold-start fix (Track 1.1): pre-warm the serve cache from the bundled
+// seed so the FIRST /api/news request after any process start (deploy, spin-down
+// wake) serves instantly instead of paying the ~9s live fan-out. The seed is
+// backdated just past the `live` window so it is served as `cached:true` (honest
+// about not being a live fetch) and immediately triggers a background refresh.
+if (bundledNewsCache?.articles?.length) {
+  // newsSelectionKey reads `.id`, so pass objects (matching how the handler
+  // looks the default selection up) — not the raw id strings.
+  cacheNews(
+    newsSelectionKey(DEFAULT_NEWS_COMPETITOR_IDS.map(id => ({ id }))),
+    {
+      generatedAt: new Date(Date.now() - (NEWS_REFRESH_MS + 5000)).toISOString(),
+      source: bundledNewsCache.source || "Cached",
+      count: bundledNewsCache.articles.length,
+      articles: bundledNewsCache.articles,
+    }
+  );
+}
+
 function getNewsFallback(competitors) {
   const exact = newsCacheBySelection.get(newsSelectionKey(competitors));
   if (exact?.articles?.length && Date.now() - Date.parse(exact.generatedAt || 0) < NEWS_CACHE_TTL_MS) return exact;
@@ -1484,7 +1503,7 @@ function parseNewsRss(xml, topicLabel, query, limit = 6, candidateCompetitors = 
 async function searchGoogleNewsRss(query, topicLabel, limit = 6, candidateCompetitors = []) {
   const freshnessQuery = `${query} when:60d`;
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(freshnessQuery)}&hl=en-GB&gl=GB&ceid=GB:en`;
-  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
+  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml", 8000);
   return parseNewsRss(resource.text, topicLabel, query, limit, candidateCompetitors);
 }
 
@@ -1567,7 +1586,7 @@ function parseBingNewsRss(xml, topicLabel, query, limit = 6, candidateCompetitor
 
 async function searchBingNewsRss(query, topicLabel, limit = 6, candidateCompetitors = []) {
   const url = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=RSS`;
-  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
+  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml", 8000);
   return parseBingNewsRss(resource.text, topicLabel, query, limit, candidateCompetitors);
 }
 
@@ -1625,11 +1644,19 @@ async function runNewsFanOut(searchFn, selectedCompetitors = [], limit = 40) {
 // when Google returns zero articles (Google 503s from the deployment's IP). The
 // returned `source` label tells the caller which feed actually produced the list.
 async function getLiveNewsArticles(selectedCompetitors = []) {
-  const googleArticles = await runNewsFanOut(searchGoogleNewsRss, selectedCompetitors);
+  // Track 1.2: race the Google and Bing fan-outs concurrently instead of a
+  // serial fallback. Wall-time becomes max(google, bing) rather than
+  // google + bing, and a blocked/slow Google no longer adds a second wave of
+  // latency. We still prefer Google when it returns anything non-empty.
+  const [googleRes, bingRes] = await Promise.allSettled([
+    runNewsFanOut(searchGoogleNewsRss, selectedCompetitors),
+    runNewsFanOut(searchBingNewsRss, selectedCompetitors),
+  ]);
+  const googleArticles = googleRes.status === "fulfilled" ? googleRes.value : [];
+  const bingArticles = bingRes.status === "fulfilled" ? bingRes.value : [];
   if (googleArticles.length > 0) {
     return { articles: googleArticles, source: "Google News RSS" };
   }
-  const bingArticles = await runNewsFanOut(searchBingNewsRss, selectedCompetitors);
   return { articles: bingArticles, source: "Bing News RSS" };
 }
 
