@@ -1430,10 +1430,17 @@ if (bundledNewsCache?.articles?.length) {
   cacheNews(
     newsSelectionKey(DEFAULT_NEWS_COMPETITOR_IDS.map(id => ({ id }))),
     {
-      generatedAt: new Date(Date.now() - (NEWS_REFRESH_MS + 5000)).toISOString(),
+      generatedAt: new Date(Date.now() - (NEWS_REFRESH_MS + 2000)).toISOString(),
       source: bundledNewsCache.source || "Cached",
       count: bundledNewsCache.articles.length,
       articles: bundledNewsCache.articles,
+      // Marked so the handler keeps serving it on the first hit no matter how
+      // long the process has been up — an absolute-age check against
+      // NEWS_SERVE_TTL_MS would let a deploy that sits idle before the first hit
+      // expire the seed and fall through to a live fan-out (defeating the fix).
+      // Once a live refresh replaces the entry this flag is gone and normal TTL
+      // logic resumes.
+      seed: true,
     }
   );
 }
@@ -1861,8 +1868,11 @@ app.get("/api/news", async (req, res) => {
     // Serve from cache when fresh enough — skips the ~9s RSS fan-out. (Step 2c)
     const cached = newsCacheBySelection.get(key);
     const cachedAgeMs = cached ? Date.now() - Date.parse(cached.generatedAt || 0) : Infinity;
-    if (!forceRefresh && cached?.articles?.length && cachedAgeMs < NEWS_SERVE_TTL_MS) {
-      const isLive = cachedAgeMs < NEWS_REFRESH_MS;
+    // A bundled seed stays serveable on the first hit regardless of process
+    // uptime (see pre-warm block); everything else must be within the serve TTL.
+    const serveable = cached?.articles?.length && (cached.seed || cachedAgeMs < NEWS_SERVE_TTL_MS);
+    if (!forceRefresh && serveable) {
+      const isLive = !cached.seed && cachedAgeMs < NEWS_REFRESH_MS;
       res.json({
         success: true,
         count: cached.articles.length,
@@ -1875,7 +1885,8 @@ app.get("/api/news", async (req, res) => {
         source: cached.source,
       });
       // Stale-while-revalidate: refresh in the background once past the window.
-      if (cachedAgeMs >= NEWS_REFRESH_MS) triggerNewsBackgroundRefresh(key, monitoredCompetitors);
+      // A seed always triggers a refresh so it is replaced by a live result.
+      if (cached.seed || cachedAgeMs >= NEWS_REFRESH_MS) triggerNewsBackgroundRefresh(key, monitoredCompetitors);
       return;
     }
 
