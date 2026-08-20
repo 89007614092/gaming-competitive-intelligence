@@ -3977,26 +3977,25 @@ const PORT = config.PORT;
 // Only bind a port when executed directly. Guarded so a test harness can
 // `require("./server")` (registering routes on `app`) without opening a socket.
 if (require.main === module) {
-  (async () => {
-    const pool = getDbPool();
-    if (pool) {
-      attachDb(pool);
-      try {
-        await primeDatasetCacheFromDb();
-        console.log("  Datasets cache preloaded from database.");
-      } catch (e) {
-        console.warn("[datasets] DB preload failed; using disk fallback:", e.message);
-      }
-    }
-    app.listen(PORT, () => {
-      console.log(`\n  Insights Tool`);
-      console.log(`  Server running at http://localhost:${PORT}`);
-      console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
-      console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
-      // When DATABASE_URL is set, shared datasets are served from Supabase
-      // (preloaded above); otherwise the on-disk JSON files remain the source.
-    });
-  })();
+  // Bind the port FIRST so the app is always reachable. The Supabase cache
+  // preload runs in the background and falls back to on-disk JSON if the DB is
+  // unreachable — a stalled DB connection must never block server startup.
+  app.listen(PORT, () => {
+    console.log(`\n  Insights Tool`);
+    console.log(`  Server running at http://localhost:${PORT}`);
+    console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
+    console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
+    // When DATABASE_URL is set, shared datasets are served from Supabase once
+    // the background preload completes; until then the on-disk JSON is used.
+  });
+
+  const pool = getDbPool();
+  if (pool) {
+    attachDb(pool);
+    primeDatasetCacheFromDb()
+      .then(() => console.log("  Datasets cache preloaded from database."))
+      .catch((e) => console.warn("[datasets] DB preload failed; using disk fallback:", e.message));
+  }
 }
 
 // =============================================================================
