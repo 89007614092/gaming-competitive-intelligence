@@ -51,6 +51,13 @@ module.exports = {
   // without this guard a restart shortly after a scan would repeat it.
   BOOT_SCAN_MIN_GAP_MS: num(process.env.BOOT_SCAN_MIN_GAP_MS, 60 * 60 * 1000),
 
+  // --- News refresh scheduler (Thread B) ---
+  // How often the server proactively refreshes the default news selection so the
+  // feed stays "live" on a clock even with no visitors. The refresh is a keyless
+  // Google/Bing RSS fan-out (cheap, no AI tokens). 5 min default. Throttle this
+  // down on a tight budget.
+  NEWS_CRON_MS: num(process.env.NEWS_CRON_MS, 5 * 60 * 1000),
+
   // --- Server ---
   PORT: num(process.env.PORT, 3000),
 };

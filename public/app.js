@@ -54,6 +54,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
+  setupNewsStream();
   setupReviewPanel();
   setupStatExpand();
 });
@@ -913,6 +914,8 @@ let savedNewsArticles = loadSavedNewsArticles();
 let newsFolders = loadNewsFolders();
 // null = "All Saved"; otherwise the id of the folder currently filtered in Saved Articles.
 let activeFolderFilter = null;
+// Thread B: a single open SSE connection for live news updates (one per tab).
+let newsEventSource = null;
 
 function loadSavedNewsArticles() {
   try {
@@ -3274,6 +3277,35 @@ function renderRisks(filter = "all") {
   });
 
   categoriesEl.innerHTML = catHtml || '<div class="empty-state"><p>No risks match the selected filter</p></div>';
+}
+
+// ===== Live news stream (Thread B) =====
+// One SSE connection per tab to /api/news/stream. On a `news-updated` event we
+// reveal a "New updates" pill; if the News view is already open we silently
+// reload the feed so it feels live without a manual refresh. No decorative
+// emoji — line-glyph controls only (PR #46 convention).
+function setupNewsStream() {
+  if (newsEventSource || typeof EventSource === "undefined") return;
+  const pill = document.getElementById("newsLivePill");
+
+  newsEventSource = new EventSource(`${API_BASE}/news/stream`);
+  newsEventSource.addEventListener("news-updated", () => {
+    if (pill) pill.hidden = false;
+    // If the user is already looking at the feed, refresh it in place.
+    const newsView = document.getElementById("news-view");
+    if (newsView && newsView.classList.contains("active")) {
+      loadNews();
+    }
+  });
+  newsEventSource.onerror = () => {
+    // Browser auto-reconnects on transient drops; nothing to do here.
+  };
+
+  // Clicking the pill clears it and forces a fresh load.
+  pill?.addEventListener("click", () => {
+    if (pill) pill.hidden = true;
+    loadNews(true);
+  });
 }
 
 // ===== Source Monitor + Review Queue (Scope C, P1–P3) =====

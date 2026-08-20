@@ -553,3 +553,36 @@ test("GET /api/news falls back to Bing when Google returns empty (Track 1 race)"
     restore();
   }
 });
+
+// Thread B — SSE live-update stream. Asserts the endpoint opens a proper
+// text/event-stream and pushes at least one frame, then disconnects cleanly so
+// the test harness doesn't hang or leak an open socket.
+test("GET /api/news/stream opens an SSE stream (text/event-stream)", async () => {
+  const port = server.address().port;
+  const controller = new AbortController();
+  const res = await realFetch(`http://127.0.0.1:${port}/api/news/stream`, {
+    headers: { accept: "text/event-stream" },
+    signal: controller.signal,
+  });
+  try {
+    assert.strictEqual(res.status, 200, "SSE endpoint must return 200");
+    assert.match(res.headers.get("content-type") || "", /text\/event-stream/,
+      "content-type must be text/event-stream");
+    // Read until we receive at least one frame (server writes ": connected" on open).
+    const reader = res.body.getReader();
+    const deadline = Date.now() + 5000;
+    let received = "";
+    while (Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      received += Buffer.from(value).toString("utf8");
+      if (received.includes("\n\n")) break;
+    }
+    assert.ok(received.length > 0, "expected at least one SSE frame from the stream");
+  } finally {
+    controller.abort();
+    // Let the server's req 'close' cleanup run so the socket is gone before the
+    // after() hook closes the server.
+    await new Promise((r) => setTimeout(r, 50));
+  }
+});

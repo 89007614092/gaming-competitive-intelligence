@@ -298,6 +298,27 @@ body {
 
 .btn-icon { font-size: 1rem; }
 
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--bg); }
+
+/* Thread B: "New updates" pill. Outlined accent so it stands out against the
+   neutral toolbar without being a loud filled button. Reuses the ↻ glyph. */
+.news-live-pill {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+  animation: news-pill-pulse 2s ease-in-out infinite;
+}
+.news-live-pill:hover { background: var(--accent); color: #fff; }
+@keyframes news-pill-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.0); }
+  50% { box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.18); }
+}
+
 /* === Stats Cards === */
 .stats-row {
   display: grid;
