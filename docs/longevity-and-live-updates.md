@@ -5,9 +5,11 @@ AI×Gaming BI web app. It captures: (1) what happens if an external dependency
 suddenly changes its terms, (2) the overall resilience verdict, and (3) the
 multi-stage roadmap for making the app *feel* live without burning AI tokens.
 
-**Status.** Thread A (this doc) — written 2026-08-20. Thread B (news-refresh cron
-+ SSE push) — implemented same session, pending deploy. Threads C/D + 2nd-model
-failover — open, awaiting decision.
+**Status.** Thread A (this doc) — written 2026-08-20. **Shipped since:** Thread B
+(news cron + SSE push, PR #58/#59), Thread C1 (folder rename/delete, PR #61), the
+Tavily→Brave→Jina search chain (PR #62), and Thread F (real-source attribution).
+**Still open:** Thread C2 (cross-device sync), Thread D (watch-URL + report
+upload), Thread E (zh-CN i18n), 2nd-model failover. See the table in §4.
 
 ---
 
@@ -74,9 +76,12 @@ bounded background job, never required to show fresh data.
 | Thread | Scope | Status |
 |---|---|---|
 | **A** | This record doc (analysis + roadmap) | **Done 2026-08-20** |
-| **B** | News-refresh **cron** (clock-driven) + **SSE push** to clients | **In progress** (this session) |
-| **C** | User-data **persistence** + folder CRUD (the disk-vs-DB decision) | Open — blocks user-created data |
+| **B** | News-refresh **cron** (clock-driven) + **SSE push** to clients | **Done** — PR #58 `76bde20`; refresh UI unified in PR #59 `b3707f4` |
+| **C** | User-data **persistence** + folder CRUD (the disk-vs-DB decision) | **C1 done** — folder rename/delete, PR #61 `0d58c40`. **C2 (cross-device) deferred** — see `docs/thread-c-folder-persistence.md` |
 | **D** | **Watch-URL** ingestion + **report upload** → knowledge base `[S#]` | Open |
+| **F** | **Real-source attribution** — stop the reader crediting `news.google.com` | **Done** — `applyRealSource`; see `docs/thread-f-real-source-attribution.md` |
+| Tavily | **Web-search provider chain** (Tavily → Brave → Jina) + circuit breaker | **Done** — PR #62 `90fcbcb`; see `docs/tavily-fallback.md`. Also fixed a ~1,700/day subhead quota burn |
+| **E** | Chinese (zh-CN) **i18n** | Deferred — discussed, not scoped |
 | Opt. | **2nd model / failover** (distinct `OPEN_MODEL_*_SCAN` key already supported) | Trivial env change; no code |
 
 **Recommended order:** B first (highest "live" feel per token/risk, no new

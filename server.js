@@ -539,6 +539,41 @@ function normalizeExtracted(extracted, fallbackUrl) {
   };
 }
 
+function safeHostOf(u) {
+  if (typeof u !== "string") return "";
+  try { return new URL(u).hostname; } catch { return ""; }
+}
+
+// When the ONLY signal we have about an article's source is Google's aggregator
+// host (news.google.com — the RSS redirect URL, or a Jina read of that URL),
+// prefer the REAL publisher name we already captured from the feed's <source>
+// tag (e.g. "Reuters"). This stops the reader credit from mislabelling an
+// article as "Source: news.google.com" when we actually know the publisher.
+// It is a label-only override: the (often unresolvable) URL is preserved so the
+// credit link still opens the article; only the displayed source name changes.
+function applyRealSource(obj, publisher) {
+  if (!obj || typeof obj !== "object") return obj;
+  const pub = (typeof publisher === "string" ? publisher : "").trim();
+  if (!pub) return obj;
+  const attr = obj.attribution && typeof obj.attribution === "object" ? obj.attribution : null;
+  const host = safeHostOf(attr ? attr.url : "") || safeHostOf(obj.url);
+  const src = attr ? (attr.source || "") : "";
+  const isAggregator = /(^|\.)news\.google\.com$/i.test(host) || /news\.google\.com/i.test(src);
+  // Override when the source is the aggregator, OR when we have no attribution
+  // at all (e.g. a stored proposal whose credit was never populated) — in both
+  // cases the known publisher name is strictly better than nothing/Google.
+  if (isAggregator || !attr) {
+    obj.attribution = {
+      source: pub,
+      title: (attr && attr.title) || obj.title || "",
+      url: (attr && attr.url) || obj.url || "",
+      retrievedAt: (attr && attr.retrievedAt) || new Date().toISOString(),
+      licenseClass: (attr && attr.licenseClass) || obj.licenseClass || "news-fair-use",
+    };
+  }
+  return obj;
+}
+
 async function fetchReaderContent(url, opts = {}) {
   const maxBytes = Number(opts.maxBytes) || READER_MAX_BYTES;
   const timeoutMs = Number(opts.timeoutMs) || READER_TIMEOUT_MS;
@@ -728,7 +763,12 @@ app.get("/api/reader", async (req, res) => {
           ingestedAt: prop.ingestedAt || null,
           attribution: prop.attribution || undefined,
         };
-        return res.json(applyLicenseGate(storeObj, { internal: true }));
+        // Prefer the publisher captured at scan time; fall back to the name the
+        // client read off the proposal card (covers items ingested before the
+        // publisher field existed).
+        const storePublisher = storeObj.publisher
+          || (typeof req.query.publisher === "string" ? req.query.publisher : "");
+        return res.json(applyLicenseGate(applyRealSource(storeObj, storePublisher), { internal: true }));
       }
     }
 
@@ -748,6 +788,7 @@ app.get("/api/reader", async (req, res) => {
     const result = await fetchReaderContent(url, {
       title: typeof req.query.title === "string" ? req.query.title : "",
       domain: typeof req.query.domain === "string" ? req.query.domain : "",
+      publisher: typeof req.query.publisher === "string" ? req.query.publisher : "",
       licenseClass: resolvedLicenseClass,
       sourceId: typeof req.query.sourceId === "string" ? req.query.sourceId : undefined,
     });
@@ -758,13 +799,14 @@ app.get("/api/reader", async (req, res) => {
     }
     // Surface any AI summary we just generated so the reader pane can show it
     // immediately (the manual paste-URL path stores the body via writeStoreBody).
-    const out = applyLicenseGate({
+    const publisher = typeof req.query.publisher === "string" ? req.query.publisher : "";
+    const out = applyLicenseGate(applyRealSource({
       ...result,
       licenseClass: result.licenseClass
         || resolvedLicenseClass
         || (result.attribution && result.attribution.licenseClass)
         || "open",
-    }, { internal: true });
+    }, publisher), { internal: true });
     if (id) {
       const sp = (proposedChanges.items || []).find(i => i.id === id);
       if (sp && sp.styledSummary) out.styledSummary = sp.styledSummary;
@@ -3953,6 +3995,7 @@ module.exports = {
   assertPublicHost,
   isPrivateOrReservedIp,
   fetchReaderContent,
+  applyRealSource,
   readStreamWithCap,
   createRateLimiter,
   summariseStoredItem,
