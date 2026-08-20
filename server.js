@@ -171,7 +171,20 @@ async function jinaExtract(url, timeoutMs = 20000) {
 const { createExtractor } = require("./lib/extractor");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
-const { getDataset, clearDatasetCache } = require("./lib/datasets");
+const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, DATASET_FILE } = require("./lib/datasets");
+
+// --- Option B: shared, editable datasets backed by Supabase (Postgres) ---
+// `pg` is optional at module load: if it isn't installed or DATABASE_URL is
+// unset, getDbPool() returns null and the app falls back to on-disk JSON.
+let _pg = null;
+try { _pg = require("pg"); } catch { /* pg not installed (e.g. local dev) */ }
+let _dbPool = null;
+function getDbPool() {
+  if (_dbPool) return _dbPool;
+  if (!process.env.DATABASE_URL || !_pg) return null;
+  _dbPool = new _pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+  return _dbPool;
+}
 const { computeRetentionState, rollToExcerpt } = retention;
 const SCRAPE_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -3675,6 +3688,46 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Gate for the shared, editable datasets (Option B). Reuses ADMIN_API_KEY when
+// EDITOR_API_KEY is absent, so a trusted team needs only one shared secret.
+// FAILS CLOSED: with no key configured it refuses, never silently open.
+function requireEditor(req, res, next) {
+  const key = process.env.EDITOR_API_KEY || process.env.ADMIN_API_KEY;
+  if (!key) return res.status(500).json({ error: "Editor auth not configured" });
+  const provided =
+    req.get("x-editor-key") || req.get("x-admin-key") ||
+    (req.body && (req.body.editorKey || req.body.adminKey));
+  if (provided !== key) return res.status(401).json({ error: "Unauthorized" });
+  next();
+}
+
+// Direct, full-document edit of a shared dataset (Option B). The request body is
+// the entire dataset JSON; it is upserted into Supabase with editor attribution.
+// Disk JSON stays a fallback seed only, so we do NOT write it here.
+app.put("/api/datasets/:name", requireEditor, async (req, res) => {
+  const { name } = req.params;
+  if (!DATASET_FILE[name]) return res.status(404).json({ error: "Unknown dataset" });
+  if (typeof req.body !== "object" || req.body === null || Array.isArray(req.body))
+    return res.status(400).json({ error: "Body must be a JSON object" });
+  const pool = getDbPool();
+  if (!pool) return res.status(500).json({ error: "Database not configured" });
+  const editor = req.get("x-editor-name") || "unknown";
+  try {
+    await pool.query(
+      `INSERT INTO datasets(name, data, updated_by, version)
+       VALUES($1, $2::jsonb, $3, 1)
+       ON CONFLICT (name) DO UPDATE
+       SET data = EXCLUDED.data, updated_by = EXCLUDED.updated_by,
+           updated_at = now(), version = datasets.version + 1`,
+      [name, JSON.stringify(req.body), editor]
+    );
+    setDatasetCache(name, req.body);
+    res.json({ success: true, name, updated_by: editor });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Integrate an approved proposal into the curated dataset (user-gated write).
 app.post("/api/proposed-changes/:id/integrate", requireAdmin, (req, res) => {
   try {
@@ -3924,14 +3977,26 @@ const PORT = config.PORT;
 // Only bind a port when executed directly. Guarded so a test harness can
 // `require("./server")` (registering routes on `app`) without opening a socket.
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`\n  Insights Tool`);
-    console.log(`  Server running at http://localhost:${PORT}`);
-    console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
-    console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
-    // The AI model runs on every answer (with an extractive-citation fallback when
-    // unavailable), so there is nothing to preload at startup.
-  });
+  (async () => {
+    const pool = getDbPool();
+    if (pool) {
+      attachDb(pool);
+      try {
+        await primeDatasetCacheFromDb();
+        console.log("  Datasets cache preloaded from database.");
+      } catch (e) {
+        console.warn("[datasets] DB preload failed; using disk fallback:", e.message);
+      }
+    }
+    app.listen(PORT, () => {
+      console.log(`\n  Insights Tool`);
+      console.log(`  Server running at http://localhost:${PORT}`);
+      console.log(`  Python: ${PYTHON ? `${PYTHON} — video transcripts enabled` : "NOT FOUND — video transcripts disabled"}`);
+      console.log(`  Search: Tavily web search (requires TAVILY_API_KEY)\n`);
+      // When DATABASE_URL is set, shared datasets are served from Supabase
+      // (preloaded above); otherwise the on-disk JSON files remain the source.
+    });
+  })();
 }
 
 // =============================================================================
