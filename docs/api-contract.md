@@ -358,7 +358,10 @@ breaking", so they are documented/tested in a later tranche:
 - `POST /api/summarise`, `GET /api/summarise/status`
 - `POST /api/source-scan`
 - `POST /api/gaming-trends/search`
-- `GET/POST /api/reader`, `POST /api/reader/store`
+- `GET/POST /api/reader`, `POST /api/reader/store` — *partially covered now*: SSRF/host
+  hardening in `test/reader-security.test.cjs`, and the credit/attribution contract
+  (incl. the `publisher` query param, see `docs/thread-f-real-source-attribution.md`)
+  in `test/reader-attribution.test.cjs`
 - `POST /api/proposed-changes/:id/integrate`, `POST /api/proposed-changes/:id/dismiss`
 - `POST /api/news/custom-competitors`, `DELETE /api/news/custom-competitors/:id`
 - `GET /api/_diag/fetch` (admin-gated diagnostic)

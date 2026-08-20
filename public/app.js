@@ -3692,11 +3692,15 @@ async function openReaderSplit(card, url) {
   // "Reuters" are not domains and would make source resolution fail; the
   // server resolves by article title in that case.
   const domain = rawDomain.includes(".") ? rawDomain : "";
+  // The human-readable publisher name (e.g. "Reuters") is surfaced as the
+  // reader credit so it never shows the Google News aggregator host.
+  const publisher = rawDomain;
   const cardId = card.getAttribute("data-id") || "";
-  const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(cardId)}`;
+  const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}&publisher=${encodeURIComponent(publisher)}&id=${encodeURIComponent(cardId)}`;
 
   split.dataset.readerUrl = url;
   split.dataset.cardId = cardId;
+  split.dataset.readerPublisher = publisher;
   const badge = document.getElementById("readerStoreBadge");
   if (badge) badge.style.display = "none";
   const licBadge = document.getElementById("readerLicenseBadge");
@@ -3900,7 +3904,8 @@ async function refreshReader() {
   if (licBadge) licBadge.style.display = "none";
   const attr = document.getElementById("readerAttribution");
   if (attr) { attr.style.display = "none"; attr.innerHTML = ""; }
-  const qs = `url=${encodeURIComponent(url)}&id=${encodeURIComponent(id || "")}&refresh=1`;
+  const publisher = (split.dataset.readerPublisher || "").trim();
+  const qs = `url=${encodeURIComponent(url)}&id=${encodeURIComponent(id || "")}&publisher=${encodeURIComponent(publisher)}&refresh=1`;
   await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, document.getElementById("readerManualEntry"));
 }
 
