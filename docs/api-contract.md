@@ -279,6 +279,23 @@ Error shape (empty live + empty cache): `503` `{ "error": "…" }`.
 
 Pinned: `subhead:string`. Errors: `400`/`404`/`502` with `{ "error": "…" }`.
 
+### `GET /api/news/stream` (Thread B — SSE live updates)
+
+Server-Sent Events stream. Opens `text/event-stream`; sends a `: connected`
+frame on open and a `: ping` heartbeat every 20s. When a news refresh lands
+(server cron tick or a client's `?refresh`), every open subscriber receives:
+
+```
+event: news-updated
+data: {"type":"news-updated","key":"…","source":"Google News RSS","count":N,"generatedAt":"…"}
+```
+
+Contract: status `200`, `content-type: text/event-stream`. Client opens one
+`EventSource` and reloads the feed on `news-updated`. The refresh itself is a
+keyless Google/Bing RSS fan-out — **no AI tokens**, so the stream never depends
+on the model. Cadence is set by `NEWS_CRON_MS` (config.js, default 5 min;
+`require.main === module` guarded so it never fires under the test harness).
+
 ### `POST /api/search`
 
 ```json

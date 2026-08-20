@@ -1836,18 +1836,35 @@ app.get("/api/news/subhead", async (req, res) => {
 // older than NEWS_REFRESH_MS we refresh it in the background; the in-flight Set
 // ensures concurrent stale requests share a single fan-out, not one each.
 const newsRefreshing = new Set();
+
+// Live push (Thread B): SSE subscribers. Each open GET /api/news/stream response
+// registers itself here and is notified when a news refresh lands. Kept as a Set
+// of raw response objects; cleaned up on disconnect so it can never grow.
+const newsSseClients = new Set();
+function broadcastNewsUpdate(payload) {
+  if (newsSseClients.size === 0) return;
+  const frame = `event: news-updated\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const client of newsSseClients) {
+    try { client.write(frame); }
+    catch (_) { newsSseClients.delete(client); }
+  }
+}
+
 function triggerNewsBackgroundRefresh(key, competitors) {
   if (newsRefreshing.has(key)) return;
   newsRefreshing.add(key);
   getLiveNewsArticles(competitors)
     .then(({ articles, source }) => {
       if (articles.length) {
+        const generatedAt = new Date().toISOString();
         cacheNews(key, {
-          generatedAt: new Date().toISOString(),
+          generatedAt,
           source,
           count: articles.length,
           articles,
         });
+        // Tell any live SSE subscribers a fresh feed is available (Thread B).
+        broadcastNewsUpdate({ type: "news-updated", key, source, count: articles.length, generatedAt });
         // Warm subheads for the next load, mirroring the live path.
         enrichTopArticles(articles, 6, 5, 15000).catch(() => {});
       }
@@ -1907,6 +1924,8 @@ app.get("/api/news", async (req, res) => {
         count: liveArticles.length,
         articles: liveArticles,
       });
+      // Live explicit refresh also notifies SSE subscribers (Thread B).
+      broadcastNewsUpdate({ type: "news-updated", key, source: liveSource, count: liveArticles.length, generatedAt: searchedAt });
     } else {
       const fallback = getNewsFallback(monitoredCompetitors);
       if (fallback?.articles?.length) {
@@ -1967,6 +1986,35 @@ app.get("/api/news", async (req, res) => {
     } catch (_) { /* fall through */ }
     return res.status(500).json({ error: err.message });
   }
+});
+
+// Thread B — Server-Sent Events stream for live news updates. A client opens
+// this once and keeps it open; whenever a news refresh lands (cron tick or a
+// user's ?refresh) it receives a `news-updated` event. Keyless, no AI tokens —
+// this is the cheap "live" mechanism the app is built around.
+app.get("/api/news/stream", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no", // disable proxy buffering (Render / nginx)
+  });
+  res.flushHeaders?.();
+  newsSseClients.add(res);
+  // Opening frame proves connectivity and primes the client.
+  res.write(": connected\n\n");
+
+  // Keep-alive heartbeat so idle proxies don't drop the socket.
+  const heartbeat = setInterval(() => {
+    try { res.write(": ping\n\n"); } catch (_) { /* socket already gone */ }
+  }, 20000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    newsSseClients.delete(res);
+  };
+  req.on("close", cleanup);
+  req.on("aborted", cleanup);
 });
 
 // --- Custom competitor definitions (server-persisted) ---
@@ -3631,6 +3679,20 @@ if (require.main === module) {
     runSourceScan({ force: false }).catch(() => {});
     try { runRetentionSweep(); } catch (_) { /* non-fatal */ }
   }, SOURCE_SCAN_TICK_MS);
+}
+
+// News-refresh cron (Thread B): keep the default news selection fresh on a fixed
+// clock even with zero visitors, so the feed feels live without anyone hitting
+// the endpoint. The refresh is a keyless Google/Bing RSS fan-out (no AI tokens)
+// and reuses the coalesced, single-flight triggerNewsBackgroundRefresh, which
+// also broadcasts to any open SSE subscribers. Cadence is env-tunable so it can
+// be throttled on a tight budget.
+const NEWS_CRON_MS = config.NEWS_CRON_MS;
+if (require.main === module) {
+  setInterval(() => {
+    const competitors = resolveNewsCompetitors();
+    triggerNewsBackgroundRefresh(newsSelectionKey(competitors), competitors);
+  }, NEWS_CRON_MS);
 }
 
 // Boot scan, guarded. Render's free tier spins the container down when idle, so
