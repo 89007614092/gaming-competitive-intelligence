@@ -21,8 +21,20 @@ module.exports = {
   // --- External search provider (used by /api/news + gaming-trends search) ---
   TAVILY_API_KEY: process.env.TAVILY_API_KEY || "",
   // Normalised once here so callers never re-lowercase/trim. "jina" is default.
+  // NOTE: this selects the URL-RESOLVER provider (Google-News redirect -> real
+  // publisher). It is NOT the web-search chain — see WEB_SEARCH_CHAIN below.
   SEARCH_PROVIDER: (process.env.SEARCH_PROVIDER || "jina").toLowerCase().trim(),
   JINA_API_KEY: process.env.JINA_API_KEY || "",
+
+  // --- Web-search fallback chain (lib/searchProvider.js) ---
+  // Order in which providers are tried for /api/search and Q&A web evidence.
+  // Tavily was the only external dependency with no fallback; this chain removes
+  // that single point of failure. Unknown names are ignored, so a typo cannot
+  // take search offline. Default: tavily -> brave -> jina (jina is keyless).
+  WEB_SEARCH_CHAIN: (process.env.WEB_SEARCH_CHAIN || "tavily,brave,jina").toLowerCase().trim(),
+  // Brave Search API — official, free tier ~2,000 queries/month. Optional: when
+  // unset, Brave is simply skipped and the chain falls through to Jina.
+  BRAVE_API_KEY: process.env.BRAVE_API_KEY || "",
 
   // --- Scan-lane pacing / quota (free-tier OpenRouter, ~50 req/day ceiling) ---
   // Min spacing between two scan model calls. This is a PROCESS-GLOBAL slot
