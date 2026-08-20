@@ -1054,6 +1054,57 @@ function listFolders() {
   return newsFolders;
 }
 
+// How many saved articles currently sit in a folder (used for chip counts and
+// for warning the user before a delete).
+function countArticlesInFolder(folderId) {
+  return savedNewsArticles.filter(a => (a.folderIds || []).includes(folderId)).length;
+}
+
+// Renames a folder in place. Returns an { ok, reason } result so the caller can
+// explain the failure instead of silently doing nothing.
+function renameFolder(folderId, name) {
+  const folder = newsFolders.find(f => f.id === folderId);
+  if (!folder) return { ok: false, reason: "not-found" };
+  const trimmed = (name || "").trim();
+  if (!trimmed) return { ok: false, reason: "empty" };
+  if (trimmed.length > 40) return { ok: false, reason: "too-long" };
+  if (trimmed === folder.name) return { ok: true, reason: "unchanged" };
+  const clash = newsFolders.some(
+    f => f.id !== folderId && f.name.trim().toLowerCase() === trimmed.toLowerCase()
+  );
+  if (clash) return { ok: false, reason: "duplicate" };
+  folder.name = trimmed;
+  saveNewsFolders();
+  return { ok: true, reason: "renamed" };
+}
+
+// Deletes a folder and cascades the removal into every saved article that
+// referenced it. Articles stay saved — only the grouping disappears — so a
+// delete can never lose the user's starred content.
+function deleteFolder(folderId) {
+  if (!folderId) return { ok: false, reason: "empty" };
+  const idx = newsFolders.findIndex(f => f.id === folderId);
+  if (idx < 0) return { ok: false, reason: "not-found" };
+  const [removed] = newsFolders.splice(idx, 1);
+
+  let touched = 0;
+  savedNewsArticles.forEach(a => {
+    if (!Array.isArray(a.folderIds)) return;
+    const at = a.folderIds.indexOf(folderId);
+    if (at >= 0) {
+      a.folderIds.splice(at, 1);
+      touched += 1;
+    }
+  });
+
+  // Never leave the view filtered by a folder that no longer exists.
+  if (activeFolderFilter === folderId) activeFolderFilter = null;
+
+  saveNewsFolders();
+  if (touched) saveNewsArticles();
+  return { ok: true, reason: "deleted", name: removed ? removed.name : "", detached: touched };
+}
+
 function getArticleFolders(article) {
   const key = newsArticleKey(article);
   const saved = savedNewsArticles.find(s => newsArticleKey(s) === key);
@@ -1117,9 +1168,17 @@ function renderFoldersSidebar() {
     `<button class="folder-chip${activeFolderFilter === null ? " active" : ""}" data-folder-id="">All Saved <span class="folder-count">${savedNewsArticles.length}</span></button>`
   );
   folders.forEach(f => {
-    const n = savedNewsArticles.filter(a => (a.folderIds || []).includes(f.id)).length;
+    const n = countArticlesInFolder(f.id);
+    const isActive = activeFolderFilter === f.id;
+    const id = escapeHtml(f.id);
+    // User folders are wrapped so the filter button and the options control are
+    // siblings — a nested button would be invalid HTML. "All Saved" and
+    // "+ New folder" stay bare, which is what makes them un-deletable.
     chips.push(
-      `<button class="folder-chip${activeFolderFilter === f.id ? " active" : ""}" data-folder-id="${escapeHtml(f.id)}">${escapeHtml(f.name)} <span class="folder-count">${n}</span></button>`
+      `<span class="folder-chip-wrap${isActive ? " active" : ""}">` +
+        `<button class="folder-chip${isActive ? " active" : ""}" data-folder-id="${id}">${escapeHtml(f.name)} <span class="folder-count">${n}</span></button>` +
+        `<button class="folder-chip-more" data-folder-menu-id="${id}" type="button" title="Rename or delete" aria-label="Options for folder ${escapeHtml(f.name)}">&#8943;</button>` +
+      `</span>`
     );
   });
   chips.push(`<button class="folder-chip folder-new" id="newFolderChip" type="button">+ New folder</button>`);
@@ -1199,6 +1258,85 @@ function closeFolderMenu() {
   document.getElementById("folderMenu")?.remove();
 }
 
+function closeFolderActionMenu() {
+  document.getElementById("folderActionMenu")?.remove();
+}
+
+// Small popover on a folder chip's "⋯" control offering Rename / Delete.
+// Purely local: both actions mutate localStorage only, no server round-trip.
+function openFolderActionMenu(anchorBtn, folderId) {
+  closeFolderActionMenu();
+  closeFolderMenu();
+  const folder = newsFolders.find(f => f.id === folderId);
+  if (!folder) return;
+  const count = countArticlesInFolder(folderId);
+
+  const menu = document.createElement("div");
+  menu.id = "folderActionMenu";
+  menu.className = "folder-menu folder-action-menu";
+  menu.dataset.folderId = folderId;
+  menu.innerHTML = `
+    <div class="folder-menu-title">${escapeHtml(folder.name)}</div>
+    <div class="folder-menu-list">
+      <button class="folder-action-item" data-action="rename" type="button">Rename folder</button>
+      <button class="folder-action-item danger" data-action="delete" type="button">Delete folder</button>
+    </div>
+    <div class="folder-action-note">${count} saved article${count === 1 ? "" : "s"} — deleting the folder keeps them saved.</div>`;
+  document.body.appendChild(menu);
+
+  // Position below the anchor, clamped to the viewport.
+  const rect = anchorBtn.getBoundingClientRect();
+  const menuW = 230;
+  const vw = document.documentElement.clientWidth;
+  let left = window.scrollX + rect.left;
+  if (left + menuW > window.scrollX + vw - 8) {
+    left = window.scrollX + Math.max(8, vw - menuW - 8);
+  }
+  menu.style.left = left + "px";
+  menu.style.top = window.scrollY + rect.bottom + 4 + "px";
+  menu.style.width = menuW + "px";
+
+  menu.addEventListener("click", (e) => {
+    const action = e.target.closest(".folder-action-item")?.dataset.action;
+    if (!action) { e.stopPropagation(); return; }
+    const id = menu.dataset.folderId;
+    const target = newsFolders.find(f => f.id === id);
+    if (!target) { closeFolderActionMenu(); return; }
+
+    if (action === "rename") {
+      closeFolderActionMenu();
+      const input = window.prompt("Rename folder:", target.name);
+      if (input === null) return; // cancelled
+      const res = renameFolder(id, input);
+      if (res.ok) {
+        if (res.reason === "renamed") showToast(`Folder renamed to “${input.trim()}”.`);
+        renderFoldersSidebar();
+      } else if (res.reason === "duplicate") {
+        showToast("A folder with that name already exists.");
+      } else if (res.reason === "too-long") {
+        showToast("Folder names are limited to 40 characters.");
+      } else if (res.reason === "empty") {
+        showToast("Folder name cannot be empty.");
+      }
+      return;
+    }
+
+    if (action === "delete") {
+      closeFolderActionMenu();
+      const n = countArticlesInFolder(id);
+      const warn = n
+        ? `Delete “${target.name}”?\n\n${n} saved article${n === 1 ? "" : "s"} will stay saved under All Saved — only the folder grouping is removed.`
+        : `Delete “${target.name}”?`;
+      if (!window.confirm(warn)) return;
+      const res = deleteFolder(id);
+      if (res.ok) {
+        showToast(`Folder “${res.name}” deleted.`);
+        renderSavedArticles(); // re-renders cards + sidebar with the filter reset
+      }
+    }
+  });
+}
+
 // Wires the card "Save to folder" menu and the Saved-Articles folder sidebar.
 function setupFolderUI() {
   const feed = document.getElementById("newsFeed");
@@ -1215,15 +1353,33 @@ function setupFolderUI() {
   // propagation on open, so the opening click won't close it immediately).
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("folderMenu");
-    if (!menu) return;
-    if (e.target.closest(".news-folder-btn")) return;
-    if (!menu.contains(e.target)) closeFolderMenu();
+    if (menu && !e.target.closest(".news-folder-btn") && !menu.contains(e.target)) {
+      closeFolderMenu();
+    }
+    const actionMenu = document.getElementById("folderActionMenu");
+    if (actionMenu && !e.target.closest(".folder-chip-more") && !actionMenu.contains(e.target)) {
+      closeFolderActionMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeFolderActionMenu();
   });
 
   const sidebar = document.getElementById("foldersSidebar");
   sidebar?.addEventListener("click", (e) => {
+    // Options control first — it sits beside the chip, not inside it.
+    const more = e.target.closest(".folder-chip-more");
+    if (more) {
+      e.preventDefault();
+      e.stopPropagation();
+      openFolderActionMenu(more, more.dataset.folderMenuId || "");
+      return;
+    }
+
     const chip = e.target.closest(".folder-chip");
     if (!chip) return;
+    closeFolderActionMenu();
     if (chip.id === "newFolderChip") {
       const name = window.prompt("New folder name:");
       if (name && name.trim()) {

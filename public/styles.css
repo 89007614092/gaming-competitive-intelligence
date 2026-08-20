@@ -583,6 +583,37 @@ body {
 .folder-chip.active .folder-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
 .folder-new { font-style: italic; color: var(--text-muted); }
 
+/* A user folder = filter chip + options control, joined into one pill.
+   "All Saved" and "+ New folder" are unwrapped, so they have no options. */
+.folder-chip-wrap { display: inline-flex; align-items: stretch; }
+.folder-chip-wrap .folder-chip {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+  padding-right: 0.5rem;
+}
+
+.folder-chip-more {
+  padding: 0.3rem 0.55rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-radius: 0 20px 20px 0;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.folder-chip-more:hover { background: var(--primary-light); border-color: var(--primary); color: var(--text); }
+.folder-chip-wrap.active .folder-chip-more {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.folder-chip-wrap.active .folder-chip-more:hover { background: var(--primary-hover); }
+
 .folder-count {
   font-size: 0.7rem;
   background: var(--border);
@@ -648,6 +679,33 @@ body {
 }
 
 .folder-menu-new .text-input { flex: 1; min-width: 0; }
+
+/* Rename / delete popover for a single folder */
+.folder-action-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.35rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.folder-action-item:hover { background: var(--primary-light); }
+.folder-action-item.danger { color: var(--danger); }
+.folder-action-item.danger:hover { background: rgba(180, 35, 24, 0.1); }
+
+.folder-action-note {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
 
 .news-title {
   font-weight: 600;
