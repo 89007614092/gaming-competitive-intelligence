@@ -121,6 +121,18 @@ test("GET /healthz returns the liveness envelope", async () => {
   // running SHA + news-seed load without reading the Render dashboard).
   assert.ok(isStr(body.commit) && body.commit.length > 0, "commit must be a non-empty string");
   assert.ok(isNum(body.newsSeedArticles), "newsSeedArticles must be a number");
+  // Search-chain diagnostics: makes a degraded/circuit-broken search visible to a
+  // live probe instead of it only showing up as empty result sets.
+  assert.ok(isObj(body.search), "search diagnostics must be an object");
+  assert.ok(isArr(body.search.chain) && body.search.chain.length > 0, "search.chain must be non-empty");
+  assert.ok(isArr(body.search.providers), "search.providers must be an array");
+  for (const p of body.search.providers) {
+    assert.ok(isStr(p.name), "provider.name must be a string");
+    assert.ok(isBool(p.configured), "provider.configured must be a boolean");
+    assert.ok(isBool(p.circuitOpen), "provider.circuitOpen must be a boolean");
+  }
+  assert.ok(body.search.active === null || isStr(body.search.active),
+    "search.active must be a provider name or null");
 });
 
 test("GET /api/status returns provider strings", async () => {
@@ -320,6 +332,72 @@ test("POST /api/search caches repeated identical queries (Step 2c Fix #2)", asyn
     assert.strictEqual(second.body.total, first.body.total, "same envelope on cache hit");
   } finally {
     restore();
+  }
+});
+
+test("POST /api/search reports WHICH provider answered", async () => {
+  const restore = stubFetch(async (url) => {
+    if (String(url).includes("api.tavily.com")) {
+      return {
+        ok: true, status: 200,
+        json: async () => ({ results: [{ title: "P", url: "https://example.com/p", content: "body" }] }),
+      };
+    }
+    throw new Error("network down");
+  });
+  try {
+    const { body } = await request(server, "POST", "/api/search",
+      { query: "provider-field-unique-query", limit: 3 });
+    assert.strictEqual(body.provider, "tavily", "provider names the leg that answered");
+  } finally { restore(); }
+});
+
+// The whole point of the chain: a dead primary must DEGRADE, not 500. Drives the
+// real route with Tavily failing and only the keyless Jina leg answering.
+test("POST /api/search falls back to the keyless jina leg when Tavily fails", async () => {
+  srv.searchProvider.resetBreakers();
+  const jinaMarkdown = [
+    "## Result 1",
+    "[Publisher Story](https://publisher.example.com/story)",
+    "Real lead paragraph from the publisher.",
+  ].join("\n");
+  let jinaHits = 0;
+  const restore = stubFetch(async (url) => {
+    const u = String(url);
+    if (u.includes("api.tavily.com")) throw new Error("tavily quota exhausted");
+    if (u.includes("s.jina.ai")) {
+      jinaHits += 1;
+      return { ok: true, status: 200, text: async () => jinaMarkdown };
+    }
+    throw new Error("network down");
+  });
+  try {
+    const { status, body } = await request(server, "POST", "/api/search",
+      { query: "tavily-fallback-unique-query", limit: 3 });
+    assert.strictEqual(status, 200, "a dead primary must not 500 the request");
+    assert.strictEqual(body.success, true);
+    assert.strictEqual(body.provider, "jina", "the keyless leg answered");
+    assert.ok(isArr(body.data) && body.data.length > 0, "results still returned");
+    assert.strictEqual(body.data[0].url, "https://publisher.example.com/story");
+    assert.strictEqual(jinaHits, 1);
+  } finally {
+    restore();
+    srv.searchProvider.resetBreakers(); // don't leak breaker state into later tests
+  }
+});
+
+test("POST /api/search 500s with a combined reason only when EVERY provider fails", async () => {
+  srv.searchProvider.resetBreakers();
+  const restore = stubFetch(async () => { throw new Error("total network outage"); });
+  try {
+    const { status, body } = await request(server, "POST", "/api/search",
+      { query: "all-providers-down-unique-query", limit: 3 });
+    assert.strictEqual(status, 500);
+    assert.ok(isStr(body.error));
+    assert.match(body.error, /Web search unavailable/);
+  } finally {
+    restore();
+    srv.searchProvider.resetBreakers();
   }
 });
 

@@ -1,7 +1,13 @@
 # Tavily Fallback Plan
 
-> Status: **PLAN FOR REVIEW** (not yet implemented). Discuss-first; no code until approved.
-> Context: per `docs/longevity-and-live-updates.md`, Tavily is the **only external dependency with no fallback**. If it changes terms or rate-limits, three features degrade with no graceful path.
+> Status: **IMPLEMENTED** — `lib/searchProvider.js` + 15 tests. Tavily is no longer a single point of failure.
+> Context: per `docs/longevity-and-live-updates.md`, Tavily *was* the **only external dependency with no fallback**. If it changed terms or rate-limited, three features degraded with no graceful path.
+>
+> **Two deliberate deviations from this plan (both documented in §7 below):**
+> 1. The keyless last-resort leg is **Jina (`s.jina.ai`), not DuckDuckGo.**
+> 2. The subhead path **keeps** a search leg for user-visible requests but is
+>    **keyless-only for background warming** — which turned out to be the real
+>    quota bug, and a bigger win than dropping search from subheads entirely.
 
 ## 1. Where Tavily is used (call-site inventory)
 
@@ -62,3 +68,71 @@ Derive candidate URLs from `data/sources.json` domains via **Google News RSS / s
 3. Remove Tavily from `/api/news/subhead` (use extracted text).
 4. Re-point Suggested Updates discovery to RSS where possible.
 5. Tests + `/healthz` provider field + manual deploy (Auto-Deploy OFF).
+
+---
+
+## 7. What actually shipped (and why it differs from the plan above)
+
+### Chain: `tavily → brave → jina` (NOT `→ ddg`)
+
+`lib/searchProvider.js` exposes `createSearchProvider({ config, fetchImpl, jinaSearch, now, threshold, cooldownMs })` → `{ searchWeb, searchProviderStatus, resetBreakers, chain }`.
+
+**Why Jina replaced DDG as the keyless leg:** this repo *already tried* a self-scraped DuckDuckGo search and deleted it — the header comment in `server.js` records that Render's shared egress IP got rate-limited and bot-challenged, so it "always timed out". Shipping DDG as the backstop would have shipped a leg that is *known not to work in production*. `s.jina.ai` is keyless (an optional `JINA_API_KEY` only lifts anonymous limits), is an official endpoint rather than an HTML scrape, and is already proven from Render by the Suggested-Updates resolver. The chain injects the existing `jinaSearch` function, so there is no duplicated parser.
+
+Bing Web Search API stays excluded (retiring). Unrelated to Bing News **RSS** — see the clarification in §2.
+
+### Behaviour
+
+| Situation | Result |
+|---|---|
+| Provider has no key | Skipped silently (`"brave: not configured"`), not an error |
+| Provider throws | Recorded; chain continues to the next leg |
+| Provider throws twice in a row | **Circuit breaker opens** — skipped for 5 min (`SEARCH` cooldown), so a dead provider stops costing 15s per query |
+| Provider returns 0 results | *Not* a failure (obscure queries legitimately have none) — try the next leg, and if all are empty return `200` + `[]` |
+| Every leg fails | One error carrying every attempt's reason |
+| Success | Failure counter resets |
+
+### Call sites moved onto the chain
+
+| Call site | Before | After |
+|---|---|---|
+| `POST /api/search` | `tavilySearch` | `searchProvider.searchWeb` + `provider` in the response |
+| `POST /api/summarise` (web evidence) | `tavilySearch` | `searchWeb` |
+| `POST /api/gaming-trends/search` | `tavilySearch` | `searchProvider.searchWeb` + `provider` |
+| `searchSubhead` (was `tavilySubhead`) | `tavilySearch` | `searchWeb` |
+
+`tavilySearch` is deleted from `server.js` — the Tavily adapter now lives in the lib.
+
+### Subhead: the quota bug the plan under-called
+
+The plan said "drop Tavily from `/api/news/subhead` entirely". Investigating it surfaced something more specific and more urgent: `enrichTopArticles(articles, 6, …)` is fire-and-forget **on every news refresh — including the Thread B clock cron** (`NEWS_CRON_MS`, 5 min default). Ungated that is up to 6 searches × ~288 refreshes/day ≈ **1,700 searches/day against a 1,000/month budget**, spent warming cards nobody has opened. Thread B made this materially worse.
+
+But deleting the search leg outright risked regressing what it was introduced to fix (the Google-News boilerplate subhead), because the keyless resolve+fetch leg is exactly the path that was failing.
+
+Shipped split, which fixes the quota burn *and* keeps quality:
+
+- `fetchArticleSubhead(article, { allowSearch })` now orchestrates two named legs:
+  - `searchSubhead(title)` — chain-backed, cached per normalised headline.
+  - `extractSubhead(article)` — **keyless**: resolve the Google-News redirect (cache-first) then read the publisher page for `og:description` / lead sentences.
+- **`enrichTopArticles` passes `allowSearch: false`** → background warming is keyless-only → **zero** search spend on the cron.
+- **`GET /api/news/subhead` keeps the default (`allowSearch: true`)** → search-first, extraction fallback. This route only fires when a card actually scrolls into view (`public/app.js:1495` requests a subhead for any visible card lacking one, *including the top 6*), so anything warming couldn't fill still gets the high-quality subhead — once per headline, then cached.
+
+Net: identical user-visible behaviour, search quota now proportional to what is actually read rather than to wall-clock time.
+
+### Config
+
+`WEB_SEARCH_CHAIN` (default `tavily,brave,jina`) and `BRAVE_API_KEY` in `config.js` + `.env.example`. `WEB_SEARCH_CHAIN` is deliberately a **new** var: the pre-existing `SEARCH_PROVIDER` selects the *URL resolver* provider, not the web-search chain, and overloading it would have silently coupled two unrelated subsystems. Unknown chain names are dropped, so a typo cannot take search offline.
+
+### Observability
+
+`GET /healthz` gains `search: { chain, providers[{name, configured, keyless, circuitOpen, failures, lastError}], active }`. A degraded search is now visible to a live probe instead of only surfacing as empty result sets.
+
+### Tests (15 new; suite 131/131)
+
+`test/search-provider.test.cjs` (12, fully injected — no network): chain parsing/dedupe/typo-tolerance, normalisation + limit cap, Tavily-first happy path, fall-through to Brave on 429, skip-unconfigured → land on keyless Jina, zero-results fall-through, all-empty → `[]`, full exhaustion error, empty-query guard, breaker opens after 2 failures / is skipped / retries after cooldown, success resets the counter, status shape.
+
+`test/api-contract.test.cjs` (3, through the real route): `provider` field present; **Tavily fails → Jina answers → still `200`**; every provider down → `500` with the combined reason. Plus `/healthz` `search` shape.
+
+### Not done (deliberately deferred)
+
+Plan step 4 — re-pointing Suggested Updates discovery from search to RSS — was **not** included here. It already uses `searchGoogleNewsRss` (keyless RSS) for discovery, so there is no Tavily dependency to remove; the real attribution problem on that path is Thread F (`news.google.com` credit), which is a separate change.

@@ -270,17 +270,18 @@ test("enrichTopArticles: returns same array, never throws/hangs on unresolvable 
   assert.ok(Date.now() - start < 5000, "completes within the timeout cap");
 });
 
-test("tavilySubhead returns clean text or null and never throws when unconfigured", async () => {
-  // With no TAVILY_API_KEY the search rejects; tavilySubhead must swallow it
-  // and return null (so the caller falls back to resolve+fetch) — never throw.
+test("searchSubhead returns clean text or null and never throws when unconfigured", async () => {
+  // With no search provider configured the chain rejects; searchSubhead must
+  // swallow it and return null (so the caller falls back to keyless extraction)
+  // — never throw.
   let threw = false;
   let out;
   try {
-    out = await srv.tavilySubhead("Tencent Cloud named a Leader in Omdia Market Radar");
+    out = await srv.searchSubhead("Tencent Cloud named a Leader in Omdia Market Radar");
   } catch (e) {
     threw = true;
   }
-  assert.strictEqual(threw, false, "tavilySubhead must not throw when Tavily is unconfigured");
+  assert.strictEqual(threw, false, "searchSubhead must not throw when search is unconfigured");
   assert.ok(out === null || (typeof out === "string" && out.length >= 30), `expected null or clean text, got: ${out}`);
   assert.ok(!srv.isGoogleNewsBoilerplate(out || ""), "must never surface the Google News boilerplate");
 });

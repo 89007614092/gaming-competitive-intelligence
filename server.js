@@ -43,57 +43,32 @@ function resolvePython() {
 const PYTHON = resolvePython();
 const TRANSCRIPT_SCRIPT = path.join(__dirname, "transcript.py");
 
-// ===== Tavily Web Search (API key required) =====
-// Replaces the old self-scraped DuckDuckGo search (run via a Python subprocess),
-// which got rate-limited / served bot-challenges from Render's shared IP and
-// always timed out. Tavily is a proper search API that returns structured
-// results reliably from any IP. Requires TAVILY_API_KEY in the environment.
+// ===== Web search — provider CHAIN, not a single vendor =====
+// Was: a bare Tavily call (which itself replaced a self-scraped DuckDuckGo
+// search that got rate-limited / bot-challenged from Render's shared IP and
+// always timed out). The problem with the bare Tavily call was that it made
+// Tavily the ONLY external dependency with no fallback: a quota or key issue
+// silently broke the search box and Q&A web evidence.
+//
+// Now every search goes through lib/searchProvider.js, which walks
+// tavily -> brave -> jina (keyless backstop) and trips a short circuit breaker
+// on a provider that keeps failing. `jinaSearch` is injected so the chain reuses
+// the already-working s.jina.ai parser defined below rather than duplicating it.
+const { createSearchProvider } = require("./lib/searchProvider");
+const searchProvider = createSearchProvider({
+  config,
+  // Arrow-wrapped: jinaSearch is declared further down in this file.
+  jinaSearch: (query, limit) => jinaSearch(query, limit),
+  log: (msg) => console.warn(msg),
+});
 
-function tavilySearch(query, limit = 10) {
-  return new Promise((resolve, reject) => {
-    const apiKey = config.TAVILY_API_KEY;
-    if (!apiKey) {
-      return reject(new Error("Search API key not configured (set TAVILY_API_KEY)"));
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query,
-        max_results: Math.min(Number(limit) || 10, 20),
-        search_depth: "basic",
-        include_answer: false,
-      }),
-      signal: controller.signal,
-    })
-      .then(async (resp) => {
-        clearTimeout(timeout);
-        if (!resp.ok) {
-          const txt = await resp.text().catch(() => "");
-          throw new Error(`Search API returned HTTP ${resp.status}: ${txt.slice(0, 160)}`);
-        }
-        const json = await resp.json();
-        const results = Array.isArray(json.results) ? json.results : [];
-        resolve(
-          results
-            .filter(item => item.url && (item.title || item.content))
-            .map(item => ({
-              title: item.title || item.url,
-              url: item.url,
-              description: String(item.content || item.title || "").slice(0, 900),
-            }))
-        );
-      })
-      .catch((err) => {
-        clearTimeout(timeout);
-        if (err.name === "AbortError") return reject(new Error("Search timed out"));
-        reject(err);
-      });
-  });
+// Back-compat shim for the existing call sites: returns just the result array
+// (the chain's provider/attempt metadata is available via searchWebDetailed).
+async function searchWeb(query, limit = 10) {
+  const { results } = await searchProvider.searchWeb(query, { limit });
+  return results;
 }
+const searchWebDetailed = (query, limit = 10) => searchProvider.searchWeb(query, { limit });
 
 // Fetch the full article body for a source URL. Reuses scrapeUrl (which
 // resolves news.google.com redirect URLs to the real publisher and returns
@@ -1090,11 +1065,10 @@ const NEWS_EXCLUDED_DOMAINS = [
 
 // ===== API ROUTES =====
 
-// POST /api/search — Tavily web search (requires TAVILY_API_KEY)
-// Cache POST /api/search results by normalized query+limit so repeated
-// identical searches hit Tavily at most once per TTL window. Saves the
-// 1k/mo Tavily budget on repeat queries and drops latency to ~instant.
-// (Step 2c Fix #2)
+// POST /api/search — web search via the provider chain (tavily -> brave -> jina)
+// Cache results by normalized query+limit so repeated identical searches hit the
+// upstream provider at most once per TTL window. Saves the 1k/mo Tavily budget on
+// repeat queries and drops latency to ~instant. (Step 2c Fix #2)
 const searchResultsCache = new Map(); // key -> { ts, payload }
 const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
 app.post("/api/search", async (req, res) => {
@@ -1108,8 +1082,10 @@ app.post("/api/search", async (req, res) => {
       return res.json({ ...hit.payload, cached: true });
     }
 
-    const results = await tavilySearch(query, limit);
-    const payload = { success: true, data: results, total: results.length };
+    const { results, provider } = await searchProvider.searchWeb(query, { limit });
+    // `provider` tells the caller WHICH leg answered, so a degraded search is
+    // visible instead of silent.
+    const payload = { success: true, data: results, total: results.length, provider };
     if (searchResultsCache.size > 500) searchResultsCache.clear();
     searchResultsCache.set(cacheKey, { ts: Date.now(), payload });
     res.json({ ...payload, cached: false });
@@ -1202,9 +1178,11 @@ app.post("/api/summarise", async (req, res) => {
       try {
         // Fetch more candidates than we keep, then relevance-filter so off-topic
         // hits (e.g. dictionary definitions of a word in the question) are dropped
-        // before they can pollute the answer. The "analysis" suffix nudges Tavily
-        // away from generic/definition pages toward substantive coverage.
-        const webResults = await tavilySearch(`${question} analysis`, 8);
+        // before they can pollute the answer. The "analysis" suffix nudges the
+        // search engine away from generic/definition pages toward substantive
+        // coverage. Runs through the provider chain, so a Tavily outage degrades
+        // to Brave/Jina instead of dropping web evidence entirely.
+        const webResults = await searchWeb(`${question} analysis`, 8);
         const filtered = webResultRelevance(question, webResults, 5);
         const kept = filtered
           .filter(item => item.url && (item.title || item.description))
@@ -1707,19 +1685,19 @@ function pickSubheadCandidate(...candidates) {
   return null;
 }
 
-// Cache Tavily results by normalized title so repeated cards for the same
-// headline hit the search API at most once per server process.
+// Cache search-derived subheads by normalized title so repeated cards for the
+// same headline hit the search chain at most once per server process.
 const subheadTitleCache = new Map();
-async function tavilySubhead(title) {
+async function searchSubhead(title) {
   const norm = String(title || "").trim().toLowerCase();
   if (!norm) return null;
   if (subheadTitleCache.has(norm)) return subheadTitleCache.get(norm);
   const p = (async () => {
     try {
-      const results = await tavilySearch(norm, 1);
+      const results = await searchWeb(norm, 1);
       const first = results && results[0];
       if (!first) return null;
-      // Prefer the clean extracted text Tavily returns for the headline query.
+      // Prefer the clean extracted text the provider returns for the headline query.
       if (first.description && !isGoogleNewsBoilerplate(first.description)) {
         return first.description.trim();
       }
@@ -1745,20 +1723,11 @@ async function tavilySubhead(title) {
   return p;
 }
 
-async function fetchArticleSubhead(article) {
+// KEYLESS leg: resolve the Google News redirect to the real publisher and read
+// the page directly. Costs no search quota, so this is the only leg the
+// background warmer is allowed to use.
+async function extractSubhead(article) {
   const title = article.title || "";
-  // Tavily-first: the web-search API returns clean extracted article text, so
-  // we skip the failing Google-News resolver + dispatcher entirely. This is the
-  // path that replaces the boilerplate with a real lead. When Tavily is
-  // unconfigured it returns null fast and we fall through to resolve+fetch.
-  try {
-    const tav = await tavilySubhead(title);
-    const picked = pickSubheadCandidate(tav);
-    if (picked) return picked;
-  } catch (_) { /* fall through to the resolve+fetch fallback */ }
-
-  // Fallback (Tavily unconfigured / failed): resolve the Google News redirect
-  // to the publisher and read the page. Keeps a real lead when Tavily is absent.
   try {
     // News enrichment runs on its OWN resolver chain (newsChains) so it can
     // never starve the background scanner's URL resolution. And it is
@@ -1783,12 +1752,44 @@ async function fetchArticleSubhead(article) {
   }
 }
 
+// Resolves a real subhead for one article.
+//
+// QUOTA NOTE (why `allowSearch` exists): the search leg is fast and high quality,
+// but the background warmer runs on EVERY news refresh — including the Thread B
+// clock cron (NEWS_CRON_MS, 5 min default). Left ungated that is up to 6 searches
+// x ~288 refreshes/day, which would incinerate a 1k/month search budget on cards
+// nobody has looked at. So:
+//   * background warming (enrichTopArticles) passes allowSearch:false -> KEYLESS
+//     extraction only, zero search spend;
+//   * the user-visible lazy path (GET /api/news/subhead, fired when a card
+//     actually scrolls into view) keeps search-first, so quality is unchanged
+//     exactly where the user is looking — once per headline, then cached.
+async function fetchArticleSubhead(article, options = {}) {
+  const allowSearch = options.allowSearch !== false;
+
+  if (allowSearch) {
+    // Search-first: the provider chain returns clean extracted article text, so
+    // we skip the flaky Google-News resolver entirely. When no provider is
+    // configured/reachable it returns null fast and we fall through.
+    try {
+      const picked = pickSubheadCandidate(await searchSubhead(article.title || ""));
+      if (picked) return picked;
+    } catch (_) { /* fall through to the keyless extraction leg */ }
+  }
+
+  return extractSubhead(article);
+}
+
 // Bounded-concurrency enrichment of the first `limit` articles (default 6) so
 // the News tab can show real subheads for the top cards. Each fetch is capped
 // by `perArticleTimeoutMs` so a single slow resolution can never pile up, and
 // the caller may run this fire-and-forget (after responding) — see /api/news.
 // The rest of the cards are filled in lazily by the client as the user scrolls
 // (see /api/news/subhead below).
+//
+// Warming is KEYLESS-ONLY (allowSearch:false): it runs on every refresh including
+// the 5-minute cron, so it must never spend search quota. Cards it can't fill get
+// the search-backed subhead on demand when the user actually scrolls to them.
 async function enrichTopArticles(articles, limit = 6, concurrency = 5, perArticleTimeoutMs = 15000) {
   const top = articles.slice(0, limit);
   // Clear the timeout as soon as the race settles so the fire-and-forget
@@ -1805,7 +1806,8 @@ async function enrichTopArticles(articles, limit = 6, concurrency = 5, perArticl
     const batch = top.slice(i, i + concurrency);
     await Promise.all(batch.map(async (a) => {
       try {
-        const sub = await withTimeout(fetchArticleSubhead(a), perArticleTimeoutMs);
+        const sub = await withTimeout(
+          fetchArticleSubhead(a, { allowSearch: false }), perArticleTimeoutMs);
         if (sub) a.subhead = sub;
       } catch (_) { /* keep the RSS description on timeout/error */ }
     }));
@@ -3521,6 +3523,10 @@ app.get("/healthz", (req, res) => {
     callBudget: { used: scanModelCallsThisRun, limit: SCAN_CALLS_PER_RUN_CAP },
     stuckRateLimitedProposals: stuckRateLimited,
     resolver: { attempts: resolverStats.attempts, ok: resolverStats.ok, successRatePct: resolverSuccessRate },
+    // Which search legs are configured, which one would answer next, and whether
+    // any is circuit-broken. Makes a degraded search visible to a live probe
+    // instead of only showing up as empty result sets.
+    search: searchProvider.searchProviderStatus(),
   });
 });
 
@@ -3821,14 +3827,14 @@ app.get("/api/gaming-trends", (req, res) => {
   }
 });
 
-// POST /api/gaming-trends/search — live web search (Tavily) for a trend
+// POST /api/gaming-trends/search — live web search for a trend, via the chain
 app.post("/api/gaming-trends/search", async (req, res) => {
   try {
     const { keywords, limit = 5 } = req.body;
     if (!keywords) return res.status(400).json({ error: "Search keywords required" });
 
-    const results = await tavilySearch(keywords, limit);
-    res.json({ success: true, data: results, keywords });
+    const { results, provider } = await searchProvider.searchWeb(keywords, { limit });
+    res.json({ success: true, data: results, keywords, provider });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3926,9 +3932,15 @@ module.exports = {
   // News subhead enrichment (option 2: deferred, timeout-capped)
   enrichTopArticles,
   fetchArticleSubhead,
-  tavilySubhead,
+  searchSubhead,
+  extractSubhead,
   isGoogleNewsBoilerplate,
   pickSubheadCandidate,
+
+  // Web-search provider chain (tavily -> brave -> jina)
+  searchWeb,
+  searchWebDetailed,
+  searchProvider,
 
   // Bing News RSS fallback (Google-News-blocked path)
   isBingRedirector,

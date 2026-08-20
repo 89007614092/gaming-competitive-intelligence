@@ -41,12 +41,23 @@ Liveness probe. Always `200`.
   "scanBudget": { "used": 0, "limit": 35, "day": "2026-08-18" },
   "callBudget": { "used": 0, "limit": 30 },
   "stuckRateLimitedProposals": 0,
-  "resolver": { "attempts": 0, "ok": 0, "successRatePct": null | 0 }
+  "resolver": { "attempts": 0, "ok": 0, "successRatePct": null | 0 },
+  "search": {
+    "chain": ["tavily", "brave", "jina"],
+    "providers": [
+      { "name": "tavily", "configured": true, "keyless": false, "circuitOpen": false, "failures": 0 }
+    ],
+    "active": "tavily" | null
+  }
 }
 ```
 
 Pinned: `ok:boolean`, `uptimeSeconds:number`, `scanning:boolean`,
-`scanBudget:object` with `used`/`limit` numbers, `resolver:object`.
+`scanBudget:object` with `used`/`limit` numbers, `resolver:object`,
+`search:object` with `chain:array`, `providers:array` (each `name:string`,
+`configured:boolean`, `circuitOpen:boolean`) and `active:string|null`.
+`search` is the web-search fallback chain's live state — `active` is the leg that
+would answer the next query, or `null` if every leg is unconfigured/circuit-broken.
 
 ### `GET /api/status`
 
@@ -299,13 +310,20 @@ on the model. Cadence is set by `NEWS_CRON_MS` (config.js, default 5 min;
 ### `POST /api/search`
 
 ```json
-{ "success": true, "data": [ { "title": "…", "url": "…", … } ], "total": 0 }
+{ "success": true, "data": [ { "title": "…", "url": "…", … } ], "total": 0, "provider": "tavily", "cached": false }
 ```
 
-Pinned: `success:true`, `data:array`, `total:number` (`=== data.length`), `cached:boolean`.
+Pinned: `success:true`, `data:array`, `total:number` (`=== data.length`),
+`cached:boolean`, `provider:string`.
 Repeat identical `query`+`limit` within a 2-min TTL are served from an in-memory
-cache (`cached:true`) without a second Tavily call — protects the 1k/mo budget.
+cache (`cached:true`) without a second upstream call — protects the 1k/mo budget.
 Missing query → `400` `{ "error": "Query is required" }`.
+
+`provider` names the chain leg that answered (`tavily` | `brave` | `jina`), so a
+degraded search is observable rather than silent. The route only `500`s when
+**every** leg fails; the error then carries each attempt's reason
+(`Web search unavailable — tavily: …; brave: …`). Zero hits from all legs is a
+`200` with an empty `data` array, not an error.
 
 ---
 
