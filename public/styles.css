@@ -583,6 +583,20 @@ body {
 .folder-chip.active .folder-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
 .folder-new { font-style: italic; color: var(--text-muted); }
 
+/* Option A portability toolbar (Export / Import) above the folder chips. */
+.folder-toolbar { display: flex; gap: 0.4rem; width: 100%; margin-bottom: 0.4rem; }
+.folder-tool-btn {
+  padding: 0.25rem 0.7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.15s;
+}
+.folder-tool-btn:hover { background: var(--primary-light); border-color: var(--primary); color: var(--text); }
+
 /* A user folder = filter chip + options control, joined into one pill.
    "All Saved" and "+ New folder" are unwrapped, so they have no options. */
 .folder-chip-wrap { display: inline-flex; align-items: stretch; }

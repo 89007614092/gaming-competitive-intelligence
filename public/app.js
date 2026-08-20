@@ -1164,6 +1164,14 @@ function renderFoldersSidebar() {
   sidebar.style.display = "flex";
   const folders = listFolders();
   const chips = [];
+  // Portability toolbar (Option A): Export / Import the folder map + saved
+  // articles. Manual cross-device move; no server round-trip.
+  chips.push(
+    `<div class="folder-toolbar">` +
+      `<button class="folder-tool-btn" id="exportFoldersBtn" type="button">Export</button>` +
+      `<button class="folder-tool-btn" id="importFoldersBtn" type="button">Import</button>` +
+    `</div>`
+  );
   chips.push(
     `<button class="folder-chip${activeFolderFilter === null ? " active" : ""}" data-folder-id="">All Saved <span class="folder-count">${savedNewsArticles.length}</span></button>`
   );
@@ -1183,6 +1191,90 @@ function renderFoldersSidebar() {
   });
   chips.push(`<button class="folder-chip folder-new" id="newFolderChip" type="button">+ New folder</button>`);
   sidebar.innerHTML = chips.join("");
+}
+
+// ===== Option A: portable folder map (Export / Import) =====
+// Serialises the two localStorage keys to a JSON file so a user can move their
+// News+Search folders + saved articles between devices/browsers without a server.
+function exportFolders() {
+  const payload = {
+    app: "gaming-competitive-intelligence",
+    kind: "news-folders",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    newsFolders: newsFolders,
+    savedNewsArticles: savedNewsArticles,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+  a.href = url;
+  a.download = `news-folders-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast("Folders exported.");
+}
+
+// Reads an exported file and MERGES it into the current local state:
+//  - folders union by id (incoming name wins on id match so renames propagate);
+//  - articles union by key, folderIds merged, most-recent savedAt kept;
+//  - dangling folderIds (not in the merged folder list) are pruned.
+function importFolders(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      if (!data || data.kind !== "news-folders" ||
+          !Array.isArray(data.newsFolders) || !Array.isArray(data.savedNewsArticles)) {
+        showToast("That file is not a valid folders export.");
+        return;
+      }
+      const byId = new Map(newsFolders.map(f => [f.id, f]));
+      let addedFolders = 0, updatedFolders = 0;
+      for (const f of data.newsFolders) {
+        if (!f || typeof f.id !== "string" || typeof f.name !== "string") continue;
+        const existing = byId.get(f.id);
+        if (existing) {
+          if (existing.name !== f.name) { existing.name = f.name; updatedFolders++; }
+        } else {
+          newsFolders.push({ id: f.id, name: f.name, createdAt: f.createdAt || new Date().toISOString() });
+          addedFolders++;
+        }
+      }
+      const validIds = new Set(newsFolders.map(f => f.id));
+      const byKey = new Map(savedNewsArticles.map(a => [newsArticleKey(a), a]));
+      let addedArticles = 0, mergedArticles = 0;
+      for (const inc of data.savedNewsArticles) {
+        if (!inc || typeof inc !== "object") continue;
+        const key = newsArticleKey(inc);
+        if (!key) continue;
+        const incFolders = Array.isArray(inc.folderIds) ? inc.folderIds : [];
+        const existing = byKey.get(key);
+        if (existing) {
+          const merged = new Set([...(existing.folderIds || []), ...incFolders]);
+          existing.folderIds = [...merged].filter(id => validIds.has(id));
+          if (inc.savedAt && (!existing.savedAt || inc.savedAt > existing.savedAt)) existing.savedAt = inc.savedAt;
+          mergedArticles++;
+        } else {
+          savedNewsArticles.push({ ...inc, folderIds: incFolders.filter(id => validIds.has(id)) });
+          addedArticles++;
+        }
+      }
+      saveNewsFolders();
+      saveNewsArticles();
+      renderFoldersSidebar();
+      renderSavedArticles();
+      showToast(`Imported: ${addedFolders} new / ${updatedFolders} updated folder(s), ${addedArticles} new / ${mergedArticles} updated article(s).`);
+    } catch (err) {
+      showToast("Could not read that file: " + err.message);
+    }
+  };
+  reader.onerror = () => showToast("Could not read that file.");
+  reader.readAsText(file);
 }
 
 function openFolderMenu(anchorBtn, articleKey) {
@@ -1368,6 +1460,12 @@ function setupFolderUI() {
 
   const sidebar = document.getElementById("foldersSidebar");
   sidebar?.addEventListener("click", (e) => {
+    // Portability toolbar (Option A) — handled before the chip logic below.
+    const exp = e.target.closest("#exportFoldersBtn");
+    if (exp) { e.preventDefault(); exportFolders(); return; }
+    const imp = e.target.closest("#importFoldersBtn");
+    if (imp) { e.preventDefault(); document.getElementById("folderImportInput")?.click(); return; }
+
     // Options control first — it sits beside the chip, not inside it.
     const more = e.target.closest(".folder-chip-more");
     if (more) {
@@ -1392,6 +1490,14 @@ function setupFolderUI() {
     activeFolderFilter = id === "" ? null : id;
     renderFoldersSidebar();
     renderSavedArticles();
+  });
+
+  // Option A: import the folder map + saved articles from an exported JSON file.
+  const importInput = document.getElementById("folderImportInput");
+  importInput?.addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importFolders(file);
+    e.target.value = ""; // allow re-importing the same file
   });
 }
 
