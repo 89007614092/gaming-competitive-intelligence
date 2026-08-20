@@ -85,8 +85,11 @@ function setupNavigation() {
     });
   });
 
-  // Refresh news button
+  // Refresh news — single explicit control; clears the live "new since you looked" badge.
   document.getElementById("refreshNewsBtn").addEventListener("click", () => {
+    newsUnseenCount = 0;
+    const badge = document.getElementById("newsLiveBadge");
+    if (badge) { badge.hidden = true; badge.textContent = ""; badge.title = ""; }
     loadNews(true);
   });
 
@@ -916,6 +919,9 @@ let newsFolders = loadNewsFolders();
 let activeFolderFilter = null;
 // Thread B: a single open SSE connection for live news updates (one per tab).
 let newsEventSource = null;
+// Count of server-pushed news updates that arrived while the user was not looking
+// at the News feed. Drives the "new since you looked" badge on the Refresh control.
+let newsUnseenCount = 0;
 
 function loadSavedNewsArticles() {
   try {
@@ -3282,30 +3288,42 @@ function renderRisks(filter = "all") {
 // ===== Live news stream (Thread B) =====
 // One SSE connection per tab to /api/news/stream. On a `news-updated` event we
 // reveal a "New updates" pill; if the News view is already open we silently
-// reload the feed so it feels live without a manual refresh. No decorative
-// emoji — line-glyph controls only (PR #46 convention).
+// ===== News live stream (Thread B) =====
+// Subscribes to server-pushed news updates so the feed feels live. There is a
+// single Refresh control; an unseen-update badge appears on it when new content
+// lands while the user is looking elsewhere. No decorative emoji — line-glyph
+// controls only (PR #46 convention).
 function setupNewsStream() {
   if (newsEventSource || typeof EventSource === "undefined") return;
-  const pill = document.getElementById("newsLivePill");
+  const badge = document.getElementById("newsLiveBadge");
+
+  function renderBadge() {
+    if (!badge) return;
+    if (newsUnseenCount > 0) {
+      badge.hidden = false;
+      badge.textContent = newsUnseenCount > 9 ? "9+" : String(newsUnseenCount);
+      badge.title = newsUnseenCount + " new article" + (newsUnseenCount === 1 ? "" : "s") + " since you last looked";
+    } else {
+      badge.hidden = true;
+      badge.textContent = "";
+      badge.title = "";
+    }
+  }
 
   newsEventSource = new EventSource(`${API_BASE}/news/stream`);
   newsEventSource.addEventListener("news-updated", () => {
-    if (pill) pill.hidden = false;
-    // If the user is already looking at the feed, refresh it in place.
+    newsUnseenCount += 1;
     const newsView = document.getElementById("news-view");
     if (newsView && newsView.classList.contains("active")) {
+      // Already looking at the feed — refresh in place and clear the badge.
       loadNews();
+      newsUnseenCount = 0;
     }
+    renderBadge();
   });
   newsEventSource.onerror = () => {
     // Browser auto-reconnects on transient drops; nothing to do here.
   };
-
-  // Clicking the pill clears it and forces a fresh load.
-  pill?.addEventListener("click", () => {
-    if (pill) pill.hidden = true;
-    loadNews(true);
-  });
 }
 
 // ===== Source Monitor + Review Queue (Scope C, P1–P3) =====

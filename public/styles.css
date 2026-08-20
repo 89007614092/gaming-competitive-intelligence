@@ -305,18 +305,22 @@ body {
 }
 .btn-ghost:hover { background: var(--bg); }
 
-/* Thread B: "New updates" pill. Outlined accent so it stands out against the
-   neutral toolbar without being a loud filled button. Reuses the ↻ glyph. */
-.news-live-pill {
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-  animation: news-pill-pulse 2s ease-in-out infinite;
-}
-.news-live-pill:hover { background: var(--accent); color: #fff; }
-@keyframes news-pill-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.0); }
-  50% { box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.18); }
+/* Thread B: unseen-update badge on the single Refresh control. Filled accent
+   so it reads as a "new since you looked" counter without a second button. */
+.news-live-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* === Stats Cards === */
