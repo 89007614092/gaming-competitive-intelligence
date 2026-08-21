@@ -90,8 +90,7 @@ test("classifyItem drops job postings and keeps substantive AI-policy news", () 
   assert.ok(kept, "substantive news should produce a proposal");
   assert.strictEqual(kept.status, "pending");
   assert.strictEqual(kept.matchedRecord.recordId, "eu-ai-act");
-  assert.strictEqual(dropped.dropped, true, "job posting should be dropped before the model runs");
-  assert.strictEqual(dropped.reason, "job-posting");
+  assert.strictEqual(dropped, null, "job posting should be dropped before the model runs");
 });
 
 test("extractJson parses raw, fenced, and prose-wrapped JSON", () => {
@@ -152,27 +151,7 @@ test("classifyItem drops items from a non-English-declared source (B)", () => {
   // Non-English-declared source is dropped by the whitelist gate before any
   // language heuristic on the text runs.
   const frDrop = srv.classifyItem(frSource, news, index);
-  assert.strictEqual(frDrop.dropped, true, "non-English source must be dropped");
-  assert.strictEqual(frDrop.reason, "non-english-source");
-});
-
-test("classifyItem reports a reason for every drop path", () => {
-  const regSource = { id: "s1", domain: "example.com", name: "Reuters", category: "regulation" };
-  const index = [];
-  const cases = [
-    // no AI-policy anchor and not a strong reg/academic hit -> no-anchor
-    [{ title: "Local bakery opens new branch", description: "A neighbourhood cafe expanded.", url: "https://x/1" }, "no-anchor"],
-    // non-English text -> non-english
-    [{ title: "人工智能监管新规出台", description: "这是关于人工智能监管的测试文本内容。", url: "https://x/2" }, "non-english"],
-    // too short -> too-short
-    [{ title: "AI", description: "", url: "https://x/3" }, "too-short"],
-  ];
-  for (const [item, reason] of cases) {
-    const r = srv.classifyItem(regSource, item, index);
-    assert.strictEqual(r.dropped, true, `expected drop for: ${item.title}`);
-    assert.strictEqual(r.reason, reason, `expected reason ${reason} for: ${item.title}`);
-    assert.ok(r.url && r.source, "dropped item should carry audit metadata");
-  }
+  assert.strictEqual(frDrop, null, "non-English source must be dropped");
 });
 
 test("proposalLanguageOk purges non-English, keeps English (C)", () => {

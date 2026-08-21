@@ -2405,12 +2405,11 @@ function loadSourceState() {
       for (const [k, v] of Object.entries(data.resolvedUrls)) resolvedUrlMap.set(k, v);
     }
     if (data && typeof data === "object") {
-      if (!Array.isArray(data.droppedItems)) data.droppedItems = [];
       return data;
     }
-    return { sources: {}, lastFullScan: null, droppedItems: [] };
+    return { sources: {}, lastFullScan: null };
   } catch (_) {
-    return { sources: {}, lastFullScan: null, droppedItems: [] };
+    return { sources: {}, lastFullScan: null };
   }
 }
 
@@ -2418,26 +2417,6 @@ function saveSourceState() {
   try {
     fs.writeFileSync(SOURCE_STATE_FILE, JSON.stringify(sourceState, null, 2));
   } catch (_) { /* non-fatal */ }
-}
-
-// Record a scan item that classifyItem rejected, so the dropped-items audit can
-// surface what the scanner is skipping and why. Capped + persisted via
-// sourceState so it survives cold starts and can't grow unbounded.
-function recordDroppedItem(prop) {
-  if (!sourceState.droppedItems) sourceState.droppedItems = [];
-  sourceState.droppedItems.push({
-    reason: prop.reason,
-    url: prop.url,
-    title: prop.title,
-    source: prop.source,
-    sourceDomain: prop.sourceDomain,
-    publishedAt: prop.publishedAt,
-    at: new Date().toISOString(),
-  });
-  if (sourceState.droppedItems.length > 200) {
-    sourceState.droppedItems.splice(0, sourceState.droppedItems.length - 200);
-  }
-  saveSourceState();
 }
 
 function loadProposed() {
@@ -3351,23 +3330,12 @@ function looksLikeJobPosting(text) {
 // Classify a fetched item: English-only, compared to existing content, and either
 // dropped (duplicate/non-English) or returned as a proposed change.
 function classifyItem(source, item, index) {
-  // Audit helper: a dropped item carries its reason + enough metadata for the
-  // dropped-items review surface to show what was skipped and why.
-  const drop = (reason) => ({
-    dropped: true,
-    reason,
-    url: item.url,
-    title: item.title,
-    source: source.id,
-    sourceDomain: source.domain,
-    publishedAt: item.publishedAt,
-  });
   const text = `${item.title} ${item.description || ""}`;
-  if (!sourceLanguageAllowed(source)) return drop("non-english-source"); // (B) drop non-English-declared source
-  if (!isLikelyEnglish(text)) return drop("non-english"); // (a) drop non-English
-  if (looksLikeJobPosting(text)) return drop("job-posting"); // (a2) drop recruitment / non-substantive noise
+  if (!sourceLanguageAllowed(source)) return null; // (B) drop non-English-declared source
+  if (!isLikelyEnglish(text)) return null; // (a) drop non-English
+  if (looksLikeJobPosting(text)) return null; // (a2) drop recruitment / non-substantive noise
   const itemTokens = new Set(tokenize(text));
-  if (itemTokens.size < 2) return drop("too-short");
+  if (itemTokens.size < 2) return null;
   const itemStrong = strongTermsIn(text);
 
   const publisher = item.sourceName || source.name;
@@ -3422,7 +3390,7 @@ function classifyItem(source, item, index) {
     return base;
   }
 
-  return drop("no-anchor"); // drop: noise / not relevant to existing curated content
+  return null; // drop: noise / not relevant to existing curated content
 }
 
 // Apply an approved proposal to the real curated dataset (user-gated write).
@@ -3556,7 +3524,6 @@ async function runSourceScan({ force = false } = {}) {
           considered++;
           const prop = classifyItem(source, item, index);
           if (!prop) continue;                       // safety: classifier returned nothing
-          if (prop.dropped) { recordDroppedItem(prop); continue; } // audit dropped items
           if (knownIds.has(prop.id)) continue;        // already proposed/acted on
           const dedupeKey = `${prop.matchedRecord ? prop.matchedRecord.title : ""}|${prop.detectedAction}|${prop.url}`;
           if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
@@ -3845,10 +3812,6 @@ app.get("/healthz", (req, res) => {
     scanBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET, day: scanBudget().day },
     callBudget: { used: scanModelCallsThisRun, limit: SCAN_CALLS_PER_RUN_CAP },
     stuckRateLimitedProposals: stuckRateLimited,
-    droppedItems: {
-      count: (sourceState.droppedItems || []).length,
-      recent: (sourceState.droppedItems || []).slice(-10).reverse(),
-    },
     resolver: { attempts: resolverStats.attempts, ok: resolverStats.ok, successRatePct: resolverSuccessRate },
     // Which search legs are configured, which one would answer next, and whether
     // any is circuit-broken. Makes a degraded search visible to a live probe
@@ -3959,23 +3922,6 @@ function requireAdmin(req, res, next) {
   if (provided !== key) return res.status(401).json({ error: "Unauthorized" });
   next();
 }
-
-// Re-eligibilise a previously-dropped scan item so the next scan re-classifies
-// it (e.g. after a classifier/seed change makes it a fit). Removes it from the
-// droppedItems audit and from the source's seen set.
-app.post("/api/admin/dropped/recover", requireAdmin, (req, res) => {
-  const body = req.body || {};
-  const { source, url } = body;
-  if (!source || !url) return res.status(400).json({ error: "source and url are required" });
-  const list = sourceState.droppedItems || [];
-  const idx = list.findIndex(d => d.source === source && d.url === url);
-  if (idx === -1) return res.status(404).json({ error: "dropped item not found" });
-  list.splice(idx, 1);
-  const st = sourceState.sources && sourceState.sources[source];
-  if (st && Array.isArray(st.seen)) st.seen = st.seen.filter(u => u !== url);
-  saveSourceState();
-  res.json({ ok: true, recovered: { source, url } });
-});
 
 // Gate for the shared, editable datasets (Option B). Reuses ADMIN_API_KEY when
 // EDITOR_API_KEY is absent, so a trusted team needs only one shared secret.
