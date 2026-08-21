@@ -30,6 +30,15 @@ const OPEN_MODEL_BASE_URL_SCAN = (process.env.OPEN_MODEL_BASE_URL_SCAN || OPEN_M
 // model id (e.g. an OpenRouter slug like meta-llama/llama-3.3-70b-instruct) than
 // the Q&A lane's Groq slug. Falls back to DEFAULT_MODEL when unset.
 const OPEN_MODEL_NAME_SCAN = process.env.OPEN_MODEL_NAME_SCAN || DEFAULT_MODEL;
+// OPTIONAL second model for the Q&A (user-facing) lane only. Same account, same
+// API key + base URL — only the model name differs — so it adds resilience with
+// NO new account, dependency, or architectural fork. When unset (default), the
+// Q&A lane behaves exactly as before. Recommended: a DIFFERENT family from the
+// primary (e.g. qwen/qwen3-32b) so a gpt-oss-specific outage doesn't also take
+// down the fallback. Set via render env OPEN_MODEL_NAME_FALLBACK.
+const OPEN_MODEL_NAME_FALLBACK = process.env.OPEN_MODEL_NAME_FALLBACK || "";
+const QA_FAILOVER_ENABLED =
+  !!OPEN_MODEL_NAME_FALLBACK && OPEN_MODEL_NAME_FALLBACK !== DEFAULT_MODEL;
 // Per-lane readiness. SUMMARY_DISABLE_MODEL gates the Q&A (user-facing) lane;
 // SUMMARY_DISABLE_SCAN gates ONLY the background scan lane.
 const QA_MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
@@ -306,6 +315,88 @@ function cooldownFrom429(resp, txt) {
   return 60 * 60 * 1000;
 }
 
+// Qwen3 emits internal <think> reasoning blocks by default, which would bloat
+// the answer and burn quota on the failover path. We pin thinking off for it.
+function modelNeedsQwen3ThinkingDisabled(model) {
+  return /qwen-?3/i.test(model || "");
+}
+
+// Safety net: strip any <think>…</think> span from a model response so a
+// reasoning model that ignores the disable flag still yields clean text.
+function stripThinkBlocks(text = "") {
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+}
+
+// Shared Q&A chat-completions caller with same-account two-model failover.
+// Iterates models [DEFAULT_MODEL] then (if QA_FAILOVER_ENABLED)
+// [OPEN_MODEL_NAME_FALLBACK]. Per-model 429 short-throttles are retried on the
+// SAME model (preserving the existing in-request wait-out behavior); any other
+// failure (network error, abort/timeout, 5xx, non-empty parse failure, empty
+// answer) advances to the next model. A long/daily-cap 429 still sets the
+// qaRateLimitedUntil cooldown and advances. Returns { content, model } on
+// success; throws after all models fail, so the caller's extractive fallback
+// engages unchanged.
+async function postQaChatCompletions({ body, timeoutMs = 60000 }) {
+  const models = QA_FAILOVER_ENABLED ? [DEFAULT_MODEL, OPEN_MODEL_NAME_FALLBACK] : [DEFAULT_MODEL];
+  const qaRetryMax = Math.max(0, Number(process.env.QA_RETRY_429_MAX || 2));
+  const qaRetryCapMs = Math.max(1000, Number(process.env.QA_RETRY_AFTER_CAP_MS || 20000));
+  let lastErr;
+  for (const model of models) {
+    for (let attempt = 0; attempt <= qaRetryMax; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const reqBody = { ...body, model };
+        if (modelNeedsNoReasoning(model)) reqBody.reasoning_effort = "low";
+        if (modelNeedsQwen3ThinkingDisabled(model)) reqBody.thinking = { type: "disabled" };
+        const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${OPEN_MODEL_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(reqBody),
+          signal: controller.signal,
+        });
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => "");
+          if (resp.status === 429) {
+            const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
+            const isShortThrottle = Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter * 1000 <= qaRetryCapMs;
+            if (isShortThrottle && attempt < qaRetryMax) {
+              console.warn(`[model:qa] 429 short throttle (Retry-After ${retryAfter}s) — retrying in ${retryAfter}s on ${model} (attempt ${attempt + 1}/${qaRetryMax})`);
+              await new Promise(r => setTimeout(r, retryAfter * 1000));
+              continue;
+            }
+            const cooldownMs = cooldownFrom429(resp, txt);
+            qaRateLimitedUntil = Date.now() + cooldownMs;
+            console.warn(`[model:qa] rate limited (HTTP 429) — Q&A calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(qaRateLimitedUntil).toISOString()}`);
+          }
+          lastErr = new Error(`Model API returned HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+          break; // advance to next model
+        }
+        const json = await resp.json();
+        const content = stripThinkBlocks(json?.choices?.[0]?.message?.content?.trim() || "");
+        if (!content) {
+          lastErr = new Error("The model returned an empty answer");
+          break;
+        }
+        return { content, model };
+      } catch (err) {
+        if (err.name === "AbortError") {
+          lastErr = new Error("Model request timed out");
+          break;
+        }
+        lastErr = err;
+        break; // network/parse error → next model
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  }
+  throw lastErr || new Error("All Q&A models failed");
+}
+
 // One-shot recovery nudge (proposal A): if the user attached [S#] sources but
 // the model omitted them, ask once more — permitting co-citation — and accept
 // the nudged answer only if it actually recovers at least one [S#]. Capped at a
@@ -320,24 +411,15 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
         "alongside another source to prove the same claim or chain of reasoning. Do not drop [S#] sources.",
     },
   ];
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
-  const nudgeBody = { model: DEFAULT_MODEL, messages: nudgeMessages, max_tokens: 1800, temperature: 0 };
-  if (modelNeedsNoReasoning(DEFAULT_MODEL)) nudgeBody.reasoning_effort = "low";
   try {
-    const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${OPEN_MODEL_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify(nudgeBody),
-      signal: controller.signal,
+    const { content: nudged } = await postQaChatCompletions({
+      body: { messages: nudgeMessages, max_tokens: 1800, temperature: 0 },
+      timeoutMs: 60000,
     });
-    if (!resp.ok) return currentAnswer;
-    const json = await resp.json();
-    const nudged = json?.choices?.[0]?.message?.content?.trim() || "";
     if (nudged.trim().length < 80) return currentAnswer;
     const validIds = new Set(evidence.map(item => item.id));
-    const candidate = nudged.replace(/\[([AWS]\d+)\]/g, (m, id) => (validIds.has(id) ? m : ""));
-    if (/^(?:\s*\[[AWS]\d+\]\s*){3,}$/.test(candidate.trim())) return currentAnswer;
+    const candidate = nudged.replace(/\[([AWST]\d+)\]/g, (m, id) => (validIds.has(id) ? m : ""));
+    if (/^(?:\s*\[[AWST]\d+\]\s*){3,}$/.test(candidate.trim())) return currentAnswer;
     // Only accept the nudge if it actually recovered an attached [S#];
     // otherwise keep the original reasoned answer (the client notice discloses
     // the residual gap).
@@ -345,8 +427,6 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
     return recovered ? candidate : currentAnswer;
   } catch (_) {
     return currentAnswer;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -375,96 +455,57 @@ async function runApiModelGeneration(question, evidence) {
   const messages = [
     {
       role: "system",
-      content: "You are a senior evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n- User-supplied items with IDs like [S1], [S2] ... (sources the user attached from their saved articles; treat them EXACTLY like web-sourced [W#] items — they are first-class, citable evidence. Cite them with [S#] whenever they bear on the answer, and distinguish them in your wording (e.g. \"Per the saved article [S2]…\"). Weigh them as authoritative context the user provided). These attached My Sources [S#] items are the user's primary evidence - lead with them. Supplement with application [A#] entries (always available) and, when web search is enabled, internet [W#] sources. Cite the evidence that genuinely supports your answer; do not force-cite material irrelevant to the question, but ensure every attached [S#] is reflected wherever it bears on the answer (you may cite an [S#] alongside another source to prove the same claim).\n\n\n\nGround every claim in the supplied evidence and cite it inline. You MAY draw reasoned inferences and practical implications FROM that evidence — connecting the dots is analysis, not invention — but you must NEVER introduce facts, figures, dates, events, or sources that are not present in the evidence. When you state an inference that goes beyond a single literal excerpt, mark it as derived from its citations (e.g. \"Taken together, this implies… [A3][A1]\").\n\nWhen the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite them.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nUser-supplied [S#] sources are handled IDENTICALLY to web [W#] sources above: draw on them, cite them inline with their [S#] ID whenever they bear on the answer, and keep them distinguishable in your wording (e.g. \"Per the saved article [S2]…\"). They are first-class evidence the user attached specifically for this question — do not treat them as lesser than [A#] or [W#]. Because the user deliberately saved them for this work, weight [S#] as primary, authoritative evidence. If no [S#] sources are present, ignore this.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer built as a clear chain of reasoning, not a flat list of facts. For each substantive point:\n- State the claim.\n- Cite the supporting evidence INLINE with its exact ID in square brackets (e.g. [A1] or [W2]), placed immediately after the claim it supports.\n- Show the reasoning: connect the cited evidence to the claim with explicit logic (e.g. \"Because [A3] shows X and [A1] shows Y, this implies Z\"). Do not present conclusions as bare assertions.\nUse well-structured paragraphs and Markdown bullet lists where useful. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways, each cited inline with its supporting [A#]/[W#]/[S#] ID. Each bullet should capture a conclusion the reader would act on or remember, not just a fact.\n\n## Conclusion\nA 3–5 sentence wrap-up that:\n1. States the overall answer in one or two sentences.\n2. Gives 1–3 actionable recommendations or decisions a reader could act on, each grounded in and citing the evidence (e.g. \"Given [A3], [W2] and [S1], studios should…\").\n3. States any open caveats or evidence gaps.\nEnd with a complete sentence.\n\nBefore finalising, verify: (a) every conclusion traces to a cited claim, (b) at least one actionable implication is stated, (c) no unsupported facts were introduced.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
+      content: "You are a senior evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n- User-supplied items with IDs like [S1], [S2] ... (sources the user attached from their saved articles; treat them EXACTLY like web-sourced [W#] items — they are first-class, citable evidence. Cite them with [S#] whenever they bear on the answer, and distinguish them in your wording (e.g. \"Per the saved article [S2]…\"). Weigh them as authoritative context the user provided). These attached My Sources [S#] items are the user's primary evidence - lead with them. Supplement with application [A#] entries (always available) and, when web search is enabled, internet [W#] sources and team-shared [T#] sources an editor added to the shared library (treat [T#] as first-class citable evidence like [W#]). Cite the evidence that genuinely supports your answer; do not force-cite material irrelevant to the question, but ensure every attached [S#] is reflected wherever it bears on the answer (you may cite an [S#] alongside another source to prove the same claim).\n\n\n\nGround every claim in the supplied evidence and cite it inline. You MAY draw reasoned inferences and practical implications FROM that evidence — connecting the dots is analysis, not invention — but you must NEVER introduce facts, figures, dates, events, or sources that are not present in the evidence. When you state an inference that goes beyond a single literal excerpt, mark it as derived from its citations (e.g. \"Taken together, this implies… [A3][A1]\").\n\nWhen the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite them.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nUser-supplied [S#] sources are handled IDENTICALLY to web [W#] sources above: draw on them, cite them inline with their [S#] ID whenever they bear on the answer, and keep them distinguishable in your wording (e.g. \"Per the saved article [S2]…\"). They are first-class evidence the user attached specifically for this question — do not treat them as lesser than [A#] or [W#]. Because the user deliberately saved them for this work, weight [S#] as primary, authoritative evidence. If no [S#] sources are present, ignore this.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer built as a clear chain of reasoning, not a flat list of facts. For each substantive point:\n- State the claim.\n- Cite the supporting evidence INLINE with its exact ID in square brackets (e.g. [A1] or [W2]), placed immediately after the claim it supports.\n- Show the reasoning: connect the cited evidence to the claim with explicit logic (e.g. \"Because [A3] shows X and [A1] shows Y, this implies Z\"). Do not present conclusions as bare assertions.\nUse well-structured paragraphs and Markdown bullet lists where useful. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways, each cited inline with its supporting [A#]/[W#]/[S#] ID. Each bullet should capture a conclusion the reader would act on or remember, not just a fact.\n\n## Conclusion\nA 3–5 sentence wrap-up that:\n1. States the overall answer in one or two sentences.\n2. Gives 1–3 actionable recommendations or decisions a reader could act on, each grounded in and citing the evidence (e.g. \"Given [A3], [W2] and [S1], studios should…\").\n3. States any open caveats or evidence gaps.\nEnd with a complete sentence.\n\nBefore finalising, verify: (a) every conclusion traces to a cited claim, (b) at least one actionable implication is stated, (c) no unsupported facts were introduced.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
     },
     {
       role: "user",
-      content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.\n\nLead with the user's attached [S#] sources, then supplement with [A#] (knowledge base) and, if provided, [W#] (internet). Ground every claim in the evidence you cite. Cite the sources that genuinely support each claim, and ensure every attached [S#] is reflected in your answer - you may cite it alongside another source to prove the same point. Do not force-cite evidence that does not bear on the question.`,
+      content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.\n\nLead with the user's attached [S#] sources, then supplement with [A#] (knowledge base), [W#] (internet, if provided), and [T#] (team-shared, if available). Ground every claim in the evidence you cite. Cite the sources that genuinely support each claim, and ensure every attached [S#] is reflected in your answer - you may cite it alongside another source to prove the same point. Do not force-cite evidence that does not bear on the question.`,
     },
   ];
 
-  // Retry-after-aware Q&A resilience: a short Groq/OpenRouter throttle (a 429
-  // carrying a small Retry-After) must NOT silently downgrade the answer to the
-  // extractive fallback. We wait out the brief throttle and retry inside this
-  // same request, so the user still gets a cited model synthesis. A long or
-  // daily-cap 429 (or exhausted retries) still pauses the lane and falls back to
-  // extractive exactly as before. Keep QA_RETRY_AFTER_CAP_MS small: the
-  // /api/summarise race budget in server.js is 70s, so firstFetch + sleeps +
-  // secondFetch must stay under it — real short throttles are only a few seconds.
-  const qaRetryMax = Math.max(0, Number(process.env.QA_RETRY_429_MAX || 2));
-  const qaRetryCapMs = Math.max(1000, Number(process.env.QA_RETRY_AFTER_CAP_MS || 20000));
-  for (let attempt = 0; attempt <= qaRetryMax; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000);
+  // Retry-after-aware Q&A resilience + same-account two-model failover are now
+  // handled inside postQaChatCompletions: a short 429 throttle is waited out and
+  // retried on the same model, a long/daily-cap 429 sets the lane cooldown, and
+  // any other failure advances to the configured fallback model. On total
+  // failure this throws, so server.js falls back to the extractive answer as
+  // before. Keep QA_RETRY_AFTER_CAP_MS small: the /api/summarise race budget in
+  // server.js is 70s, so firstFetch + sleeps + secondFetch must stay under it.
+  let rawAnswer;
+  try {
+    ({ content: rawAnswer } = await postQaChatCompletions({
+      body: { messages, max_tokens: 1800, temperature: 0 },
+      timeoutMs: 60000,
+    }));
+  } catch (err) {
+    throw err; // server.js extractive fallback engages unchanged
+  }
+  let answer = rawAnswer;
+  const validCitationIds = new Set(evidence.map(item => item.id));
+  answer = answer.replace(/\[([AWST]\d+)\]/g, (match, id) => (validCitationIds.has(id) ? match : ""));
+  if (answer.trim().length < 80) throw new Error("Model returned a degenerate answer");
+  if (/^(?:\s*\[[AWST]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Model returned a degenerate answer");
+  const userEvidenceIds = evidence.filter(item => item.sourceType === "user").map(item => item.id);
+  const citedUser = userEvidenceIds.some(id => answer.includes(`[${id}]`));
+  // User-supplied sources (My Sources [S#]) are the user's primary evidence.
+  // The prompt steers the model to lead with them; if it still omitted an
+  // attached [S#], the nudge below gives it one recovery attempt rather than
+  // silently dropping the context or degrading to the extractive list. Any
+  // residual uncited [S#] is disclosed to the user via a client-side notice.
+  if (userEvidenceIds.length && !citedUser) {
     try {
-      const qaBody = {
-        model: DEFAULT_MODEL,
-        messages,
-        max_tokens: 1800,
-        temperature: 0,
-      };
-      if (modelNeedsNoReasoning(DEFAULT_MODEL)) qaBody.reasoning_effort = "low";
-      const resp = await fetch(`${OPEN_MODEL_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${OPEN_MODEL_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(qaBody),
-        signal: controller.signal,
-      });
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    if (resp.status === 429) {
-      const retryAfter = parseInt(resp.headers.get("retry-after") || "", 10);
-      const isShortThrottle = Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter * 1000 <= qaRetryCapMs;
-      if (isShortThrottle && attempt < qaRetryMax) {
-        // Brief throttle: wait it out and retry within this request instead of
-        // forcing the extractive fallback. Costs no extra quota beyond the wait.
-        console.warn(`[model:qa] 429 short throttle (Retry-After ${retryAfter}s) — retrying in ${retryAfter}s (attempt ${attempt + 1}/${qaRetryMax})`);
-        await new Promise(r => setTimeout(r, retryAfter * 1000));
-        continue;
-      }
-      const cooldownMs = cooldownFrom429(resp, txt);
-      qaRateLimitedUntil = Date.now() + cooldownMs;
-      console.warn(`[model:qa] rate limited (HTTP 429) — Q&A calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(qaRateLimitedUntil).toISOString()}`);
-    }
-    throw new Error(`Model API returned HTTP ${resp.status}: ${txt.slice(0, 200)}`);
-  }
-    const json = await resp.json();
-    let answer = json?.choices?.[0]?.message?.content?.trim() || "";
-    if (!answer) throw new Error("The model returned an empty answer");
-    const validCitationIds = new Set(evidence.map(item => item.id));
-    answer = answer.replace(/\[([AWS]\d+)\]/g, (match, id) => (validCitationIds.has(id) ? match : ""));
-    if (answer.trim().length < 80) throw new Error("Model returned a degenerate answer");
-    if (/^(?:\s*\[[AWS]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Model returned a degenerate answer");
-    const userEvidenceIds = evidence.filter(item => item.sourceType === "user").map(item => item.id);
-    const citedUser = userEvidenceIds.some(id => answer.includes(`[${id}]`));
-    const citationCount = evidence.filter(item => answer.includes(`[${item.id}]`)).length;
-    // User-supplied sources (My Sources [S#]) are the user's primary evidence.
-    // The prompt steers the model to lead with them; if it still omitted an
-    // attached [S#], the nudge below gives it one recovery attempt rather than
-    // silently dropping the context or degrading to the extractive list. Any
-    // residual uncited [S#] is disclosed to the user via a client-side notice.
-    if (userEvidenceIds.length && !citedUser) {
-      try {
-        answer = await nudgeForUserSources(messages, answer, evidence, userEvidenceIds);
-      } catch (_) {
-        // nudge is best-effort; keep the reasoned answer and let the client
-        // notice disclose any residual gap.
-      }
-    }
-    // Composite (a)+(b3): accept a reasoned answer once it cites at least one
-    // source (was >= 2, which forced the extractive "list" almost always).
-    // Retain the extractive fallback only as a true safety net for a wholly
-    // uncited answer.
-    const gate = evaluateCitationGate(answer, evidence);
-    if (gate.pass) return answer;
-    return buildExtractiveAnswer(question, evidence);
-    } finally {
-      clearTimeout(timeout);
+      answer = await nudgeForUserSources(messages, answer, evidence, userEvidenceIds);
+    } catch (_) {
+      // nudge is best-effort; keep the reasoned answer and let the client
+      // notice disclose any residual gap.
     }
   }
+  // Composite (a)+(b3): accept a reasoned answer once it cites at least one
+  // source (was >= 2, which forced the extractive "list" almost always).
+  // Retain the extractive fallback only as a true safety net for a wholly
+  // uncited answer.
+  const gate = evaluateCitationGate(answer, evidence);
+  if (gate.pass) return answer;
+  return buildExtractiveAnswer(question, evidence);
 }
 
 // Serialise model calls so we never open two concurrent API requests at once
@@ -642,6 +683,7 @@ function buildExtractiveAnswer(question, evidence) {
   const appItems = usable.filter(item => item.sourceType === "application");
   const webItems = usable.filter(item => item.sourceType === "internet");
   const userItems = usable.filter(item => item.sourceType === "user");
+  const teamItems = usable.filter(item => item.sourceType === "team");
   const questionWords = new Set(words(question));
 
   // --- Detailed Answer: grouped, cited evidence (app vs web) ---
@@ -668,6 +710,14 @@ function buildExtractiveAnswer(question, evidence) {
   if (userItems.length) {
     detailedLines.push("\n**Your attached sources**");
     for (const item of userItems) {
+      const excerpt = relevantExcerpt(item, question, 4, 1400, item.title);
+      if (!excerpt) continue;
+      detailedLines.push(`- **${item.title}** — ${excerpt} [${item.id}]`);
+    }
+  }
+  if (teamItems.length) {
+    detailedLines.push("\n**Team-shared sources**");
+    for (const item of teamItems) {
       const excerpt = relevantExcerpt(item, question, 4, 1400, item.title);
       if (!excerpt) continue;
       detailedLines.push(`- **${item.title}** — ${excerpt} [${item.id}]`);
@@ -744,6 +794,8 @@ function buildExtractiveAnswer(question, evidence) {
 module.exports = {
   DEFAULT_MODEL,
   OPEN_MODEL_NAME_SCAN,
+  OPEN_MODEL_NAME_FALLBACK,
+  QA_FAILOVER_ENABLED,
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
@@ -751,6 +803,8 @@ module.exports = {
   buildExtractiveAnswer,
   evaluateCitationGate,
   nudgeForUserSources,
+  runApiModelGeneration,
+  postQaChatCompletions,
   webResultRelevance,
   isModelReady,
   isScanModelReady,

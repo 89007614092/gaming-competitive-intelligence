@@ -57,6 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNewsStream();
   setupReviewPanel();
   setupStatExpand();
+  setupTeamSources();
 });
 
 // ===== Navigation =====
@@ -73,7 +74,7 @@ function setupNavigation() {
       // Reset sub-tabs for the newly activated view
       resetSubTabForView(viewId);
 
-      if (viewId === "news-view") loadNews();
+      if (viewId === "news-view") { loadNews(); loadTeamSources(); }
       if (viewId === "knowledge-base") loadKnowledgeBase();
       if (viewId === "spider-web") loadSpiderWeb();
       if (viewId === "tencent-products") loadTencentProducts();
@@ -1191,6 +1192,99 @@ function renderFoldersSidebar() {
   });
   chips.push(`<button class="folder-chip folder-new" id="newFolderChip" type="button">+ New folder</button>`);
   sidebar.innerHTML = chips.join("");
+}
+
+// ===== Thread D: Team Sources (shared, editor-curated evidence library) =====
+// Sources an editor adds here become citable [T#] evidence in the Q&A lane.
+function setupTeamSources() {
+  const addBtn = document.getElementById("addTeamSourceBtn");
+  if (addBtn) addBtn.addEventListener("click", addTeamSource);
+  const urlInput = document.getElementById("teamSourceUrl");
+  if (urlInput) urlInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addTeamSource(); });
+  const list = document.getElementById("teamSourcesList");
+  if (list) {
+    list.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-refresh-id]");
+      if (btn) { e.preventDefault(); refreshTeamSource(btn.dataset.refreshId); }
+    });
+  }
+}
+
+async function loadTeamSources() {
+  const listEl = document.getElementById("teamSourcesList");
+  const emptyEl = document.getElementById("teamSourcesEmpty");
+  if (!listEl) return;
+  try {
+    const res = await fetch(`${API_BASE}/sources`);
+    if (!res.ok) { listEl.innerHTML = ""; return; }
+    const data = await res.json();
+    const sourcesList = Array.isArray(data.sources) ? data.sources : [];
+    if (!sourcesList.length) {
+      listEl.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "block";
+      return;
+    }
+    if (emptyEl) emptyEl.style.display = "none";
+    listEl.innerHTML = sourcesList.map(renderTeamSourceRow).join("");
+  } catch (_) {
+    listEl.innerHTML = "";
+  }
+}
+
+function renderTeamSourceRow(s) {
+  const id = escapeHtml(s.id);
+  const title = escapeHtml(s.title || s.url || s.citationId || "Untitled");
+  const url = safeHref(s.url);
+  const citation = s.citationId ? `<span class="team-source-cite">[${escapeHtml(s.citationId)}]</span>` : "";
+  const status = escapeHtml(s.status || "pending");
+  const addedBy = s.addedBy ? ` · ${escapeHtml(s.addedBy)}` : "";
+  const refreshBtn = `<button class="team-source-refresh" data-refresh-id="${id}" type="button" title="Re-fetch and re-ingest">&#x21BB;</button>`;
+  return (
+    `<div class="team-source-row">` +
+      `<span class="team-source-status status-${escapeHtml(status)}">${status}</span>` +
+      citation +
+      `<a class="team-source-title-link" href="${url}" target="_blank" rel="noopener">${title}</a>` +
+      `<span class="team-source-meta">${addedBy}</span>` +
+      refreshBtn +
+    `</div>`
+  );
+}
+
+async function addTeamSource() {
+  const urlInput = document.getElementById("teamSourceUrl");
+  const titleInput = document.getElementById("teamSourceTitle");
+  const url = urlInput && urlInput.value ? urlInput.value.trim() : "";
+  if (!url) { showToast("Enter a URL to add."); return; }
+  const title = titleInput && titleInput.value ? titleInput.value.trim() : "";
+  try {
+    const res = await authedFetch(`${API_BASE}/sources`, {
+      method: "POST",
+      body: JSON.stringify({ kind: "url", url, title }),
+    });
+    if (res.status === 401) { showToast("Editor key required to add team sources."); return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || "Failed to add source.");
+      return;
+    }
+    if (urlInput) urlInput.value = "";
+    if (titleInput) titleInput.value = "";
+    showToast("Source added — ingesting in the background…");
+    await loadTeamSources();
+  } catch (_) {
+    showToast("Network error adding source.");
+  }
+}
+
+async function refreshTeamSource(id) {
+  try {
+    const res = await authedFetch(`${API_BASE}/sources/${encodeURIComponent(id)}/refresh`, { method: "POST" });
+    if (res.status === 401) { showToast("Editor key required."); return; }
+    showToast("Re-ingesting source…");
+    await loadTeamSources();
+  } catch (_) {
+    showToast("Network error refreshing source.");
+  }
 }
 
 // ===== Option A: portable folder map (Export / Import) =====
