@@ -172,6 +172,11 @@ const { createExtractor } = require("./lib/extractor");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
 const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, DATASET_FILE } = require("./lib/datasets");
+const sources = require("./lib/sources");
+// Thread D reuses the governed reader pipeline (Jina + Thread F attribution) for
+// ingestion, so inject it once at boot. Function declarations are hoisted, so
+// fetchReaderContent is already bound here even though it is defined lower.
+sources.setSourceReader(fetchReaderContent);
 
 // --- Option B: shared, editable datasets backed by Supabase (Postgres) ---
 // `pg` is optional at module load: if it isn't installed or DATABASE_URL is
@@ -182,7 +187,10 @@ let _dbPool = null;
 function getDbPool() {
   if (_dbPool) return _dbPool;
   if (!process.env.DATABASE_URL || !_pg) return null;
-  _dbPool = new _pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+  // family: 4 forces IPv4 resolution. Render free-tier containers have no
+  // IPv6 egress route, so a direct Supabase host that resolves to AAAA would
+  // fail with ENETUNREACH before reaching Postgres.
+  _dbPool = new _pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5, family: 4 });
   return _dbPool;
 }
 const { computeRetentionState, rollToExcerpt } = retention;
@@ -1223,6 +1231,14 @@ app.post("/api/summarise", async (req, res) => {
       });
     } catch (_) { /* ignore malformed userSources */ }
 
+    // Thread D: shared, team-side sources an editor added to the library. Each
+    // becomes a [T#] evidence item (citable like [W#]). Degrades to [] if the
+    // DB is unconfigured or errors, so it never blocks the answer.
+    let teamEvidence = [];
+    try {
+      teamEvidence = await sources.loadTeamEvidence();
+    } catch (_) { /* ignore — team evidence is additive */ }
+
     let webEvidence = [];
     let webSearchError = "";
     // When the user attached their own sources, cap the web results so the
@@ -1282,7 +1298,7 @@ app.post("/api/summarise", async (req, res) => {
       internetDropped = true;
     }
 
-    const evidence = [...appEvidence, ...userEvidence, ...webEvidence];
+    const evidence = [...appEvidence, ...userEvidence, ...teamEvidence, ...webEvidence];
     let answer;
     let mode;
     let modelError = "";
@@ -3725,6 +3741,51 @@ app.put("/api/datasets/:name", requireEditor, async (req, res) => {
     res.json({ success: true, name, updated_by: editor });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// --- Thread D: shared, team-side ingestion (watch-URL + report-upload) ---
+// POST /api/sources — add a watched URL (editor-gated; D1 = URL only, report
+// upload lands in D2). Ingestion runs in the background; the row starts
+// 'pending' and flips to 'ingested' (with a [T#] id) once fetched.
+app.post("/api/sources", requireEditor, async (req, res) => {
+  if (req.body?.kind !== "url") {
+    return res.status(400).json({ error: "Only kind:'url' is supported in this release (report upload arrives in D2)" });
+  }
+  const url = typeof req.body.url === "string" ? req.body.url.trim() : "";
+  if (!url) return res.status(400).json({ error: "A url is required" });
+  const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
+  const editor = req.get("x-editor-name") || "unknown";
+  try {
+    const source = await sources.addSourceUrl(url, title, editor);
+    res.status(202).json({ success: true, source });
+  } catch (e) {
+    if (/Database not configured/.test(e.message)) return res.status(500).json({ error: e.message });
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// GET /api/sources — list (open read; shared reference data, no secrets).
+app.get("/api/sources", async (req, res) => {
+  try {
+    const list = await sources.listSources();
+    res.json({ success: true, sources: list });
+  } catch (e) {
+    if (/Database not configured/.test(e.message)) return res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/sources/:id/refresh — re-ingest a source (editor-gated). Used by the
+// UI refresh button now; the D3 watch-cron will call the same core later.
+app.post("/api/sources/:id/refresh", requireEditor, async (req, res) => {
+  try {
+    const updated = await sources.refreshSource(req.params.id);
+    res.json({ success: true, source: updated });
+  } catch (e) {
+    if (/Database not configured/.test(e.message)) return res.status(500).json({ error: e.message });
+    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    res.status(400).json({ error: e.message });
   }
 });
 

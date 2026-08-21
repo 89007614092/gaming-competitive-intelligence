@@ -4745,3 +4745,23 @@ body {
 @media (max-width: 720px) {
   .reader-split-panes { grid-template-columns: 1fr; }
 }
+
+/* ===== Thread D: Team Sources ===== */
+.team-sources-sub { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+.team-sources-add { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.team-sources-add .search-input { flex: 1; min-width: 200px; }
+.team-sources-add .team-source-title { flex: 0 0 180px; min-width: 120px; }
+.team-sources-list { display: flex; flex-direction: column; gap: 8px; }
+.team-source-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border, #e3e6ec); border-radius: 8px; background: var(--bg-elevated, #fff); }
+.team-source-status { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.team-source-status.status-pending { background: #fff3cd; color: #8a6d00; }
+.team-source-status.status-ingested { background: #d8f3dc; color: #1b5e20; }
+.team-source-status.status-changed { background: #e0e7ff; color: #3730a3; }
+.team-source-status.status-failed { background: #fde2e2; color: #9b1c1c; }
+.team-source-cite { font-weight: 700; color: var(--accent, #3b5bdb); white-space: nowrap; }
+.team-source-title-link { color: var(--text, #1a1f2b); text-decoration: none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-source-title-link:hover { text-decoration: underline; }
+.team-source-meta { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.team-source-refresh { background: none; border: 1px solid var(--border, #e3e6ec); border-radius: 6px; cursor: pointer; font-size: 14px; line-height: 1; padding: 4px 8px; color: var(--text-muted); }
+.team-source-refresh:hover { color: var(--accent, #3b5bdb); border-color: var(--accent, #3b5bdb); }
+.team-sources-empty { color: var(--text-muted); font-size: 13px; }

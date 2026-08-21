@@ -133,6 +133,21 @@
           </div>
         </div>
 
+        <!-- Team Sources (Thread D): shared, editor-curated evidence library -->
+        <div class="section" id="teamSourcesSection">
+          <div class="section-header">
+            <h2>Team Sources</h2>
+            <span class="team-sources-sub">Shared evidence library · cited as [T#] in Q&amp;A</span>
+          </div>
+          <div class="team-sources-add">
+            <input type="url" id="teamSourceUrl" placeholder="Paste an article URL to add as shared evidence…" class="search-input" />
+            <input type="text" id="teamSourceTitle" placeholder="Optional title" class="search-input team-source-title" />
+            <button class="btn btn-primary" id="addTeamSourceBtn" type="button">Add Source</button>
+          </div>
+          <div class="team-sources-list" id="teamSourcesList"></div>
+          <p class="team-sources-empty" id="teamSourcesEmpty" style="display:none;">No team sources yet. Add a URL above to build the shared evidence library (requires an editor key).</p>
+        </div>
+
         <!-- Search results -->
         <div class="section" id="searchResultsSection" style="display:none;"></div>
       </section>
