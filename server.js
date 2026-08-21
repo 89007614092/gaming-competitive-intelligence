@@ -88,6 +88,60 @@ async function fetchArticleBody(url, fallbackText, title = "") {
   }
 }
 
+// ===== Web evidence cost controls (PR #2) =====
+// Extracted article bodies are cached by URL so repeat questions about the same
+// page don't re-extract (re-saving Jina/reader calls). In-memory per process;
+// entries expire after an hour and the map is capped to avoid unbounded growth
+// on a long-lived server.
+const ARTICLE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const articleBodyCache = new Map(); // url -> { text, ts }
+function articleCacheKey(url) {
+  try { return new URL(String(url)).href.replace(/#.*$/, ""); } catch { return String(url); }
+}
+async function fetchCachedArticleBody(url, fallbackText, title = "") {
+  const key = articleCacheKey(url);
+  const hit = articleBodyCache.get(key);
+  if (hit && Date.now() - hit.ts < ARTICLE_CACHE_TTL_MS) return hit.text;
+  const text = await fetchArticleBody(url, fallbackText, title);
+  if (text && text !== fallbackText) {
+    articleBodyCache.set(key, { text, ts: Date.now() });
+    if (articleBodyCache.size > 500) articleBodyCache.delete(articleBodyCache.keys().next().value);
+  }
+  return text;
+}
+
+// B1 — skip the web search entirely when local (KB + attached) evidence already
+// covers the question. Conservative: only skip when most significant question
+// keywords appear in the local evidence AND the question carries no recency
+// signal (so genuinely-new / fresh info still triggers a search).
+const RECENCY_TERMS = /\b(latest|recent|new(?:er|est)?|news|today|this week|this month|20(?:2[4-9]|3\d)|update[sd]?|current(?:ly)?|now|breaking)\b/i;
+const WEAK_STOP_TERMS = new Set([
+  "about", "what", "when", "where", "which", "their", "they", "that", "this",
+  "with", "from", "have", "has", "are", "were", "been", "will", "does", "into",
+  "than", "then", "over", "also", "how", "why", "who", "can", "could", "should",
+  "would", "doesn", "the", "and", "for", "but", "not", "there", "these", "those",
+]);
+function tokenizeWords(text) {
+  return String(text || "").toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !WEAK_STOP_TERMS.has(w));
+}
+function localEvidenceCovers(question, localEvidence) {
+  const qWords = tokenizeWords(question);
+  if (qWords.length < 2) return false;            // too short to judge
+  if (RECENCY_TERMS.test(question)) return false; // fresh info wanted -> search
+  const localBlob = localEvidence.map(e => `${e.title || ""} ${e.text || e.excerpt || ""}`).join(" ").toLowerCase();
+  const localTokens = new Set(tokenizeWords(localBlob));
+  if (localTokens.size === 0) return false;
+  const covered = qWords.filter(w => localTokens.has(w)).length;
+  return covered / qWords.length >= 0.7; // conservative threshold
+}
+
+// B2 — after the model answers, find which web [W#] ids it actually cited, so
+// we only deep-fetch full text for those (uncited hits cost nothing).
+function citedWebIds(answer, webEvidence) {
+  const cited = new Set((answer || "").match(/\[W\d+\]/g) || []);
+  return webEvidence.filter(w => cited.has(`[${w.id}]`)).map(w => w.id);
+}
+
 // ===== Jina Reader (keyless option for the proposed-changes resolver) =====
 // r.jina.ai/<url> returns the article body as clean text; s.jina.ai/<query>
 // returns search results already extracted as markdown. Used when
@@ -1249,11 +1303,17 @@ app.post("/api/summarise", async (req, res) => {
 
     let webEvidence = [];
     let webSearchError = "";
+    let internetSkipped = false;
     // When the user attached their own sources, cap the web results so the
     // user's hand-picked context isn't drowned out by internet noise.
     const webCap = userEvidence.length > 0 ? Math.max(2, 6 - userEvidence.length) : 5;
 
-    if (useInternet) {
+    // B1: if the KB + attached evidence already covers the question, skip the
+    // web search entirely — saves a search call (and, below, any deep-fetches).
+    const localEvidence = [...appEvidence, ...userEvidence, ...teamEvidence];
+    if (useInternet && localEvidenceCovers(question, localEvidence)) {
+      internetSkipped = true;
+    } else if (useInternet) {
       try {
         // Fetch more candidates than we keep, then relevance-filter so off-topic
         // hits (e.g. dictionary definitions of a word in the question) are dropped
@@ -1263,7 +1323,10 @@ app.post("/api/summarise", async (req, res) => {
         // to Brave/Jina instead of dropping web evidence entirely.
         const webResults = await searchWeb(`${question} analysis`, 8);
         const filtered = webResultRelevance(question, webResults, 5);
-        const kept = filtered
+        // Snippet-only for now (B2): full text is deep-fetched LATER, ONLY for
+        // sources the model actually cites — so uncited hits never cost an
+        // extraction. This is the core fix for the "collected 5, cited 0" waste.
+        webEvidence = filtered
           .filter(item => item.url && (item.title || item.description))
           .slice(0, webCap)
           .map((item, index) => ({
@@ -1275,19 +1338,8 @@ app.post("/api/summarise", async (req, res) => {
             text: String(item.description || item.title || "").slice(0, 900),
             excerpt: String(item.description || item.title || "").slice(0, 360),
             url: item.url,
+            snippetOnly: true,
           }));
-        // Deep-fetch full text for the top 3 most-relevant web results so they are
-        // processed as fully as the user's [S#] sources (bounded concurrency;
-        // failures fall back to the Tavily snippet). The remaining results keep
-        // their 900-char snippet.
-        const topWeb = kept.slice(0, 3);
-        const restWeb = kept.slice(3);
-        const enrichedTop = await mapWithConcurrency(topWeb, 3, async (src) => {
-          const full = await fetchArticleBody(src.url, src.text, src.title);
-          if (full === src.text) return src;
-          return { ...src, text: full, excerpt: full.slice(0, 360) };
-        });
-        webEvidence = [...enrichedTop, ...restWeb];
       } catch (error) {
         webSearchError = error.message;
       }
@@ -1299,9 +1351,10 @@ app.post("/api/summarise", async (req, res) => {
     // caller explicitly opted out. In that case drop the raw web evidence so it
     // can never reach the extractive path (the bug we fixed). The single
     // "Includes Internet Sources" tickbox is the UI control; this is the
-    // server-side backstop against malformed requests.
+    // server-side backstop against malformed requests. (A skipped search needs
+    // no dropping.)
     let internetDropped = false;
-    if (useInternet && (!useModel || !isModelReady())) {
+    if (useInternet && !internetSkipped && (!useModel || !isModelReady())) {
       webEvidence = [];
       internetDropped = true;
     }
@@ -1314,9 +1367,12 @@ app.post("/api/summarise", async (req, res) => {
 
     if (useModel) {
       mode = "local-open-source-model";
-      try {
-        answer = await Promise.race([
-          generateOpenSourceAnswer(question, evidence),
+      // Race a model call against the 70s warm-up timer; reuse one timer var so
+      // the enrichment re-run below doesn't leak a dangling timeout.
+      const raceModel = (p) => {
+        if (modelTimer) clearTimeout(modelTimer);
+        return Promise.race([
+          p,
           new Promise((_, reject) => {
             modelTimer = setTimeout(
               () => reject(new Error("Local model is still warming up; an extractive summary was returned. Try again in a moment for an AI synthesis.")),
@@ -1324,6 +1380,30 @@ app.post("/api/summarise", async (req, res) => {
             );
           }),
         ]);
+      };
+      try {
+        answer = await raceModel(generateOpenSourceAnswer(question, evidence));
+        // B2: deep-fetch full text ONLY for web sources the model actually
+        // cited, then re-run once with the enriched evidence. If nothing was
+        // cited, no extraction happens at all (the core token-saving fix). On
+        // enrichment failure we keep the first (snippet-based) answer rather
+        // than dropping to extractive.
+        if (useInternet && !internetDropped && !internetSkipped && webEvidence.length) {
+          const cited = citedWebIds(answer, webEvidence);
+          const toFetch = webEvidence.filter(w => cited.includes(w.id) && w.snippetOnly);
+          if (toFetch.length) {
+            const enriched = await mapWithConcurrency(toFetch, 3, async (src) => {
+              const full = await fetchCachedArticleBody(src.url, src.text, src.title);
+              if (full === src.text) return src;
+              return { ...src, text: full, excerpt: full.slice(0, 360), snippetOnly: false };
+            });
+            const byId = new Map(enriched.map(e => [e.id, e]));
+            const enrichedEvidence = evidence.map(e => byId.get(e.id) || e);
+            try {
+              answer = await raceModel(generateOpenSourceAnswer(question, enrichedEvidence));
+            } catch (_) { /* keep the first answer on enrichment failure */ }
+          }
+        }
       } catch (error) {
         modelError = error.message;
         mode = "extractive-fallback";
@@ -1341,6 +1421,7 @@ app.post("/api/summarise", async (req, res) => {
       answer,
       question,
       internetUsed: webEvidence.length > 0,
+      internetSkipped,
       internetDropped,
       webSearchError,
       model: {
@@ -4097,6 +4178,10 @@ module.exports = {
 
   // Model-output parsing
   extractJson,
+
+  // Web evidence cost controls (PR #2) — pure helpers, exported for tests
+  localEvidenceCovers,
+  citedWebIds,
 
   // Text segmentation
   splitSentences,

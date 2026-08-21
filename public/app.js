@@ -350,11 +350,12 @@ async function runSummary() {
     renderAnswerByStyle();
     const sourceCount = data.sources?.length || 0;
     const internetLabel = data.internetUsed ? " · internet evidence included" : "";
+    const skipLabel = data.internetSkipped ? " · web skipped (local evidence covers)" : "";
     const modeText =
       data.model?.mode === "extractive-citation" ? "extractive · cited"
       : data.model?.mode === "local-open-source-model" ? "AI model"
       : "extractive (model fallback)";
-    document.getElementById("summaryResultMeta").textContent = `${sourceCount} sources · ${modeText}${internetLabel} · ${new Date(data.generatedAt).toLocaleTimeString()}`;
+    document.getElementById("summaryResultMeta").textContent = `${sourceCount} sources · ${modeText}${internetLabel}${skipLabel} · ${new Date(data.generatedAt).toLocaleTimeString()}`;
 
     // When the answer was NOT produced by the AI model (the default
     // extractive-citation mode, or the model falling back to extractive),
