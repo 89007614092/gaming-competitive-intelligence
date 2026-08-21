@@ -2407,8 +2407,28 @@ function loadProposed() {
 // JSONB row keyed by "__store" — simpler and exactly correct for a small
 // (<300 item) document, and it preserves the {items, dismissedIds,
 // integratedIds} shape the rest of the code expects.
+
+// Self-healing: ensure the backing table exists before we touch it. This makes
+// the manual `scripts/migrate-proposed.js` step optional — on first DB contact
+// the app creates the table itself (idempotent). Memoized so the DDL runs once
+// per process, not on every save. Mirrors the schema in scripts/migrate-proposed.js.
+let _proposedTableEnsured = false;
+async function ensureProposedTable(pool) {
+  if (_proposedTableEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS proposed_changes (
+      id           TEXT PRIMARY KEY,
+      data         JSONB NOT NULL,
+      status       TEXT,
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  _proposedTableEnsured = true;
+}
+
 async function persistProposedStore(pool) {
   const data = JSON.stringify(proposedChanges);
+  await ensureProposedTable(pool);
   await pool.query(
     `INSERT INTO proposed_changes (id, data, status, updated_at)
      VALUES ($1, $2, $3, now())
@@ -2440,6 +2460,7 @@ async function primeProposedFromDb() {
   const pool = datasetsGetDbPool();
   if (!pool) return;
   try {
+    await ensureProposedTable(pool);
     const res = await pool.query("SELECT data FROM proposed_changes WHERE id = $1", ["__store"]);
     const row = res.rows && res.rows[0];
     if (!row || !row.data) return;
