@@ -312,16 +312,16 @@ async function runSummary() {
 
 // Parse a Markdown answer into sections and render it to HTML.
 // Supports: "## " headings -> <h4.ans-section>, "- "/"* " bullets -> <ul><li>,
-// **bold**, and [A#]/[W#] inline citation chips/links. Legacy "■ " headings and
+// **bold**, and [A#]/[W#]/[T#] inline citation chips/links. Legacy "■ " headings and
 // citation behaviour are preserved. Unknown headings become "other" sections.
 function parseAnswer(text, sources) {
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
   const renderInline = (line) => {
     let html = escapeHtml(line);
     html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\[([AWS]\d+)\]/g, (m, id) => {
+    html = html.replace(/\[([AWST]\d+)\]/g, (m, id) => {
       const src = sourceMap.get(id);
-      const cls = "ans-cite" + (src?.sourceType === "internet" ? " ans-cite-web" : src?.sourceType === "user" ? " ans-cite-user" : "");
+      const cls = "ans-cite" + (src?.sourceType === "internet" ? " ans-cite-web" : src?.sourceType === "user" ? " ans-cite-user" : src?.sourceType === "team" ? " ans-cite-team" : "");
       const inner = escapeHtml(id);
       if (src && /^https?:\/\//i.test(src.url || "")) {
         return `<a class="${cls}" href="${escapeHtml(src.url)}" target="_blank" rel="noopener" title="${escapeHtml(src.title || "")}">${inner}</a>`;
@@ -429,10 +429,17 @@ function renderSummaryEvidence(sources) {
     // source but the answer did not cite it, disclose the gap transparently
     // instead of silently dropping the context.
     const isUserSource = source.sourceType === "user";
-    const cited = isUserSource ? lastAnswerText.includes("[" + source.id + "]") : true;
-    const notice = isUserSource && !cited
-      ? `<p class="evidence-notice">Another source was used over this as evidence due to greater relevance</p>`
-      : "";
+    // The cited check now applies to every source type (not just user [S#]
+    // sources): a web [W#], team [T#], or KB [A#] source that was retrieved as
+    // evidence but never referenced inline by the answer is disclosed as
+    // "retrieved, not cited" so the reader knows it was considered but not used.
+    const cited = lastAnswerText.includes("[" + source.id + "]");
+    let notice = "";
+    if (!cited) {
+      notice = isUserSource
+        ? `<p class="evidence-notice">Another source was used over this as evidence due to greater relevance</p>`
+        : `<p class="evidence-notice evidence-notice-muted">Retrieved, not cited in answer.</p>`;
+    }
     return `
       <article class="summary-evidence-card">
         <div class="summary-evidence-card-header">
