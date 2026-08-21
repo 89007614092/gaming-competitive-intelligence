@@ -557,6 +557,44 @@ body {
   background: var(--primary-light);
 }
 
+/* "Add to Team Sources" control on each article card — shares the circular
+   action-button shape with the folder/star buttons but uses the Team Sources
+   purple accent so it reads as a shared-evidence action. */
+.news-team-src-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.news-team-src-btn:hover:not(.added):not(:disabled) {
+  color: #6b46c1;
+  border-color: #6b46c1;
+  background: #f3effe;
+  transform: scale(1.05);
+}
+
+.news-team-src-btn.added {
+  color: #6b46c1;
+  border-color: #6b46c1;
+  background: #f3effe;
+  cursor: default;
+}
+
+.news-team-src-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Folder filter chips above the feed (Saved Articles only) */
 .folders-sidebar {
   display: flex;

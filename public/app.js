@@ -59,6 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupReviewPanel();
   setupStatExpand();
   setupTeamSources();
+  setupNewsTeamSources();
 });
 
 // ===== Navigation =====
@@ -1046,6 +1047,13 @@ function newsArticleKey(article) {
   return article?.url || `${article?.title || ""}|${article?.publishedAt || ""}`;
 }
 
+// Dedup for "Add to Team Sources" from a news card. Keyed by the article URL.
+// `addedToTeamSources` tracks in-session adds (survives card re-renders);
+// `existingTeamSourceUrls` is refreshed from GET /api/sources so a card already
+// present in Team Sources (e.g. added via the paste box) shows as added too.
+const addedToTeamSources = new Set();
+const existingTeamSourceUrls = new Set();
+
 function isNewsArticleSaved(article) {
   const key = newsArticleKey(article);
   return savedNewsArticles.some(saved => newsArticleKey(saved) === key);
@@ -1310,6 +1318,8 @@ async function loadTeamSources() {
     if (!res.ok) { listEl.innerHTML = ""; return; }
     const data = await res.json();
     const sourcesList = Array.isArray(data.sources) ? data.sources : [];
+    existingTeamSourceUrls.clear();
+    sourcesList.forEach((s) => { if (s && s.url) existingTeamSourceUrls.add(s.url); });
     if (!sourcesList.length) {
       listEl.innerHTML = "";
       if (emptyEl) emptyEl.style.display = "block";
@@ -1375,6 +1385,52 @@ async function refreshTeamSource(id) {
     await loadTeamSources();
   } catch (_) {
     showToast("Network error refreshing source.");
+  }
+}
+
+// Add a news article directly to Team Sources from its card. Reuses the exact
+// same POST /api/sources call the URL paste-box makes — the article URL is the
+// resolvable link (Google News redirect handled by the reader pipeline), so no
+// server change is needed. Editor-gated via authedFetch (prompts for the key).
+function setupNewsTeamSources() {
+  const feed = document.getElementById("newsFeed");
+  if (!feed) return;
+  feed.addEventListener("click", (e) => {
+    const btn = e.target.closest(".news-team-src-btn");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    addNewsArticleToTeamSources(btn);
+  });
+}
+
+async function addNewsArticleToTeamSources(btn) {
+  const url = btn.dataset.url;
+  const title = btn.dataset.title || "";
+  const key = btn.dataset.articleKey || url;
+  if (!url || url === "#") { showToast("This article has no link to add."); return; }
+  if (addedToTeamSources.has(key)) { showToast("Already added to Team Sources."); return; }
+  btn.disabled = true;
+  try {
+    const res = await authedFetch(`${API_BASE}/sources`, {
+      method: "POST",
+      body: JSON.stringify({ kind: "url", url, title }),
+    });
+    if (res.status === 401) { showToast("Editor key required to add team sources."); btn.disabled = false; return; }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || "Failed to add source.");
+      btn.disabled = false;
+      return;
+    }
+    addedToTeamSources.add(key);
+    btn.classList.add("added");
+    btn.innerHTML = "&#10003;";
+    btn.title = "Already in Team Sources";
+    showToast("Added to Team Sources — ingesting in background…");
+  } catch (_) {
+    showToast("Network error adding source.");
+    btn.disabled = false;
   }
 }
 
@@ -1720,6 +1776,13 @@ function newsCardHtml(a, i, saved) {
   const articleKey = encodeURIComponent(newsArticleKey(a));
   const inFolders = getArticleFolders(a).length > 0;
 
+  // "Add to Team Sources" affordance — mirrors the URL paste box but fires
+  // straight from the card. Deduped against in-session adds + existing sources.
+  const teamKey = a.url || "";
+  const inTeam = !!teamKey && (addedToTeamSources.has(teamKey) || existingTeamSourceUrls.has(teamKey));
+  const canAddTeam = safeUrl !== "#";
+  const teamBtn = `<button class="news-team-src-btn${inTeam ? " added" : ""}" data-url="${escapeHtml(safeUrl)}" data-title="${escapeHtml(a.title || "")}" data-article-key="${escapeHtml(teamKey)}" type="button" ${canAddTeam ? "" : "disabled "}aria-label="Add to Team Sources" title="${inTeam ? "Already in Team Sources" : (canAddTeam ? "Add to Team Sources" : "No link to add")}">${inTeam ? "&#10003;" : "&#43;"}</button>`;
+
   return `
     <div class="news-card${saved ? " is-saved" : ""}" data-index="${i}">
       <div class="news-card-header">
@@ -1729,6 +1792,7 @@ function newsCardHtml(a, i, saved) {
         <div class="news-card-actions">
           <button class="news-folder-btn${inFolders ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="Save to folder" title="Save to folder">&#128193;<span class="news-folder-caret">&#9662;</span></button>
           <button class="news-favorite-btn${saved ? " active" : ""}" data-article-key="${escapeHtml(articleKey)}" aria-label="${saved ? "Remove from saved articles" : "Save article for later"}" title="${saved ? "Remove from saved articles" : "Save article for later"}">${saved ? "&#9733;" : "&#9734;"}</button>
+          ${teamBtn}
         </div>
       </div>
       <div class="news-tag-row">
