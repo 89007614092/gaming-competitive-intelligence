@@ -1857,6 +1857,7 @@ body {
 .ans-cite:hover { text-decoration: underline; }
 .ans-cite-web { background: #dcfce7; color: #15803d; }
 .ans-cite-user { background: #fef9c3; color: #a16207; }
+.ans-cite-team { background: #ede9fe; color: #6d28d9; }
 
 .summary-warning {
   margin-bottom: 1rem;
@@ -1889,6 +1890,8 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .summary-evidence-card-header {
@@ -1923,6 +1926,9 @@ body {
   color: var(--text);
   font-size: 0.83rem;
   text-decoration: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .summary-evidence-card a:hover {
@@ -1934,6 +1940,8 @@ body {
   color: var(--text-muted);
   font-size: 0.76rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .evidence-notice {
@@ -1945,6 +1953,15 @@ body {
   font-size: 0.74rem;
   font-style: italic;
   line-height: 1.45;
+}
+
+/* Subtler variant for "retrieved, not cited" disclosures (all non-user
+   source types). Intentionally neutral so it reads as an FYI, not an error. */
+.evidence-notice-muted {
+  border-left-color: var(--border);
+  background: var(--bg-subtle, rgba(0, 0, 0, 0.03));
+  color: var(--text-muted);
+  font-style: normal;
 }
 
 @media (max-width: 760px) {
