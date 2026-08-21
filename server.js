@@ -241,12 +241,11 @@ let _dbPool = null;
 function getDbPool() {
   if (_dbPool) return _dbPool;
   if (!process.env.DATABASE_URL || !_pg) return null;
-  // family: 4 forces IPv4 resolution. Render free-tier containers have no
-  // IPv6 egress route, so a direct Supabase host that resolves to AAAA would
-  // fail with ENETUNREACH before reaching Postgres.
-  _dbPool = new _pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5, family: 4 });
+  // Pool options (incl. IPv4 pin + PG_FAMILY override) live in lib/dbPool.
+  _dbPool = makePool(_pg, process.env.DATABASE_URL, { max: 5 });
   return _dbPool;
 }
+const { makePool } = require("./lib/dbPool");
 const { computeRetentionState, rollToExcerpt } = retention;
 const SCRAPE_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";

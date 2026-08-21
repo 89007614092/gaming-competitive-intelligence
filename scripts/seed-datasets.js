@@ -28,9 +28,9 @@ try {
 const { DATASET_FILE } = require("../lib/datasets");
 
 const force = process.argv.includes("--force");
-// family: 4 forces IPv4 resolution (Render free-tier has no IPv6 egress,
-// and some Supabase hosts resolve to AAAA records).
-const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 5, family: 4 });
+// Pool options (incl. IPv4 pin + PG_FAMILY override) live in lib/dbPool.
+const { makePool } = require("../lib/dbPool");
+const pool = makePool(pg, DATABASE_URL, { max: 5 });
 
 async function main() {
   await pool.query(`
