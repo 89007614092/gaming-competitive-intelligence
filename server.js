@@ -1232,11 +1232,19 @@ app.post("/api/summarise", async (req, res) => {
     } catch (_) { /* ignore malformed userSources */ }
 
     // Thread D: shared, team-side sources an editor added to the library. Each
-    // becomes a [T#] evidence item (citable like [W#]). Degrades to [] if the
-    // DB is unconfigured or errors, so it never blocks the answer.
+    // becomes a [T#] evidence item (citable like [W#]). They are OPT-IN: the
+    // client only sends teamSourceIds when the user opens the "Team Sources"
+    // composer toggle. When none are requested we inject nothing, so team
+    // evidence is never auto-loaded into every answer (saves tokens and makes
+    // the "retrieved, not cited" disclosure meaningful). Degrades to [] on DB
+    // error so it never blocks the answer.
     let teamEvidence = [];
     try {
-      teamEvidence = await sources.loadTeamEvidence();
+      const requestedTeamIds = Array.isArray(req.body?.teamSourceIds) ? req.body.teamSourceIds : [];
+      if (requestedTeamIds.length) {
+        const allTeam = await sources.loadTeamEvidence();
+        teamEvidence = allTeam.filter(e => requestedTeamIds.includes(e.id));
+      }
     } catch (_) { /* ignore — team evidence is additive */ }
 
     let webEvidence = [];
