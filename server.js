@@ -659,15 +659,12 @@ async function fetchReaderContent(url, opts = {}) {
   const licenseClass = opts.licenseClass || "news-fair-use";
   const sourceId = opts.sourceId || null;
 
-  // Google News links: try to resolve to the real publisher URL first.
-  if (/news\.google\.com/i.test(target)) {
-    try {
-      const real = await resolveGoogleNewsUrl(target, opts.title || "", opts.domain || "");
-      if (real) target = real;
-    } catch (_) { /* keep the original URL */ }
-  }
+  // Google News links can't be scraped directly — they 302 to a consent/GDPR
+  // wall from Render's egress, and the local resolver that once resolved them
+  // now fails 100% of the time here. Skip it and let the governed Jina
+  // extraction below follow the redirect server-side instead.
 
-  // Still a Google News link (resolution failed): attempt governed Jina
+  // Still a Google News link: attempt governed Jina
   // extraction — Jina follows the Google redirect and renders JS server-side,
   // so it often retrieves what a direct fetch cannot. Fall back to the viewer
   // partial preview (Option A), then to the manual-entry marker.
@@ -1067,11 +1064,25 @@ async function scrapeUrl(url, opts = {}) {
   // and summarised instead of a useless redirect page. If resolution fails we
   // fall through to the original URL and let fetchTextResource report the error.
   let effectiveUrl = sourceUrl;
+  // Google News links can't be scraped directly (consent/GDPR wall from Render's
+  // egress) and the local resolver that once resolved them now fails 100% of
+  // the time here. Resolve via Jina's server-side extraction instead, which
+  // follows the redirect and renders JS, so we get the real article body.
   if (/news\.google\.com/i.test(sourceUrl)) {
     try {
-      const real = await resolveGoogleNewsUrl(sourceUrl, opts.title || "", opts.domain || "");
-      if (real) effectiveUrl = real;
-    } catch (_) { /* keep the original URL */ }
+      const jt = await jinaExtract(sourceUrl, 20000);
+      if (jt && jt.length >= 140 && !looksLikeBotWall(jt)) {
+        return {
+          title: opts.title || new URL(sourceUrl).hostname,
+          text: jt,
+          url: sourceUrl,
+          originalUrl: sourceUrl,
+          sourceType: "webpage",
+          extractionMethod: "Jina (Google News redirect resolved server-side)",
+          language: "unknown",
+        };
+      }
+    } catch (_) { /* fall through to direct fetch */ }
   }
 
   const page = await fetchTextResource(effectiveUrl);
@@ -1894,15 +1905,30 @@ async function extractSubhead(article) {
     // cache-first: if this article (or the scanner) already resolved the real
     // URL, reuse it instead of hitting a search engine again.
     let target = article.url;
+    let pageText = null;
     if (/news\.google\.com/i.test(target)) {
-      const cached = resolvedUrlMap.get(target) || (sourceState.resolvedUrls && sourceState.resolvedUrls[target]);
-      target = cached || await resolveGoogleNewsUrl(target, title, "", newsChains) || target;
+      // Resolve Google News links via Jina's server-side extraction rather than
+      // the broken local resolver (which fails 100% from Render's egress). Jina
+      // follows the redirect and renders JS, so it retrieves what a direct fetch
+      // cannot. The resolver/cache is only a fallback when Jina is unavailable.
+      try {
+        const jt = await jinaExtract(target, 15000);
+        if (jt && jt.length >= 140 && !looksLikeBotWall(jt)) pageText = jt;
+      } catch (_) { /* fall through */ }
     }
-    const page = await fetchTextResource(target);
+    if (!pageText) {
+      const cached = resolvedUrlMap.get(target) || (sourceState.resolvedUrls && sourceState.resolvedUrls[target]);
+      const resolved = cached || target;
+      try {
+        const resource = await fetchTextResource(resolved);
+        pageText = resource.text;
+      } catch (_) { /* fall through */ }
+    }
+    if (!pageText) return null;
     // Prefer the editor's strapline (meta description / og:description).
-    const strapline = extractMetaDescription(page.text);
+    const strapline = extractMetaDescription(pageText);
     // Fall back to the first 1-2 sentences of the article body.
-    const body = extractText(page.text);
+    const body = extractText(pageText);
     const lead = splitSentences(body).slice(0, 2).join(" ").trim();
     // Reject the Google News boilerplate either way so we never show the
     // generic "Comprehensive up-to-date news coverage…" line.
@@ -2378,9 +2404,13 @@ function loadSourceState() {
     if (data && typeof data === "object" && data.resolvedUrls) {
       for (const [k, v] of Object.entries(data.resolvedUrls)) resolvedUrlMap.set(k, v);
     }
-    return data && typeof data === "object" ? data : { sources: {}, lastFullScan: null };
+    if (data && typeof data === "object") {
+      if (!Array.isArray(data.droppedItems)) data.droppedItems = [];
+      return data;
+    }
+    return { sources: {}, lastFullScan: null, droppedItems: [] };
   } catch (_) {
-    return { sources: {}, lastFullScan: null };
+    return { sources: {}, lastFullScan: null, droppedItems: [] };
   }
 }
 
@@ -2388,6 +2418,26 @@ function saveSourceState() {
   try {
     fs.writeFileSync(SOURCE_STATE_FILE, JSON.stringify(sourceState, null, 2));
   } catch (_) { /* non-fatal */ }
+}
+
+// Record a scan item that classifyItem rejected, so the dropped-items audit can
+// surface what the scanner is skipping and why. Capped + persisted via
+// sourceState so it survives cold starts and can't grow unbounded.
+function recordDroppedItem(prop) {
+  if (!sourceState.droppedItems) sourceState.droppedItems = [];
+  sourceState.droppedItems.push({
+    reason: prop.reason,
+    url: prop.url,
+    title: prop.title,
+    source: prop.source,
+    sourceDomain: prop.sourceDomain,
+    publishedAt: prop.publishedAt,
+    at: new Date().toISOString(),
+  });
+  if (sourceState.droppedItems.length > 200) {
+    sourceState.droppedItems.splice(0, sourceState.droppedItems.length - 200);
+  }
+  saveSourceState();
 }
 
 function loadProposed() {
@@ -3070,9 +3120,19 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
         }
       } catch (_) { /* fall through to the local resolver / direct fetch */ }
     }
-    const real = await resolveGoogleNewsUrl(item.url, item.title, domain);
-    if (!real) return { text: null, blocked: false };
-    articleUrl = real;
+    // The local resolver fails 100% of the time from Render's egress, so don't
+    // bother with it. Try the governed Jina extractor (keyed, works from any IP)
+    // as a second attempt before giving up on the preview.
+    try {
+      const via = await extractor.extractArticle(item.url, { licenseClass: "news-fair-use" });
+      if (via && via.text && via.text.trim().length >= 140) {
+        const sentences = via.text.match(/[^.!?]+[.!?]+/g) || [via.text];
+        let lead = sentences.slice(0, 4).join(" ").trim();
+        if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
+        return { text: lead, blocked: false };
+      }
+    } catch (_) { /* fall through */ }
+    return { text: null, blocked: false };
   }
   try {
     let body;
@@ -3291,12 +3351,23 @@ function looksLikeJobPosting(text) {
 // Classify a fetched item: English-only, compared to existing content, and either
 // dropped (duplicate/non-English) or returned as a proposed change.
 function classifyItem(source, item, index) {
+  // Audit helper: a dropped item carries its reason + enough metadata for the
+  // dropped-items review surface to show what was skipped and why.
+  const drop = (reason) => ({
+    dropped: true,
+    reason,
+    url: item.url,
+    title: item.title,
+    source: source.id,
+    sourceDomain: source.domain,
+    publishedAt: item.publishedAt,
+  });
   const text = `${item.title} ${item.description || ""}`;
-  if (!sourceLanguageAllowed(source)) return null; // (B) drop non-English-declared source
-  if (!isLikelyEnglish(text)) return null; // (a) drop non-English
-  if (looksLikeJobPosting(text)) return null; // (a2) drop recruitment / non-substantive noise
+  if (!sourceLanguageAllowed(source)) return drop("non-english-source"); // (B) drop non-English-declared source
+  if (!isLikelyEnglish(text)) return drop("non-english"); // (a) drop non-English
+  if (looksLikeJobPosting(text)) return drop("job-posting"); // (a2) drop recruitment / non-substantive noise
   const itemTokens = new Set(tokenize(text));
-  if (itemTokens.size < 2) return null;
+  if (itemTokens.size < 2) return drop("too-short");
   const itemStrong = strongTermsIn(text);
 
   const publisher = item.sourceName || source.name;
@@ -3351,7 +3422,7 @@ function classifyItem(source, item, index) {
     return base;
   }
 
-  return null; // drop: noise / not relevant to existing curated content
+  return drop("no-anchor"); // drop: noise / not relevant to existing curated content
 }
 
 // Apply an approved proposal to the real curated dataset (user-gated write).
@@ -3484,7 +3555,8 @@ async function runSourceScan({ force = false } = {}) {
           seen.add(item.url);
           considered++;
           const prop = classifyItem(source, item, index);
-          if (!prop) continue;                       // dropped: non-English or duplicate
+          if (!prop) continue;                       // safety: classifier returned nothing
+          if (prop.dropped) { recordDroppedItem(prop); continue; } // audit dropped items
           if (knownIds.has(prop.id)) continue;        // already proposed/acted on
           const dedupeKey = `${prop.matchedRecord ? prop.matchedRecord.title : ""}|${prop.detectedAction}|${prop.url}`;
           if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
@@ -3773,6 +3845,10 @@ app.get("/healthz", (req, res) => {
     scanBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET, day: scanBudget().day },
     callBudget: { used: scanModelCallsThisRun, limit: SCAN_CALLS_PER_RUN_CAP },
     stuckRateLimitedProposals: stuckRateLimited,
+    droppedItems: {
+      count: (sourceState.droppedItems || []).length,
+      recent: (sourceState.droppedItems || []).slice(-10).reverse(),
+    },
     resolver: { attempts: resolverStats.attempts, ok: resolverStats.ok, successRatePct: resolverSuccessRate },
     // Which search legs are configured, which one would answer next, and whether
     // any is circuit-broken. Makes a degraded search visible to a live probe
@@ -3883,6 +3959,23 @@ function requireAdmin(req, res, next) {
   if (provided !== key) return res.status(401).json({ error: "Unauthorized" });
   next();
 }
+
+// Re-eligibilise a previously-dropped scan item so the next scan re-classifies
+// it (e.g. after a classifier/seed change makes it a fit). Removes it from the
+// droppedItems audit and from the source's seen set.
+app.post("/api/admin/dropped/recover", requireAdmin, (req, res) => {
+  const body = req.body || {};
+  const { source, url } = body;
+  if (!source || !url) return res.status(400).json({ error: "source and url are required" });
+  const list = sourceState.droppedItems || [];
+  const idx = list.findIndex(d => d.source === source && d.url === url);
+  if (idx === -1) return res.status(404).json({ error: "dropped item not found" });
+  list.splice(idx, 1);
+  const st = sourceState.sources && sourceState.sources[source];
+  if (st && Array.isArray(st.seen)) st.seen = st.seen.filter(u => u !== url);
+  saveSourceState();
+  res.json({ ok: true, recovered: { source, url } });
+});
 
 // Gate for the shared, editable datasets (Option B). Reuses ADMIN_API_KEY when
 // EDITOR_API_KEY is absent, so a trusted team needs only one shared secret.
