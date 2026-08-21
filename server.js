@@ -4007,6 +4007,19 @@ app.post("/api/sources/:id/refresh", requireEditor, async (req, res) => {
   }
 });
 
+// DELETE /api/sources/:id — remove a source (editor-gated). Lets an editor clear
+// failed/duplicate rows from the Team Sources list. Citable [T#] ids are not
+// reused afterwards, so existing references in stored answers stay valid.
+app.delete("/api/sources/:id", requireEditor, async (req, res) => {
+  try {
+    await sources.deleteSource(req.params.id);
+    res.json({ success: true, id: req.params.id });
+  } catch (e) {
+    if (/Database not configured/.test(e.message)) return res.status(500).json({ error: e.message });
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // Integrate an approved proposal into the curated dataset (user-gated write).
 app.post("/api/proposed-changes/:id/integrate", requireAdmin, (req, res) => {
   try {

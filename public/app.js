@@ -1303,6 +1303,8 @@ function setupTeamSources() {
   const list = document.getElementById("teamSourcesList");
   if (list) {
     list.addEventListener("click", (e) => {
+      const del = e.target.closest("[data-delete-id]");
+      if (del) { e.preventDefault(); deleteTeamSource(del.dataset.deleteId); return; }
       const btn = e.target.closest("[data-refresh-id]");
       if (btn) { e.preventDefault(); refreshTeamSource(btn.dataset.refreshId); }
     });
@@ -1338,8 +1340,11 @@ function renderTeamSourceRow(s) {
   const url = safeHref(s.url);
   const citation = s.citationId ? `<span class="team-source-cite">[${escapeHtml(s.citationId)}]</span>` : "";
   const status = escapeHtml(s.status || "pending");
-  const addedBy = s.addedBy ? ` · ${escapeHtml(s.addedBy)}` : "";
+  // "unknown" is the server default when no editor name is supplied — hide it
+  // rather than rendering a meaningless "· unknown" tag.
+  const addedBy = (s.addedBy && s.addedBy !== "unknown") ? ` · ${escapeHtml(s.addedBy)}` : "";
   const refreshBtn = `<button class="team-source-refresh" data-refresh-id="${id}" type="button" title="Re-fetch and re-ingest">&#x21BB;</button>`;
+  const delBtn = `<button class="team-source-delete" data-delete-id="${id}" type="button" title="Remove this source">&#10005;</button>`;
   return (
     `<div class="team-source-row">` +
       `<span class="team-source-status status-${escapeHtml(status)}">${status}</span>` +
@@ -1347,6 +1352,7 @@ function renderTeamSourceRow(s) {
       `<a class="team-source-title-link" href="${url}" target="_blank" rel="noopener">${title}</a>` +
       `<span class="team-source-meta">${addedBy}</span>` +
       refreshBtn +
+      delBtn +
     `</div>`
   );
 }
@@ -1385,6 +1391,18 @@ async function refreshTeamSource(id) {
     await loadTeamSources();
   } catch (_) {
     showToast("Network error refreshing source.");
+  }
+}
+
+async function deleteTeamSource(id) {
+  try {
+    const res = await authedFetch(`${API_BASE}/sources/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (res.status === 401) { showToast("Editor key required."); return; }
+    if (!res.ok) { showToast("Failed to remove source."); return; }
+    showToast("Source removed.");
+    await loadTeamSources();
+  } catch (_) {
+    showToast("Network error removing source.");
   }
 }
 

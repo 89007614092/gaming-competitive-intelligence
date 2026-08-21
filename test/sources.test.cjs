@@ -46,6 +46,10 @@ function makeFakePool() {
         });
         return { rows: [] };
       }
+      // SELECT id, status, citation_id FROM sources WHERE url = $1  (de-dup check)
+      if (/SELECT .* FROM sources WHERE url = \$1/i.test(text)) {
+        return { rows: rows.filter(r => r.url === params[0]) };
+      }
       // SELECT * FROM sources WHERE id = $1  (ingest / refresh)
       if (/SELECT \* FROM sources WHERE id/i.test(text)) {
         return { rows: rows.filter(r => r.id === params[0]) };
@@ -74,6 +78,13 @@ function makeFakePool() {
       // listSources — honour ORDER BY added_at DESC
       if (/FROM sources ORDER BY added_at DESC/i.test(text)) {
         return { rows: rows.slice().sort((a, b) => b.added_at - a.added_at).map(r => ({ ...r })) };
+      }
+      // DELETE FROM sources WHERE id = $1
+      if (/DELETE FROM sources WHERE id/i.test(text)) {
+        const id = params[0];
+        const idx = rows.findIndex(r => r.id === id);
+        if (idx >= 0) rows.splice(idx, 1);
+        return { rows: [] };
       }
       // loadTeamEvidence
       if (/status IN \('ingested', 'changed'\)/.test(text)) {
@@ -149,6 +160,37 @@ test("Thread D — shared source ingestion (library)", async (t) => {
       const row = await sources.addSourceUrl("https://example.com/b", "B", "molly");
       const ingested = await sources.ingestSource(row.id);
       assert.strictEqual(ingested.status, "failed");
+    } finally { libTeardown(); }
+  });
+
+  await t.test("addSourceUrl de-duplicates by URL (re-add updates the same row)", async () => {
+    libSetup();
+    try {
+      const r1 = await sources.addSourceUrl("https://example.com/dup", "Dup", "molly");
+      const r2 = await sources.addSourceUrl("https://example.com/dup", "Dup", "molly");
+      assert.strictEqual(r1.id, r2.id, "re-add must update the existing row, not insert a new one");
+      const list = await sources.listSources();
+      const matching = list.filter(s => s.url === "https://example.com/dup");
+      assert.strictEqual(matching.length, 1, "only one row should exist per URL");
+      // Force the (background) ingestion to complete, then confirm it ingested.
+      await sources.ingestSource(r1.id);
+      const after = await sources.listSources();
+      const row = after.find(s => s.url === "https://example.com/dup");
+      assert.strictEqual(row.status, "ingested");
+      assert.match(row.citationId, /^T\d+$/);
+    } finally { libTeardown(); }
+  });
+
+  await t.test("ingestSource preserves an existing [T#] on re-ingest (no renumber)", async () => {
+    libSetup();
+    try {
+      pushIngestedRow(pool, { id: "src_p", citation: "T1" });
+      const refreshed = await sources.refreshSource("src_p");
+      assert.strictEqual(refreshed.status, "ingested");
+      assert.strictEqual(refreshed.citation_id, "T1", "citation id must not be renumbered on refresh");
+      const list = await sources.listSources();
+      const row = list.find(s => s.id === "src_p");
+      assert.strictEqual(row.citationId, "T1");
     } finally { libTeardown(); }
   });
 
@@ -231,6 +273,18 @@ test("Thread D — source routes (real app, fake pool)", async (t) => {
         { "x-admin-key": "test-editor-key" });
       assert.strictEqual(r.status, 200);
       assert.strictEqual(r.body.source.status, "ingested");
+    });
+
+    await t.test("DELETE /api/sources/:id (editor-gated) removes a source", async () => {
+      pushIngestedRow(pool, { id: "src_del", citation: "T1" });
+      const noKey = await request("DELETE", "/api/sources/src_del");
+      assert.strictEqual(noKey.status, 401);
+      const ok = await request("DELETE", "/api/sources/src_del", undefined,
+        { "x-admin-key": "test-editor-key" });
+      assert.strictEqual(ok.status, 200);
+      assert.strictEqual(ok.body.success, true);
+      const list = await request("GET", "/api/sources");
+      assert.ok(!list.body.sources.some(s => s.id === "src_del"));
     });
 
     await t.test("POST /api/summarise injects ONLY requested team sources (opt-in)", async () => {
