@@ -225,7 +225,7 @@ async function jinaExtract(url, timeoutMs = 20000) {
 const { createExtractor } = require("./lib/extractor");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
-const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, DATASET_FILE } = require("./lib/datasets");
+const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool: datasetsGetDbPool, DATASET_FILE } = require("./lib/datasets");
 const sources = require("./lib/sources");
 // Thread D reuses the governed reader pipeline (Jina + Thread F attribution) for
 // ingestion, so inject it once at boot. Function declarations are hoisted, so
@@ -2403,11 +2403,63 @@ function loadProposed() {
   }
 }
 
+// Durable store for Suggested Updates. The whole object is kept as a single
+// JSONB row keyed by "__store" — simpler and exactly correct for a small
+// (<300 item) document, and it preserves the {items, dismissedIds,
+// integratedIds} shape the rest of the code expects.
+async function persistProposedStore(pool) {
+  const data = JSON.stringify(proposedChanges);
+  await pool.query(
+    `INSERT INTO proposed_changes (id, data, status, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, status = EXCLUDED.status, updated_at = now()`,
+    ["__store", data, "store"]
+  );
+}
+
 function saveProposed() {
+  // Disk write is the always-available fallback (and the local-dev path when
+  // DATABASE_URL is unset). On the deployed host the Supabase copy is the
+  // durable store that survives Render's ephemeral-disk cold starts, so
+  // enrichment progress is never wiped on a wake-up.
   try {
     fs.writeFileSync(PROPOSED_FILE, JSON.stringify(proposedChanges, null, 2));
   } catch (_) { /* non-fatal */ }
+  const pool = datasetsGetDbPool();
+  if (pool) {
+    persistProposedStore(pool).catch((e) =>
+      console.warn("[proposed] DB save failed; disk fallback only:", e.message));
+  }
 }
+
+// Load the durable store from Supabase at boot, overriding the disk-seeded
+// in-memory copy. With this, enrichment progress persists across cold starts
+// and the scan's self-healing retry loop can drain the queue over time
+// instead of restarting from zero on every wake-up.
+async function primeProposedFromDb() {
+  const pool = datasetsGetDbPool();
+  if (!pool) return;
+  try {
+    const res = await pool.query("SELECT data FROM proposed_changes WHERE id = $1", ["__store"]);
+    const row = res.rows && res.rows[0];
+    if (!row || !row.data) return;
+    const loaded = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+    if (loaded && Array.isArray(loaded.items)) {
+      proposedChanges = {
+        items: loaded.items,
+        dismissedIds: Array.isArray(loaded.dismissedIds) ? loaded.dismissedIds : [],
+        integratedIds: Array.isArray(loaded.integratedIds) ? loaded.integratedIds : [],
+      };
+      console.log(`  Proposed-changes store loaded from database (${proposedChanges.items.length} items).`);
+    }
+  } catch (e) {
+    console.warn("[proposed] DB load failed; using disk/in-memory:", e.message);
+  }
+}
+
+// Test seams (harmless in production).
+function getProposedChanges() { return proposedChanges; }
+function setProposedChanges(obj) { proposedChanges = obj; }
 
 // ---------------------------------------------------------------------------
 // Phase 3: retention sweep + shared-store write-back
@@ -4163,6 +4215,11 @@ if (require.main === module) {
     primeDatasetCacheFromDb()
       .then(() => console.log("  Datasets cache preloaded from database."))
       .catch((e) => console.warn("[datasets] DB preload failed; using disk fallback:", e.message));
+    // Suggested-Updates durable store (Leg 2): load from Supabase so enrichment
+    // progress survives cold starts. Degrades to disk/in-memory on any error.
+    primeProposedFromDb()
+      .then(() => {})
+      .catch((e) => console.warn("[proposed] DB preload failed; using disk fallback:", e.message));
   }
 }
 
@@ -4205,6 +4262,13 @@ module.exports = {
   // Google-News -> Jina direct-extract path (Leg 1 resolver fix).
   fetchArticlePreview,
   jinaExtract,
+
+  // Suggested-Updates durable store (Leg 2) — exported for the DB round-trip test.
+  saveProposed,
+  primeProposedFromDb,
+  persistProposedStore,
+  getProposedChanges,
+  setProposedChanges,
 
   // Text segmentation
   splitSentences,
