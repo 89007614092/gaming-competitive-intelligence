@@ -178,6 +178,10 @@
                 <input type="checkbox" id="useMySources" />
                 <span>My Sources</span>
               </label>
+              <label class="summary-model-toggle">
+                <input type="checkbox" id="useTeamSources" />
+                <span>Team Sources</span>
+              </label>
             </div>
             <div class="summary-composer-actions">
               <label class="summary-style-label" for="summaryStyle">
@@ -202,6 +206,17 @@
           </div>
           <div class="my-sources-list" id="mySourcesList"></div>
           <p class="my-sources-empty" id="mySourcesEmpty" style="display:none;">No saved articles yet. Save articles in News + Search to use them here.</p>
+        </div>
+
+        <!-- Team Sources: attach shared editor-curated sources (Thread D) as [T#] citations.
+             Opt-in: hidden until the composer toggle is on; checkboxes mirror My Sources. -->
+        <div class="my-sources-panel" id="teamSourcesComposerPanel" style="display:none;">
+          <div class="my-sources-panel-header">
+            <span class="my-sources-title">Team Sources</span>
+            <span class="my-sources-count" id="teamSourcesComposerCount">0 selected</span>
+          </div>
+          <div class="my-sources-list" id="teamSourcesComposerList"></div>
+          <p class="my-sources-empty" id="teamSourcesComposerEmpty" style="display:none;">No team sources yet. Add them under News + Search → Team Sources.</p>
         </div>
 
         <div class="summary-suggestions" aria-label="Example questions">

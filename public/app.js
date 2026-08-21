@@ -51,6 +51,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupFolderUI();
   setupNewsCompetitors();
   setupMySources();
+  setupTeamSourcesComposer();
   setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
@@ -161,6 +162,77 @@ function setupMySources() {
   });
 }
 
+// Thread D composer control: opt-in Team Sources, mirroring My Sources.
+// Default OFF. When switched on, the checklist is populated and every ingested
+// team source is auto-selected (so the toggle alone = "include all team
+// sources"); the user can then deselect specific ones. Selected citation_ids
+// are sent to /api/summarise and the server only injects those [T#] items.
+function setupTeamSourcesComposer() {
+  const toggle = document.getElementById("useTeamSources");
+  const panel = document.getElementById("teamSourcesComposerPanel");
+  if (!toggle || !panel) return;
+  toggle.addEventListener("change", () => {
+    panel.style.display = toggle.checked ? "block" : "none";
+    if (toggle.checked) {
+      renderTeamComposerList();
+    } else {
+      selectedTeamSourceIds.clear();
+      updateTeamComposerCount();
+    }
+  });
+}
+
+async function renderTeamComposerList() {
+  const list = document.getElementById("teamSourcesComposerList");
+  const empty = document.getElementById("teamSourcesComposerEmpty");
+  const count = document.getElementById("teamSourcesComposerCount");
+  if (!list) return;
+  try {
+    const res = await fetch(`${API_BASE}/sources`);
+    if (!res.ok) { list.innerHTML = ""; if (empty) empty.style.display = "block"; return; }
+    const data = await res.json();
+    const sourcesList = Array.isArray(data.sources) ? data.sources : [];
+    if (!sourcesList.length) {
+      list.innerHTML = "";
+      if (empty) empty.style.display = "block";
+      updateTeamComposerCount();
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    // Auto-select all ingested team sources when the panel first opens, so the
+    // toggle alone includes the whole pool (per the agreed UX).
+    selectedTeamSourceIds = new Set(sourcesList.map(s => s.citationId).filter(Boolean));
+    list.innerHTML = sourcesList.map(s => {
+      const cid = s.citationId || "";
+      const key = encodeURIComponent(cid);
+      const checked = cid ? "checked" : "";
+      const urlHost = s.url ? hostOf(s.url) : "";
+      return `<label class="my-sources-item">
+        <input type="checkbox" class="team-source-check" data-cid="${key}" ${checked} />
+        <span class="my-sources-item-title">${escapeHtml(s.citationId ? `[${cid}] ` : "")}${escapeHtml(s.title || s.url || "Untitled")}</span>
+        ${urlHost ? `<a class="my-sources-item-url" href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${escapeHtml(urlHost)}</a>` : ""}
+      </label>`;
+    }).join("");
+    list.querySelectorAll(".team-source-check").forEach(cb => {
+      cb.addEventListener("change", () => {
+        const cid = decodeURIComponent(cb.dataset.cid);
+        if (cb.checked) selectedTeamSourceIds.add(cid);
+        else selectedTeamSourceIds.delete(cid);
+        updateTeamComposerCount();
+      });
+    });
+    updateTeamComposerCount();
+  } catch (_) {
+    list.innerHTML = "";
+    if (empty) empty.style.display = "block";
+  }
+}
+
+function updateTeamComposerCount() {
+  const count = document.getElementById("teamSourcesComposerCount");
+  if (count) count.textContent = `${selectedTeamSourceIds.size} selected`;
+}
+
 function renderMySourcesList() {
   const list = document.getElementById("mySourcesList");
   const empty = document.getElementById("mySourcesEmpty");
@@ -239,6 +311,14 @@ async function runSummary() {
       }));
   }
 
+  // Thread D: attach selected team sources as [T#] evidence, but ONLY when the
+  // composer toggle is on (opt-in). Defaults to none, so team evidence is never
+  // auto-injected into every answer (saves tokens; makes the "not cited" badge
+  // meaningful because the user explicitly chose them).
+  const teamSources = document.getElementById("useTeamSources")?.checked === true
+    ? [...selectedTeamSourceIds]
+    : [];
+
   button.disabled = true;
   button.textContent = "Asking...";
   result.style.display = "block";
@@ -259,6 +339,7 @@ async function runSummary() {
         useInternet,
         useModel,
         userSources,
+        teamSources,
       }),
     });
     const data = await response.json();
@@ -402,6 +483,8 @@ let lastAnswerText = "";
 let lastAnswerSources = [];
 // Phase 3a: keys of saved News articles the user has chosen to attach as [S#] sources.
 let selectedMySourceKeys = new Set();
+// Thread D: citation_ids (e.g. "T2") of team sources the user has chosen to attach as [T#] evidence.
+let selectedTeamSourceIds = new Set();
 
 function renderAnswerByStyle() {
   const answer = document.getElementById("summaryAnswer");

@@ -232,6 +232,26 @@ test("Thread D — source routes (real app, fake pool)", async (t) => {
       assert.strictEqual(r.status, 200);
       assert.strictEqual(r.body.source.status, "ingested");
     });
+
+    await t.test("POST /api/summarise injects ONLY requested team sources (opt-in)", async () => {
+      pushIngestedRow(pool, { id: "src_t1", citation: "T1" });
+      pushIngestedRow(pool, { id: "src_t2", citation: "T2" });
+      const ask = (teamSourceIds) => request("POST", "/api/summarise", {
+        question: "What does the CMA say about AI procurement in gaming?",
+        useModel: false, useInternet: false, userSources: [], teamSourceIds,
+      });
+      // No IDs requested -> team evidence must be absent (no auto-inject).
+      const r1 = await ask([]);
+      assert.strictEqual(r1.status, 200);
+      assert.ok(r1.body.success);
+      const teamR1 = (r1.body.sources || []).filter(s => s.sourceType === "team");
+      assert.strictEqual(teamR1.length, 0, "team evidence must be absent when not requested");
+      // Only T2 requested -> exactly T2 injected, T1 excluded.
+      const r2 = await ask(["T2"]);
+      const teamR2 = (r2.body.sources || []).filter(s => s.sourceType === "team");
+      assert.strictEqual(teamR2.length, 1);
+      assert.strictEqual(teamR2[0].id, "T2");
+    });
   } finally {
     if (server.closeAllConnections) server.closeAllConnections();
     await new Promise(r => server.close(r));
