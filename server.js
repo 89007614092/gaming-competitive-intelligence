@@ -2979,6 +2979,24 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
   if (!item.url) return { text: null, blocked: false };
   let articleUrl = item.url;
   if (/news\.google\.com/i.test(articleUrl)) {
+    // Render's server-side egress can't follow Google News' 302 redirect — it
+    // lands on the consent/GDPR wall, so resolveGoogleNewsUrl returns null
+    // (live /healthz shows resolver attempts:18, ok:0). Jina's reader resolves
+    // + extracts the redirect from its OWN infra, so when Jina is the active
+    // provider we extract the Google News URL directly instead of relying on the
+    // local resolver. This is what unblocks proposal previews (and therefore
+    // enrichment) on the free-tier host.
+    if (activeSearchProvider() === "jina") {
+      try {
+        const jt = await jinaExtract(item.url, timeoutMs);
+        if (jt && jt.length >= 140 && !looksLikeBotWall(jt)) {
+          const sentences = jt.match(/[^.!?]+[.!?]+/g) || [jt];
+          let lead = sentences.slice(0, 4).join(" ").trim();
+          if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
+          return { text: lead, blocked: false };
+        }
+      } catch (_) { /* fall through to the local resolver / direct fetch */ }
+    }
     const real = await resolveGoogleNewsUrl(item.url, item.title, domain);
     if (!real) return { text: null, blocked: false };
     articleUrl = real;
@@ -4182,6 +4200,11 @@ module.exports = {
   // Web evidence cost controls (PR #2) — pure helpers, exported for tests
   localEvidenceCovers,
   citedWebIds,
+
+  // Suggested-Updates preview fetch — exported so tests can verify the
+  // Google-News -> Jina direct-extract path (Leg 1 resolver fix).
+  fetchArticlePreview,
+  jinaExtract,
 
   // Text segmentation
   splitSentences,
