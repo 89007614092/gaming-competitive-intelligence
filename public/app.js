@@ -4444,6 +4444,8 @@ async function renderReviewPanel() {
         <div class="proposal-summary-block">
           <div class="proposal-preview-label">Proposed entry (AI-generated, in app style):</div>
           <div class="proposal-preview proposal-summary-text">${escapeHtml(p.styledSummary)}</div>
+          ${p.jurisdiction && p.jurisdiction !== "unknown" ? `<div class="proposal-meta proposal-jurisdiction"><span class="proposal-meta-label">Jurisdiction:</span> ${escapeHtml(p.jurisdiction)}</div>` : ""}
+          ${p.whyItMatters ? `<div class="proposal-meta proposal-whymatters"><span class="proposal-meta-label">Why it matters:</span> ${escapeHtml(p.whyItMatters)}</div>` : ""}
           <div class="proposal-edit-row">
             <button class="btn btn-sm proposal-edit-toggle" data-edit-toggle type="button">Edit summary</button>
           </div>
@@ -4482,6 +4484,7 @@ async function renderReviewPanel() {
           <span class="proposal-source">${escapeHtml(p.publisher || p.source || "")}</span>
           <span class="proposal-license-badge proposal-license-${p.licenseClass || "open"}" data-cls="${p.licenseClass || "open"}">${READER_LICENSE_LABELS[p.licenseClass] || p.licenseClass || "Open"}</span>
           <span class="proposal-date">${escapeHtml(p.publishedLabel || "")}</span>
+          ${p.jurisdiction && p.jurisdiction !== "unknown" ? `<span class="proposal-jurisdiction-pill">${escapeHtml(p.jurisdiction)}</span>` : ""}
         </div>
         <div class="proposal-title">${escapeHtml(p.title)}</div>
         ${p.url ? `<a class="proposal-source-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open the original article ↗</a>` : ""}

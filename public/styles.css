@@ -4505,6 +4505,26 @@ body {
   color: #1e293b;
   margin-bottom: 0.4rem;
 }
+.proposal-meta {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: #334155;
+  margin-top: 0.25rem;
+}
+.proposal-meta-label {
+  font-weight: 700;
+  color: #475569;
+}
+.proposal-jurisdiction-pill {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #0f6e56;
+  background: #e1f5ee;
+  border: 1px solid #9fe1cb;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
 .proposal-source-link {
   display: inline-block;
   font-size: 0.78rem;
