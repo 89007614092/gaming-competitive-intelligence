@@ -324,8 +324,8 @@ async function runSummary() {
   button.textContent = "Asking...";
   result.style.display = "block";
   document.getElementById("summaryResultQuestion").textContent = question;
-  document.getElementById("summaryResultMeta").textContent = "Retrieving application evidence...";
-  answer.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading the AI model and synthesising evidence...</p></div>`;
+  document.getElementById("summaryResultMeta").textContent = window.t('loading.retrievingEvidence');
+  answer.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.aiModelSynthesising')}</p></div>`;
   document.getElementById("summaryEvidence").innerHTML = "";
   document.getElementById("summaryWarning").style.display = "none";
   document.getElementById("summaryTierNotice").style.display = "none";
@@ -938,7 +938,7 @@ async function loadNews(forceRefresh = false) {
   searchActive = false;
   hideSearchBanner();
   const feed = document.getElementById("newsFeed");
-  feed.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Scanning competitor news...</p></div>';
+  feed.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.scanningNews')}</p></div>`;
 
   try {
     const params = new URLSearchParams({ competitors: selectedNewsCompetitorIds.join(",") });
@@ -1922,7 +1922,7 @@ async function doSearch() {
   searchActive = true;
   activeSearchQuery = query;
   showSearchBanner(query);
-  feed.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Searching the web for “${escapeHtml(query)}”…</p></div>`;
+  feed.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.webSearch', { query: escapeHtml(query) })}</p></div>`;
 
   try {
     const res = await fetch(`${API_BASE}/search`, {
@@ -1993,7 +1993,7 @@ let kbActiveCategory = null;
 
 async function loadKnowledgeBase(category = null, search = null) {
   const content = document.getElementById("kbContent");
-  content.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading knowledge base...</p></div>';
+  content.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.knowledgeBase')}</p></div>`;
 
   try {
     let url = `${API_BASE}/knowledge`;
@@ -2287,7 +2287,7 @@ const spiderViewState = {
 
 async function loadSpiderWeb() {
   const container = document.getElementById("spiderContainerSection");
-  container.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Building competitor network...</p></div>';
+  container.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.competitorNetwork')}</p></div>`;
 
   try {
     if (!spiderData) {
@@ -2661,7 +2661,7 @@ async function loadCompanyMap() {
   if (!container) return;
 
   // Show loading
-  container.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading map...</p></div>';
+  container.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.map')}</p></div>`;
 
   // Load Tencent Maps SDK
   loadTencentMapSDK();
@@ -3098,7 +3098,7 @@ async function loadCurrentUseCases() {
   }
 
   if (grid) {
-    grid.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading current use cases...</p></div>';
+    grid.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.useCases')}</p></div>`;
   }
 
   try {
@@ -3257,7 +3257,7 @@ async function loadGamingTrends() {
     return;
   }
 
-  grid.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading AI gaming trends...</p></div>';
+  grid.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.gamingTrends')}</p></div>`;
 
   try {
     const res = await fetch(`${API_BASE}/gaming-trends`);
@@ -3504,7 +3504,7 @@ async function loadRegulatoryTimeline() {
     return;
   }
 
-  content.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading regulatory timeline...</p></div>';
+  content.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.regulatoryTimeline')}</p></div>`;
 
   try {
     const res = await fetch(`${API_BASE}/regulatory-timeline`);
@@ -3580,7 +3580,7 @@ async function loadRisks() {
   }
 
   const categoriesEl = document.getElementById("risksCategories");
-  categoriesEl.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading risk analysis...</p></div>';
+  categoriesEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.riskAnalysis')}</p></div>`;
 
   try {
     const res = await fetch(`${API_BASE}/risks`);
@@ -4375,7 +4375,7 @@ async function renderReviewPanel() {
   const listEl = document.getElementById("reviewPanelList");
   const emptyEl = document.getElementById("reviewPanelEmpty");
   if (!listEl) return;
-  listEl.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading proposed changes…</p></div>';
+  listEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.proposedChanges')}</p></div>`;
   try {
     const res = await fetch(`${API_BASE}/proposed-changes`);
     const json = res.ok ? await res.json() : { pending: [] };

@@ -138,6 +138,25 @@
       // Footer
       'footer.aiTransparency': 'This feature uses AI models to assist with answers and background updates. Be aware responses are AI generated to an extent, and so the accuracy of information cannot be assured.',
 
+      // Q&A panel (dynamic chrome)
+      'qna.noSavedArticles': 'No saved articles yet. Save articles in News + Search to use them here.',
+      'qna.noTeamSources': 'No team sources yet. Add them under News + Search → Team Sources.',
+      'qna.sources': 'Sources',
+
+      // Loading states
+      'loading.knowledgeBase': 'Loading knowledge base...',
+      'loading.competitorNetwork': 'Building competitor network...',
+      'loading.map': 'Loading map...',
+      'loading.useCases': 'Loading current use cases...',
+      'loading.gamingTrends': 'Loading AI gaming trends...',
+      'loading.regulatoryTimeline': 'Loading regulatory timeline...',
+      'loading.riskAnalysis': 'Loading risk analysis...',
+      'loading.aiModelSynthesising': 'Loading the AI model and synthesising evidence...',
+      'loading.scanningNews': 'Scanning competitor news...',
+      'loading.webSearch': 'Searching the web for “{query}”…',
+      'loading.proposedChanges': 'Loading proposed changes…',
+      'loading.retrievingEvidence': 'Retrieving application evidence...',
+
       // Placeholders
       'ph.newsSearch': 'Search articles, e.g., NetEase AI game engine partnership 2026',
       'ph.kbSearch': 'Search knowledge base... e.g. EU AI Act, Stability AI, runtime generative, watermarking',
@@ -269,6 +288,25 @@
       // Footer
       'footer.aiTransparency': '本功能使用 AI 模型辅助回答与后台更新。请注意，回答在一定程度上由 AI 生成，因此无法保证信息的准确性。',
 
+      // Q&A panel (dynamic chrome)
+      'qna.noSavedArticles': '暂无已保存文章。请在“新闻 + 搜索”中保存文章以在此使用。',
+      'qna.noTeamSources': '暂无团队来源。请在“新闻 + 搜索”→“团队来源”中添加。',
+      'qna.sources': '来源',
+
+      // Loading states
+      'loading.knowledgeBase': '正在加载知识库……',
+      'loading.competitorNetwork': '正在构建竞争对手关系网……',
+      'loading.map': '正在加载地图……',
+      'loading.useCases': '正在加载当前应用案例……',
+      'loading.gamingTrends': '正在加载 AI 游戏趋势……',
+      'loading.regulatoryTimeline': '正在加载监管时间表……',
+      'loading.riskAnalysis': '正在加载风险分析……',
+      'loading.aiModelSynthesising': '正在加载 AI 模型并综合证据……',
+      'loading.scanningNews': '正在扫描竞争对手新闻……',
+      'loading.webSearch': '正在联网搜索“{query}”…',
+      'loading.proposedChanges': '正在加载建议更新……',
+      'loading.retrievingEvidence': '正在检索应用证据……',
+
       // Placeholders
       'ph.newsSearch': '搜索文章，例如：网易 AI 游戏引擎合作 2026',
       'ph.kbSearch': '搜索知识库……例如：欧盟 AI 法案、Stability AI、运行时生成、水印',
@@ -351,6 +389,22 @@
     { sel: '#reviewPanelTitle', key: 'modal.review.title' },
     { sel: '#reviewPanelOverlay .modal-subtitle', key: 'modal.review.subtitle' },
     { sel: '#reviewPanelEmpty p', key: 'review.empty' },
+
+    // Q&A panel (summarise-view) static chrome
+    { sel: '#summaryUseModel + span', key: 'common.includeInternet' },
+    { sel: '#useMySources + span', key: 'common.mySources' },
+    { sel: '#useTeamSources + span', key: 'common.teamSources' },
+    { sel: '.summary-style-label > span', key: 'common.answerStyle' },
+    { sel: '#summaryStyle option[value="full"]', key: 'common.full' },
+    { sel: '#summaryStyle option[value="detailed"]', key: 'common.detailed' },
+    { sel: '#summaryStyle option[value="bullets"]', key: 'common.bullets' },
+    { sel: '#summaryStyle option[value="conclusion"]', key: 'common.conclusion' },
+    { sel: '#mySourcesPanel .my-sources-title', key: 'common.mySources' },
+    { sel: '#teamSourcesComposerPanel .my-sources-title', key: 'common.teamSources' },
+    { sel: '#mySourcesEmpty', key: 'qna.noSavedArticles' },
+    { sel: '#teamSourcesComposerEmpty', key: 'qna.noTeamSources' },
+    { sel: '#summaryResult .summary-eyebrow', key: 'common.answer' },
+    { sel: '#summaryResult .summary-evidence-section h3', key: 'qna.sources' },
 
     // Modals
     { sel: '#competitorModalTitle', key: 'modal.addCompetitors.title' },
