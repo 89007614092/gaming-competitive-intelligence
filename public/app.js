@@ -4440,12 +4440,19 @@ async function renderReviewPanel() {
       // We render it ONLY when it actually exists — we never fall back to raw or
       // extracted text as the "finished" suggestion (#4).
       if (p.styledSummary) {
+        // Proposed Entry + Why it matters are presented as ONE contiguous block:
+        // the AI entry sits first, and the relevance note reads as a direct
+        // continuation of it (not a separate disconnected line). Jurisdiction is
+        // already shown as a header pill, so the in-body duplicate is dropped.
         return `
         <div class="proposal-summary-block">
           <div class="proposal-preview-label">Proposed entry (AI-generated, in app style):</div>
           <div class="proposal-preview proposal-summary-text">${escapeHtml(p.styledSummary)}</div>
-          ${p.jurisdiction && p.jurisdiction !== "unknown" ? `<div class="proposal-meta proposal-jurisdiction"><span class="proposal-meta-label">Jurisdiction:</span> ${escapeHtml(p.jurisdiction)}</div>` : ""}
-          ${p.whyItMatters ? `<div class="proposal-meta proposal-whymatters"><span class="proposal-meta-label">Why it matters:</span> ${escapeHtml(p.whyItMatters)}</div>` : ""}
+          ${p.whyItMatters ? `
+          <div class="proposal-whymatters-inline">
+            <div class="proposal-whymatters-label">Why it matters</div>
+            <div class="proposal-whymatters-text">${escapeHtml(p.whyItMatters)}</div>
+          </div>` : ""}
           <div class="proposal-edit-row">
             <button class="btn btn-sm proposal-edit-toggle" data-edit-toggle type="button">Edit summary</button>
           </div>
