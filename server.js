@@ -1825,6 +1825,44 @@ async function getLiveNewsArticles(selectedCompetitors = []) {
   return { articles: bingArticles, source: "Bing News RSS" };
 }
 
+// Rebuild: the Suggested-Updates scan now reuses the SAME articles shown in the
+// News + Search tab (no separate RSS feed lane). Read the cached News+Search set
+// when fresh; otherwise trigger a live fetch — exactly what the tab would show.
+async function getScanArticleCandidates() {
+  const competitors = resolveNewsCompetitors();
+  const key = newsSelectionKey(competitors);
+  const cached = newsCacheBySelection.get(key);
+  if (cached && Array.isArray(cached.articles) && cached.articles.length) return cached.articles;
+  try {
+    const { articles } = await getLiveNewsArticles(competitors);
+    return articles || [];
+  } catch {
+    return [];
+  }
+}
+
+// News + Search items lack the `source` shape classifyItem expects (id/domain/
+// category/licenseClass). Wrap each in a synthetic source shim so the existing
+// matcher runs unchanged. AI-regulation stays the PRIMARY lens (bestMatch's
+// STRONG_TERMS), with AI×gaming as the extension — consistent with the app's
+// guardrail.
+function syntheticSourceForArticle(item) {
+  let domain = "";
+  try {
+    domain = new URL(item.url || "").host.replace(/^www\./, "");
+  } catch {
+    domain = String(item.sourceName || "news").toLowerCase().replace(/\s+/g, "-");
+  }
+  return {
+    id: domain,
+    name: item.sourceName || domain,
+    domain,
+    category: "regulation",
+    licenseClass: "news-fair-use",
+    language: "en",
+  };
+}
+
 // --- News subhead enrichment -------------------------------------------------
 // Google News RSS <description> only carries the headline + source name (no
 // summary), so News cards otherwise repeat the title plus the site. This pulls
@@ -2623,6 +2661,28 @@ function strongTermsIn(text) {
   }
   return found;
 }
+// Rebuild: the News + Search tab is already AI×gaming-curated, so for NEW-topic
+// gap discovery we accept a broader in-domain anchor than the reg-only
+// STRONG_TERMS. This lets competitor AI×gaming news (which often lacks a
+// regulatory phrase) still surface as a candidate knowledge-base gap, while
+// pure non-AI noise that slips into the tab is still dropped.
+const DOMAIN_TERMS = [
+  "ai", "a.i.", "artificial intelligence", "generative ai", "genai",
+  "machine learning", "deep learning", "neural", "llm", "llms", "chatbot",
+  "gaming", "video game", "video games", "game ai", "npc", "game development",
+  "synthetic media", "deepfake", "player data", "virtual world",
+];
+function domainTermsIn(text) {
+  const t = String(text || "").toLowerCase();
+  const toks = new Set(tokenize(t));
+  const found = new Set();
+  for (const term of DOMAIN_TERMS) {
+    if (term.includes(" ")) { if (t.includes(term)) found.add(term); }
+    else if (toks.has(term)) found.add(term);
+  }
+  return found;
+}
+
 function sharedCount(a, b) {
   let n = 0;
   for (const x of a) if (b.has(x)) n++;
@@ -3296,8 +3356,8 @@ function enrichmentFailure(obj, prop) {
   if (summary.length < 80) return "styledSummary too short (<80 chars)";
   const jurisdiction = typeof obj.jurisdiction === "string" ? obj.jurisdiction.trim() : "";
   if (jurisdiction.length < 2) return "missing jurisdiction";
-  const why = typeof obj.whyItMatters === "string" ? obj.whyItMatters.trim() : "";
-  if (why.length < 30) return "missing or thin whyItMatters";
+  // The "why it matters" rationale is now folded INTO styledSummary (the single
+  // combined entry text), so there is no separate field to validate here.
   // Restatement guard: a good summary must add materially beyond the headline.
   const title = String((prop && prop.title) || "").toLowerCase();
   if (title.length > 12) {
@@ -3321,8 +3381,8 @@ async function enrichWithModel(prop, excerpt, opts = {}) {
   // Manual submissions are analyst-curated, so we tell the model to always
   // produce a styledSummary and never reject them as non-substantive.
   const forceNote = allowReject ? "" : "\n\nThis item was manually submitted by an analyst for the AI & gaming competitive-intelligence knowledge base. It is always substantive — produce a full styledSummary and do NOT set rejected:true.";
-  const system = `You rewrite AI-regulation/policy news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-3 sentences (around 60-110 words) that describe what the document ACTUALLY SAYS — never merely echo the headline; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}${forceNote}`;
-  const user = `Analyse this AI-regulation/policy source and return ONE structured knowledge-base entry.${existing}
+  const system = `You rewrite AI-regulation/policy and AI×gaming news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-4 sentences that describe what the document ACTUALLY SAYS — never merely echo the headline; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}${forceNote}`;
+  const user = `Analyse this AI-regulation/policy or AI×gaming source and return ONE structured knowledge-base entry.${existing}
 SOURCE TITLE (${prop.publisher || "unknown"}): ${prop.title}
 SOURCE TEXT:
 ${text}
@@ -3330,18 +3390,14 @@ ${text}
 Return ONLY valid JSON:
 {
   "updateCategory": one of "information-outdated" | "additional-information" | "new-case-study" | "new-deadline" | "new-development",
-  "updateReason": one short sentence (max 20 words) explaining why this is suggested,
-  "styledSummary": 2-3 sentences in English describing the document's actual content and concrete implications (not a restatement of the title). Max 600 chars. Do NOT add a citation line — the app shows the source link.
   "jurisdiction": the relevant legal scope, e.g. "EU", "United Kingdom", "United States", "France", "global" (use "unknown" only if genuinely unspecified),
-  "whyItMatters": 1-2 sentences in English on the concrete impact for AI governance / AI policy / gaming+AI,
-  "rejected": true ONLY if this is a job posting, a hiring/careers page, an event invitation, or otherwise not a substantive AI-regulation/policy development. If rejected, set styledSummary to "" and updateCategory to null.
+  "styledSummary": 2-4 sentences in English in the knowledge-base house style. Describe what the source ACTUALLY says AND — crucially — WHY it matters as an update to the knowledge base: what gap it fills, or which existing node it updates or outdates. For an update to an existing entry, write it so it could be appended to (or replace) that node. State concrete figures, dates and regulation/article references. Max 600 chars. Do NOT add a citation line — the app shows the source link. Never invent facts.
+  "rejected": true ONLY if this is a job posting, a hiring/careers page, an event invitation, or otherwise not a substantive AI-regulation/policy or AI×gaming development. If rejected, set styledSummary to "".
 }`;
   const build = (obj) => ({
     updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
-    updateReason: String(obj.updateReason || "").slice(0, 240),
     styledSummary: obj.styledSummary.slice(0, 600).trim(),
     jurisdiction: String(obj.jurisdiction || "unknown").slice(0, 80).trim(),
-    whyItMatters: String(obj.whyItMatters || "").slice(0, 400).trim(),
   });
   const parse = (raw) => { try { return extractJson(raw); } catch { return null; } };
 
@@ -3363,7 +3419,7 @@ Return ONLY valid JSON:
   // blocking an analyst-curated item.
   if (!allowReject) return build(obj);
   await paceScanModelCall();
-  const retryUser = user + `\n\nPREVIOUS OUTPUT FAILED VALIDATION: ${fail}. Rewrite with a substantive 2-3 sentence English summary describing the document's actual content and concrete impact, a real "jurisdiction", and a "whyItMatters" impact statement. Do not merely rephrase the headline.`;
+  const retryUser = user + `\n\nPREVIOUS OUTPUT FAILED VALIDATION: ${fail}. Rewrite with a substantive 2-4 sentence English summary describing the document's actual content and concrete impact (and why it matters as a knowledge-base update), a real "jurisdiction", and no headline restatement.`;
   const raw2 = await summariseEngine.runModelChat(system, retryUser, { maxTokens: 600, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
   if (raw2 && raw2.rateLimited) return { rateLimited: true };
   const obj2 = parse(raw2);
@@ -3393,27 +3449,25 @@ async function summariseStoredItem(prop, { force = true } = {}) {
       prop.styledSummary = enriched.styledSummary;
       prop.enrichStatus = "done";
       if (enriched.updateCategory) prop.updateCategory = enriched.updateCategory;
-      if (enriched.updateReason) prop.updateReason = enriched.updateReason;
       if (enriched.jurisdiction) prop.jurisdiction = enriched.jurisdiction;
-      if (enriched.whyItMatters) prop.whyItMatters = enriched.whyItMatters;
       return enriched.styledSummary;
     }
   } catch (_) { /* best effort */ }
   return null;
 }
 
-// Whether a pending proposal still needs (re-)enrichment under the #81 schema.
-// A fully-enriched item has a real preview, a heuristic reason, a >=80-char
-// summary, AND the newer jurisdiction/whyItMatters fields. Items written by the
-// pre-#81 code (no jurisdiction/whyItMatters, or a short legacy summary) return
-// true so the scan loop and the admin re-enrich endpoint can upgrade them with
-// the quality-gated prompt instead of leaving them frozen forever.
+// Whether a pending proposal still needs (re-)enrichment. A fully-enriched item
+// has a real preview, a heuristic category, a >=80-char combined summary, AND a
+// jurisdiction. Items written by the pre-rebuild code (no jurisdiction, or a
+// short legacy summary) return true so the scan loop and the admin re-enrich
+// endpoint can upgrade them with the quality-gated prompt instead of leaving
+// them frozen forever.
 function needsEnrichment(prop) {
   const hasPreview = prop.preview && prop.preview.length;
   const hasReason = prop.updateCategory && UPDATE_REASON_LABELS[prop.updateCategory];
   const hasStyled = prop.styledSummary && prop.styledSummary.length >= 80;
-  const hasSchema81 = prop.jurisdiction && prop.whyItMatters;
-  return !(hasPreview && hasReason && hasStyled && hasSchema81);
+  const hasJurisdiction = prop.jurisdiction && prop.jurisdiction.length >= 2;
+  return !(hasPreview && hasReason && hasStyled && hasJurisdiction);
 }
 
 // Core per-proposal enrichment, shared by the background scan loop and the admin
@@ -3504,7 +3558,6 @@ async function enrichOneProposal(prop, runState, fetcher = fetchArticlePreview) 
     if (enriched.partial) {
       prop.styledSummary = enriched.partial.styledSummary || prop.styledSummary || null;
       prop.jurisdiction = enriched.partial.jurisdiction || null;
-      prop.whyItMatters = enriched.partial.whyItMatters || null;
     }
     if (!prop.styledSummary) prop.enrichStatus = "done";
     return "blocked";
@@ -3518,12 +3571,11 @@ async function enrichOneProposal(prop, runState, fetcher = fetchArticlePreview) 
     prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
     return "rate-limited";
   }
-  // Success: persist the model output and mark done.
+  // Success: persist the model output and mark done. The combined rationale
+  // lives inside styledSummary (no separate whyItMatters field).
   prop.updateCategory = enriched.updateCategory;
-  prop.updateReason = enriched.updateReason;
   prop.styledSummary = enriched.styledSummary || null;
   prop.jurisdiction = enriched.jurisdiction || null;
-  prop.whyItMatters = enriched.whyItMatters || null;
   prop.enrichStatus = "done";
   const styled = enriched.styledSummary;
   prop.suggestedEdit = prop.detectedAction === "new"
@@ -3589,11 +3641,13 @@ function classifyItem(source, item, index) {
     return base;
   }
 
-  // No matching existing record. Surfacing a brand-new topic is noisy, so only
-  // propose it when it is clearly about AI regulation/policy AND comes from an
-  // official regulator / legislation / academic source. Competitor & industry
-  // "news" with no existing anchor is dropped entirely.
-  if (itemStrong.size >= 1 && (source.category === "regulation" || source.category === "academic")) {
+  // No matching existing record. The News + Search tab is already AI×gaming
+  // curated, so any in-tab article with no KB match is a candidate "gap" — but
+  // we still require a domain anchor (a strong AI/reg term OR a broader
+  // AI×gaming term) so non-AI noise that slipped into the tab is dropped. This
+  // widens discovery beyond the reg-only STRONG_TERMS while keeping the
+  // AI-regulation-primary guardrail intact.
+  if (itemStrong.size >= 1 || domainTermsIn(text).size >= 1) {
     base.detectedAction = "new";
     base.matchConfidence = 0;
     base.matchedRecord = null;
@@ -3675,14 +3729,6 @@ function formatLabel(dateStr) {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
-async function fetchSourceItems(source) {
-  const freshness = source.freshness || "7d";
-  const query = `site:${source.domain} ${source.terms} when:${freshness}`;
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-GB&gl=GB&ceid=GB:en`;
-  const resource = await fetchTextResource(url, "application/rss+xml,application/xml,text/xml");
-  return parseNewsRss(resource.text, source.name, query, source.limit || 5, []);
-}
-
 async function runSourceScan({ force = false } = {}) {
   if (sourceScanInFlight) {
     const held = Date.now() - sourceScanStartedAt;
@@ -3698,19 +3744,13 @@ async function runSourceScan({ force = false } = {}) {
   const startedAt = Date.now();
 
   try {
-    const sources = loadSourceRegistry();
-    const now = Date.now();
-    const due = sources.filter(s =>
-      force ||
-      !sourceState.sources[s.id] ||
-      !sourceState.sources[s.id].lastScanAt ||
-      (now - sourceState.sources[s.id].lastScanAt) >= (s.ttlMinutes || 15) * 60000
-    );
-
     const index = buildExistingIndex();
+    // Rebuild: reuse the SAME articles shown in the News + Search tab instead of
+    // a separate Google-News-RSS source registry. The tab is already AI×gaming
+    // curated, so this removes the bespoke scan-only feed lane entirely.
+    const articles = await getScanArticleCandidates();
     // Three independent guards stop the same item being proposed twice:
-    //   1. `seen`      — per-source URL set (above); persisted across scans in
-    //                   sourceState so a URL already scanned won't be re-fetched.
+    //   1. `seen`      — per-scan URL set below.
     //   2. knownIds   — proposal id already present in the review queue.
     //   3. pendingKeys— composite "record-title|action|url" so we don't re-propose
     //                   the same underlying change (e.g. a 2nd deadline on a record
@@ -3727,39 +3767,26 @@ async function runSourceScan({ force = false } = {}) {
     const newProps = []; // proposals created in THIS scan that still need enrichment
     let scanned = 0, considered = 0, proposed = 0;
     const counts = { update: 0, deadline: 0, correction: 0, new: 0 };
+    const seen = new Set();
 
-    for (const source of due) {
-      try {
-        const items = await fetchSourceItems(source);
-        const state = sourceState.sources[source.id] || { seen: [] };
-        const seen = new Set(state.seen || []);
-        for (const item of items) {
-          if (!item.url || seen.has(item.url)) continue;
-          seen.add(item.url);
-          considered++;
-          const prop = classifyItem(source, item, index);
-          if (!prop) continue;                       // safety: classifier returned nothing
-          if (knownIds.has(prop.id)) continue;        // already proposed/acted on
-          const dedupeKey = `${prop.matchedRecord ? prop.matchedRecord.title : ""}|${prop.detectedAction}|${prop.url}`;
-          if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
-          existing.push(prop);
-          newProps.push(prop);
-          prop._newlyProposed = true;
-          knownIds.add(prop.id);
-          pendingKeys.add(dedupeKey);
-          proposed++;
-          counts[prop.detectedAction] = (counts[prop.detectedAction] || 0) + 1;
-        }
-        sourceState.sources[source.id] = {
-          lastScanAt: now,
-          name: source.name,
-          seen: [...seen].slice(-300),
-        };
-        scanned++;
-      } catch (_) {
-        // Skip a failing source; continue with the rest.
-      }
+    for (const item of articles) {
+      if (!item.url || seen.has(item.url)) continue;
+      seen.add(item.url);
+      considered++;
+      const prop = classifyItem(syntheticSourceForArticle(item), item, index);
+      if (!prop) continue;                       // safety: classifier returned nothing
+      if (knownIds.has(prop.id)) continue;        // already proposed/acted on
+      const dedupeKey = `${prop.matchedRecord ? prop.matchedRecord.title : ""}|${prop.detectedAction}|${prop.url}`;
+      if (pendingKeys.has(dedupeKey)) continue;   // avoid re-proposing same record change
+      existing.push(prop);
+      newProps.push(prop);
+      prop._newlyProposed = true;
+      knownIds.add(prop.id);
+      pendingKeys.add(dedupeKey);
+      proposed++;
+      counts[prop.detectedAction] = (counts[prop.detectedAction] || 0) + 1;
     }
+    scanned = 1;
 
     // Enrich each new proposal with a real preview of the source article so the
     // review panel shows the actual text that would be added (and so the target
@@ -3784,10 +3811,10 @@ async function runSourceScan({ force = false } = {}) {
       if (retryAdded >= RETRY_CAP) break;
       if (newIds.has(prop.id)) continue; // already covered by the newProps pass
       if (prop.status !== "pending") continue;
-      // Skip only when FULLY enriched under the #81 schema (preview + heuristic
-      // reason + >=80-char summary + jurisdiction/whyItMatters). Items written by
-      // the pre-#81 code (no jurisdiction/whyItMatters, or a short legacy summary)
-      // are re-eligible so the newer, quality-gated prompt upgrades them; a
+      // Skip only when FULLY enriched under the current schema (preview +
+      // heuristic reason + >=80-char combined summary + jurisdiction). Items
+      // written by the pre-rebuild code (no jurisdiction, or a short legacy
+      // summary) are re-eligible so the quality-gated prompt upgrades them; a
       // proposal that got a heuristic category but no styledSummary is retried so
       // it can later receive the AI "Proposed Entry" summary once the model key
       // is available.

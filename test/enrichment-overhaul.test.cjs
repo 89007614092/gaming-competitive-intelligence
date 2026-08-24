@@ -1,9 +1,10 @@
-// Suggested-Updates overhaul tests (PR #81):
+// Suggested-Updates rebuild tests (PR #85):
 //  - looksNonEnglish drops Latin-script European languages (the leak that let
 //    Italian/French/German/Spanish items into Suggested Updates)
-//  - enrichmentFailure enforces the structured schema
-//  - enrichWithModel returns jurisdiction + whyItMatters, retries once on a
-//    validation failure, and flags for manual review when both attempts fail.
+//  - enrichmentFailure enforces the simplified schema (combined styledSummary +
+//    jurisdiction; the "why it matters" rationale is folded INTO styledSummary)
+//  - enrichWithModel returns the combined styledSummary + jurisdiction, retries
+//    once on a validation failure, and flags for manual review when both fail.
 process.env.SCAN_MODEL_MIN_GAP_MS = "50"; // keep any paced retry fast
 
 const test = require("node:test");
@@ -12,20 +13,17 @@ const assert = require("node:assert");
 const summariseEngine = require("../summarise-engine");
 const srv = require("../server");
 
+// The combined entry: what the source says AND why it matters as an update.
 const GOOD = JSON.stringify({
   updateCategory: "new-development",
-  updateReason: "Regulator published new guidance.",
   styledSummary:
-    "The European Data Protection Board issued detailed guidance clarifying data-subject rights under the GDPR, including stronger consent and access obligations that apply to AI processors from next year.",
+    "The European Data Protection Board issued guidance clarifying data-subject rights under the GDPR, including stronger consent and access obligations for AI processors from next year. This raises the compliance bar for model operators handling personal data.",
   jurisdiction: "EU",
-  whyItMatters:
-    "It tightens how AI systems handling personal data must obtain and demonstrate valid consent, raising the compliance bar for model operators.",
 });
 
-// A schema-incomplete response: summary too short, no jurisdiction, no whyItMatters.
+// A schema-incomplete response: summary too short, no jurisdiction.
 const BAD = JSON.stringify({
   updateCategory: "new-development",
-  updateReason: "x",
   styledSummary: "Short summary that is too brief.",
 });
 
@@ -43,26 +41,25 @@ test("looksNonEnglish drops Latin-script European languages, keeps English", () 
   assert.strictEqual(srv.looksNonEnglish("Nvidia Blackwell GPU Announced", 2), false, "English proper-noun headline kept");
 });
 
-test("enrichmentFailure enforces the structured schema", () => {
+test("enrichmentFailure enforces the simplified schema", () => {
   assert.strictEqual(srv.enrichmentFailure(JSON.parse(GOOD), prop()), null, "valid output passes");
   const longSummary = "x".repeat(90);
   assert.match(srv.enrichmentFailure({ styledSummary: longSummary }, prop()), /jurisdiction/, "missing jurisdiction fails");
-  assert.match(srv.enrichmentFailure({ styledSummary: longSummary, jurisdiction: "EU" }, prop()), /whyItMatters/, "missing whyItMatters fails");
   // Tiny summary fails on length before the other checks.
-  assert.match(srv.enrichmentFailure({ styledSummary: "too short", jurisdiction: "EU", whyItMatters: "x".repeat(30) }, prop()), /too short/, "tiny summary fails");
+  assert.match(srv.enrichmentFailure({ styledSummary: "too short", jurisdiction: "EU" }, prop()), /too short/, "tiny summary fails");
   // Pure headline restatement fails.
   const title = "EU AI Act updated with compliance deadline";
-  const restate = { styledSummary: `${title}. ${title}.`, jurisdiction: "EU", whyItMatters: "x".repeat(30) };
+  const restate = { styledSummary: `${title}. ${title}.`, jurisdiction: "EU" };
   assert.match(srv.enrichmentFailure(restate, { title }), /restates/, "headline echo fails");
 });
 
-test("enrichWithModel returns structured fields on a good response", async () => {
+test("enrichWithModel returns the combined entry on a good response", async () => {
   summariseEngine.runModelChat = async () => GOOD;
   try {
     const out = await srv.enrichWithModel(prop(), "source text", { allowReject: true });
     assert.ok(out && out.styledSummary, "summary present");
     assert.strictEqual(out.jurisdiction, "EU", "jurisdiction captured");
-    assert.ok(out.whyItMatters && out.whyItMatters.length >= 30, "whyItMatters captured");
+    assert.strictEqual(out.whyItMatters, undefined, "no separate whyItMatters field");
     assert.strictEqual(out.blocked, undefined, "not blocked on success");
   } finally {
     delete summariseEngine.runModelChat;
