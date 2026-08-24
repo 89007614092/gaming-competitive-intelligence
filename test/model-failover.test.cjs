@@ -130,3 +130,81 @@ test("qwen3 fallback response has <think> blocks stripped", async () => {
     globalThis.fetch = undefined;
   }
 });
+
+// --- Scan-lane failover (PR #78-followup) ---------------------------------
+// The scan model (OPEN_MODEL_NAME_SCAN) is distinct from the Q&A model in prod.
+// In this test file OPEN_MODEL_NAME_SCAN is unset so it equals DEFAULT_MODEL
+// ("openai/gpt-oss-120b"), and OPEN_MODEL_NAME_FALLBACK is "qwen/qwen3-32b", so
+// getScanCandidates() yields [gpt-oss-120b, qwen/qwen3-32b] — both reachable on
+// the same mock base URL, distinguishable by the `model` field in the body.
+
+test("scan candidates include the Q&A fallback as second hop", () => {
+  const cands = engine.getScanCandidates();
+  assert.strictEqual(cands.length, 2);
+  assert.strictEqual(cands[0].model, "openai/gpt-oss-120b");
+  assert.strictEqual(cands[1].model, "qwen/qwen3-32b");
+  // First hop uses the scan creds, second hop uses the Q&A creds.
+  assert.strictEqual(cands[0].apiKey, "test-key");
+  assert.strictEqual(cands[1].apiKey, "test-key");
+});
+
+test("scan primary success returns content without contacting the fallback", async () => {
+  const models = [];
+  globalThis.fetch = async (url, opts) => {
+    models.push(JSON.parse(opts.body).model);
+    return makeResponse(200, "Scan entry [A1].");
+  };
+  try {
+    const out = await engine.runModelChat("sys", "usr", { lane: "scan" });
+    assert.strictEqual(out, "Scan entry [A1].");
+    assert.deepStrictEqual(models, ["openai/gpt-oss-120b"]);
+  } finally {
+    globalThis.fetch = undefined;
+  }
+});
+
+test("scan primary 429 falls back to the Q&A model and still enriches", async () => {
+  const models = [];
+  globalThis.fetch = async (url, opts) => {
+    const m = JSON.parse(opts.body).model;
+    models.push(m);
+    if (m === "openai/gpt-oss-120b") return makeResponse(429, "throttled");
+    return makeResponse(200, "Recovered scan entry [A1].");
+  };
+  try {
+    const out = await engine.runModelChat("sys", "usr", { lane: "scan" });
+    assert.strictEqual(out, "Recovered scan entry [A1].");
+    assert.deepStrictEqual(models, ["openai/gpt-oss-120b", "qwen/qwen3-32b"]);
+  } finally {
+    globalThis.fetch = undefined;
+  }
+});
+
+test("scan primary network error falls back to the Q&A model", async () => {
+  const models = [];
+  let first = true;
+  globalThis.fetch = async (url, opts) => {
+    const m = JSON.parse(opts.body).model;
+    models.push(m);
+    if (first) { first = false; throw new Error("scan provider down"); }
+    return makeResponse(200, "Fallback scan entry [A1].");
+  };
+  try {
+    const out = await engine.runModelChat("sys", "usr", { lane: "scan" });
+    assert.strictEqual(out, "Fallback scan entry [A1].");
+    assert.deepStrictEqual(models, ["openai/gpt-oss-120b", "qwen/qwen3-32b"]);
+  } finally {
+    globalThis.fetch = undefined;
+  }
+});
+
+test("scan both candidates 429 returns { rateLimited: true }", async () => {
+  globalThis.fetch = async () => makeResponse(429, "all throttled");
+  try {
+    const out = await engine.runModelChat("sys", "usr", { lane: "scan" });
+    assert.strictEqual(out && out.rateLimited, true);
+  } finally {
+    globalThis.fetch = undefined;
+  }
+});
+
