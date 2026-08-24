@@ -126,3 +126,50 @@ test("enrichOneProposal rejects a non-English (Latin-script) body", async () => 
   assert.strictEqual(prop.status, "rejected");
   assert.strictEqual(prop.rejectedByLanguage, true);
 });
+
+// --- Step 2: enrichment must consume the FULL body, not just the short card lead ---
+const LONG_BODY =
+  "The OECD AI Policy Observatory published a five-step roadmap to close the AI evaluation gap. " +
+  "Step 1 establishes a benchmark methodology for evaluating general-purpose models. " +
+  "Step 2 mandates independent auditing of frontier systems. " +
+  "Step 3 requires incident reporting. " +
+  "Step 4 sets red-teaming standards. " +
+  "Step 5 creates public evaluation leaderboards for transparency.";
+const SHORT_LEAD = "The OECD published a five-step roadmap to close the AI evaluation gap.";
+
+test("Step 2: model receives the full body (not just the card lead)", async () => {
+  resetBudget();
+  const captured = { user: "" };
+  summariseEngine.runModelChat = async (system, user) => { captured.user = user; return GOOD; };
+  try {
+    const bodyFetcher = async () => ({ text: SHORT_LEAD, body: LONG_BODY, blocked: false });
+    const prop = { id: "step2a", title: "OECD roadmap", detectedAction: "new", category: "regulation", snippet: "y", status: "pending" };
+    const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, bodyFetcher);
+    assert.strictEqual(status, "enriched");
+    // The body-only phrase must reach the model prompt...
+    assert.ok(captured.user.includes("Step 1 establishes a benchmark methodology"), "model must see body content beyond the lead");
+    // ...and the card preview must stay the short lead, NOT the long body.
+    assert.strictEqual(prop.preview, SHORT_LEAD, "card preview stays the short lead");
+    assert.ok(prop.preview.length < 200, "card preview is short");
+    assert.ok(prop.styledSummary && prop.styledSummary.length >= 80, "substantive summary produced");
+  } finally {
+    delete summariseEngine.runModelChat;
+  }
+});
+
+test("Step 2: falls back to the lead when the fetcher returns no body (legacy shape)", async () => {
+  resetBudget();
+  const captured = { user: "" };
+  summariseEngine.runModelChat = async (system, user) => { captured.user = user; return GOOD; };
+  try {
+    // Legacy fetcher shape: { text, blocked } with no `body` field.
+    const legacyFetcher = async () => ({ text: SHORT_LEAD, blocked: false });
+    const prop = { id: "step2b", title: "OECD roadmap", detectedAction: "new", category: "regulation", snippet: "y", status: "pending" };
+    const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, legacyFetcher);
+    assert.strictEqual(status, "enriched");
+    assert.ok(captured.user.includes("five-step roadmap to close the AI evaluation gap"), "model sees the lead text");
+    assert.strictEqual(prop.preview, SHORT_LEAD);
+  } finally {
+    delete summariseEngine.runModelChat;
+  }
+});

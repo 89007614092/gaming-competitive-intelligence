@@ -3081,8 +3081,19 @@ function looksLikeBotWall(text) {
 // Returns { text, blocked }. `text` is a usable lead excerpt, or null. `blocked`
 // is true when the source blocked automated access (bot-wall / anti-scrape), so
 // the caller can flag the proposal for manual review instead of caching garbage.
-async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, domain } = {}) {
-  if (!item) return { text: null, blocked: false };
+// Returns { text, body, blocked }.
+//  - `text`   = a short lead (≤ maxChars) used for the review-card preview.
+//  - `body`   = a fuller slice (≤ bodyMaxChars) of the extracted article, used as
+//               the ENRICHMENT input so the model can summarise substance that
+//               sits beyond the first few sentences (e.g. an enumerated "roadmap"
+//               whose steps appear mid-article). Null when only a thin snippet was
+//               available and no body fetch ran.
+//  - `blocked`= true when the source blocked automated access (bot-wall), so the
+//               caller can flag the proposal for manual review.
+// Both `text` and `body` are derived from a SINGLE fetched payload — there is no
+// second network call for the enrichment body.
+async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, bodyMaxChars = 3500, domain } = {}) {
+  if (!item) return { text: null, body: null, blocked: false };
   const snippetText = stripHtml(item.snippet || item.description || "").replace(/\s+/g, " ").trim();
   const titleText = String(item.title || "").toLowerCase();
   // A snippet is only usable if it carries real information BEYOND the headline
@@ -3097,14 +3108,21 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
     .trim();
   const snippetIsThin = snippetText.length < 120 || extra.length < 40;
 
-  if (!snippetIsThin) {
-    const sentences = snippetText.match(/[^.!?]+[.!?]+/g) || [snippetText];
-    let lead = sentences.slice(0, 3).join(" ").trim();
+  const toLead = (s, n) => {
+    const sentences = s.match(/[^.!?]+[.!?]+/g) || [s];
+    let lead = sentences.slice(0, n).join(" ").trim();
     if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
-    return { text: lead, blocked: false };
+    return lead;
+  };
+  // The enrichment body is the fuller extracted text, capped to keep the model
+  // call cheap; the card preview (text) is always the shorter lead.
+  const toBody = (s) => (s && s.length > bodyMaxChars ? s.slice(0, bodyMaxChars).trim() : (s || null));
+
+  if (!snippetIsThin) {
+    return { text: toLead(snippetText, 3), body: null, blocked: false };
   }
 
-  if (!item.url) return { text: null, blocked: false };
+  if (!item.url) return { text: null, body: null, blocked: false };
   let articleUrl = item.url;
   if (/news\.google\.com/i.test(articleUrl)) {
     // Render's server-side egress can't follow Google News' 302 redirect — it
@@ -3118,10 +3136,7 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
       try {
         const jt = await jinaExtract(item.url, timeoutMs);
         if (jt && jt.length >= 140 && !looksLikeBotWall(jt)) {
-          const sentences = jt.match(/[^.!?]+[.!?]+/g) || [jt];
-          let lead = sentences.slice(0, 4).join(" ").trim();
-          if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
-          return { text: lead, blocked: false };
+          return { text: toLead(jt, 4), body: toBody(jt), blocked: false };
         }
       } catch (_) { /* fall through to the local resolver / direct fetch */ }
     }
@@ -3131,35 +3146,29 @@ async function fetchArticlePreview(item, { timeoutMs = 12000, maxChars = 720, do
     try {
       const via = await extractor.extractArticle(item.url, { licenseClass: "news-fair-use" });
       if (via && via.text && via.text.trim().length >= 140) {
-        const sentences = via.text.match(/[^.!?]+[.!?]+/g) || [via.text];
-        let lead = sentences.slice(0, 4).join(" ").trim();
-        if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
-        return { text: lead, blocked: false };
+        return { text: toLead(via.text, 4), body: toBody(via.text), blocked: false };
       }
     } catch (_) { /* fall through */ }
-    return { text: null, blocked: false };
+    return { text: null, body: null, blocked: false };
   }
   try {
-    let body;
+    let full;
     if (activeSearchProvider() === "jina") {
-      body = await jinaExtract(articleUrl, timeoutMs);
+      full = await jinaExtract(articleUrl, timeoutMs);
     } else {
       const resource = await fetchTextResource(articleUrl, "text/html,application/xhtml+xml,text/plain", timeoutMs);
-      body = extractText(resource.text).replace(/\s+/g, " ").trim();
+      full = extractText(resource.text).replace(/\s+/g, " ").trim();
     }
-    if (body.length < 140) return { text: null, blocked: false };
-    if (looksLikeBotWall(body)) return { text: null, blocked: true };
-    const sentences = body.match(/[^.!?]+[.!?]+/g) || [body];
-    let lead = sentences.slice(0, 4).join(" ").trim();
-    if (lead.length > maxChars) lead = lead.slice(0, maxChars).trim().replace(/[,;]\s*$/, "") + "…";
-    return { text: lead, blocked: false };
+    if (full.length < 140) return { text: null, body: null, blocked: false };
+    if (looksLikeBotWall(full)) return { text: null, body: null, blocked: true };
+    return { text: toLead(full, 4), body: toBody(full), blocked: false };
   } catch (err) {
     // Distinguish an access block (bot-wall / anti-scrape) from a transient
     // network error so we flag the former for manual review rather than retry
     // endlessly on something that will never succeed automatically.
     const msg = (err && err.message ? err.message : "").toLowerCase();
     const accessBlocked = /http (401|403|429|503)|forbidden|access denied|unable to fetch|are you a robot|verify you are human|cloudflare/i.test(msg);
-    return { text: null, blocked: accessBlocked };
+    return { text: null, body: null, blocked: accessBlocked };
   }
 }
 
@@ -3416,9 +3425,9 @@ function needsEnrichment(prop) {
 // Returns one of: "enriched" | "blocked" | "rejected" | "rate-limited" | "pending".
 async function enrichOneProposal(prop, runState, fetcher = fetchArticlePreview) {
   const PER_PROPOSAL_BACKOFF_MS = config.SCAN_PROPOSAL_BACKOFF_MS;
-  let preview = null, blocked = false;
+  let preview = null, blocked = false, result = null;
   try {
-    const result = await fetcher(prop, { domain: prop.sourceDomain });
+    result = await fetcher(prop, { domain: prop.sourceDomain });
     preview = result.text;
     blocked = !!result.blocked;
   } catch { /* best effort */ }
@@ -3440,7 +3449,13 @@ async function enrichOneProposal(prop, runState, fetcher = fetchArticlePreview) 
     }
   }
   // (C) Re-validate language on the REAL article text.
-  const baseText = preview || stripHtml(prop.snippet || prop.description || "");
+  // Prefer the fuller body (when we fetched one) for enrichment so the model
+  // sees substance beyond the short card lead; otherwise fall back to the lead/
+  // preview, then the RSS snippet. (Step 2: stop echoing headlines when the
+  // "5 steps" sit mid-article, past the ≤720-char preview lead.)
+  const baseText =
+    (result.body && result.body.trim().length >= 140 ? result.body : preview) ||
+    stripHtml(prop.snippet || prop.description || "");
   if (baseText && looksNonEnglish(baseText, 3)) {
     prop.rejectedByLanguage = true;
     prop.status = "rejected";
