@@ -37,6 +37,14 @@ const OPEN_MODEL_NAME_SCAN = process.env.OPEN_MODEL_NAME_SCAN || DEFAULT_MODEL;
 // primary (e.g. qwen/qwen3-32b) so a gpt-oss-specific outage doesn't also take
 // down the fallback. Set via render env OPEN_MODEL_NAME_FALLBACK.
 const OPEN_MODEL_NAME_FALLBACK = process.env.OPEN_MODEL_NAME_FALLBACK || "";
+// OPTIONAL dedicated credentials for the scan-lane FALLBACK candidate (the
+// second entry returned by getScanCandidates). Enables the "double-account"
+// trick: run the scan primary on a 2nd Groq account (OPEN_MODEL_API_KEY_SCAN)
+// and point its fallback at a DISTINCT account too, so two independent RPM /
+// quota pools back the background scan. Falls back to the Q&A key/URL when
+// unset (current behaviour).
+const OPEN_MODEL_API_KEY_FALLBACK_SCAN = process.env.OPEN_MODEL_API_KEY_FALLBACK_SCAN || "";
+const OPEN_MODEL_BASE_URL_FALLBACK_SCAN = (process.env.OPEN_MODEL_BASE_URL_FALLBACK_SCAN || "").replace(/\/+$/, "");
 const QA_FAILOVER_ENABLED =
   !!OPEN_MODEL_NAME_FALLBACK && OPEN_MODEL_NAME_FALLBACK !== DEFAULT_MODEL;
 // Per-lane readiness. SUMMARY_DISABLE_MODEL gates the Q&A (user-facing) lane;
@@ -54,12 +62,21 @@ const SCAN_MODEL_DISABLED = process.env.SUMMARY_DISABLE_SCAN === "1" || !OPEN_MO
 // env at call time.
 function getScanCandidates() {
   const primary = { model: OPEN_MODEL_NAME_SCAN, apiKey: OPEN_MODEL_API_KEY_SCAN, baseUrl: OPEN_MODEL_BASE_URL_SCAN };
-  const fbName =
-    (OPEN_MODEL_NAME_FALLBACK && OPEN_MODEL_NAME_FALLBACK !== OPEN_MODEL_NAME_SCAN)
-      ? OPEN_MODEL_NAME_FALLBACK
-      : (DEFAULT_MODEL !== OPEN_MODEL_NAME_SCAN ? DEFAULT_MODEL : null);
-  if (!fbName) return [primary];
-  return [primary, { model: fbName, apiKey: OPEN_MODEL_API_KEY, baseUrl: OPEN_MODEL_BASE_URL }];
+  // Fallback candidate: explicit OPEN_MODEL_NAME_FALLBACK, else the Q&A primary
+  // model. A fallback is kept whenever it is genuinely DISTINCT — a different
+  // MODEL, OR the same model on a DIFFERENT credential (the double-account
+  // trick via OPEN_MODEL_API_KEY_FALLBACK_SCAN). We only skip it when it would
+  // be a perfect duplicate of the primary (same model AND same key/URL), so a
+  // same-model-but-different-account fallback is never collapsed away.
+  const fbModel = OPEN_MODEL_NAME_FALLBACK || DEFAULT_MODEL;
+  const fbKey = OPEN_MODEL_API_KEY_FALLBACK_SCAN || OPEN_MODEL_API_KEY;
+  const fbUrl = OPEN_MODEL_BASE_URL_FALLBACK_SCAN || OPEN_MODEL_BASE_URL;
+  const sameModel = fbModel === OPEN_MODEL_NAME_SCAN;
+  const sameCred = fbKey === OPEN_MODEL_API_KEY_SCAN && fbUrl === OPEN_MODEL_BASE_URL_SCAN;
+  if (!(sameModel && sameCred)) {
+    return [primary, { model: fbModel, apiKey: fbKey, baseUrl: fbUrl }];
+  }
+  return [primary];
 }
 const DATA_DIR = path.join(__dirname, "data");
 const STOP_WORDS = new Set([
