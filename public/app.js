@@ -699,7 +699,7 @@ async function checkApiStatus() {
   } catch (err) {
     document.querySelector(".status-dot").classList.add("disconnected");
     document.querySelector(".status-dot").classList.remove("connected");
-    document.querySelector(".status-label").textContent = "Server Offline";
+    document.querySelector(".status-label").textContent = t("status.serverOffline");
   }
 }
 
