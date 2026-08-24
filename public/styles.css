@@ -209,6 +209,26 @@ body {
 
 .settings-btn:hover { background: rgba(255,255,255,0.18); }
 
+/* Language switcher (zh-CN i18n scaffold) */
+.lang-switch {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+.lang-btn {
+  flex: 1;
+  background: rgba(255,255,255,0.1);
+  border: none;
+  color: var(--sidebar-text);
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+.lang-btn:hover { background: rgba(255,255,255,0.18); }
+.lang-btn.active { background: var(--accent, #4f8cff); color: #fff; font-weight: 600; }
+
 /* === Main Content === */
 .main {
   flex: 1;
