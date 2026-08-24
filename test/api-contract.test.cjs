@@ -247,6 +247,28 @@ test("GET /api/proposed-changes returns the pending envelope", async () => {
   }
 });
 
+test("GET /api/proposed-changes hides unenriched placeholders but keeps enriched + manual-review", async () => {
+  // Seed a known store via the exported setter, then restore afterwards.
+  const prev = srv.getProposedChanges ? srv.getProposedChanges() : null;
+  const seeded = [
+    { id: "p_enriched", status: "pending", title: "Enriched", url: "https://e.test", styledSummary: "AI summary." },
+    { id: "p_blocked", status: "pending", title: "Blocked", url: "https://b.test", fetchStatus: "blocked" },
+    { id: "p_quota", status: "pending", title: "Quota stuck", url: "https://q.test", enrichStatus: "rate-limited" },
+    { id: "p_rejected", status: "rejected", title: "Rejected", url: "https://r.test" },
+  ];
+  srv.setProposedChanges({ items: seeded });
+  try {
+    const { status, body } = await request(server, "GET", "/api/proposed-changes");
+    assert.strictEqual(status, 200);
+    const ids = body.pending.map((i) => i.id).sort();
+    assert.deepStrictEqual(ids, ["p_blocked", "p_enriched"]);
+    assert.strictEqual(body.pendingCount, 2);
+    assert.strictEqual(body.enrichingCount, 1); // only p_quota
+  } finally {
+    srv.setProposedChanges(prev || { items: [] });
+  }
+});
+
 test("GET /api/news/custom-competitors returns the custom competitor array", async () => {
   const { status, body } = await request(server, "GET", "/api/news/custom-competitors");
   assert.strictEqual(status, 200);
