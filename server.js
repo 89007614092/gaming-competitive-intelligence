@@ -2509,6 +2509,7 @@ async function primeProposedFromDb() {
 // Test seams (harmless in production).
 function getProposedChanges() { return proposedChanges; }
 function setProposedChanges(obj) { proposedChanges = obj; }
+function getSourceState() { return sourceState; }
 
 // ---------------------------------------------------------------------------
 // Phase 3: retention sweep + shared-store write-back
@@ -3392,6 +3393,130 @@ async function summariseStoredItem(prop, { force = true } = {}) {
   return null;
 }
 
+// Whether a pending proposal still needs (re-)enrichment under the #81 schema.
+// A fully-enriched item has a real preview, a heuristic reason, a >=80-char
+// summary, AND the newer jurisdiction/whyItMatters fields. Items written by the
+// pre-#81 code (no jurisdiction/whyItMatters, or a short legacy summary) return
+// true so the scan loop and the admin re-enrich endpoint can upgrade them with
+// the quality-gated prompt instead of leaving them frozen forever.
+function needsEnrichment(prop) {
+  const hasPreview = prop.preview && prop.preview.length;
+  const hasReason = prop.updateCategory && UPDATE_REASON_LABELS[prop.updateCategory];
+  const hasStyled = prop.styledSummary && prop.styledSummary.length >= 80;
+  const hasSchema81 = prop.jurisdiction && prop.whyItMatters;
+  return !(hasPreview && hasReason && hasStyled && hasSchema81);
+}
+
+// Core per-proposal enrichment, shared by the background scan loop and the admin
+// re-enrich endpoint. Fetches a real preview of the article, re-validates
+// language on the body, then runs the quality-gated model enrichment. Mutates
+// `prop` in place; the CALLER is responsible for persisting via saveProposed().
+// `runState` carries the per-run call counter: { callsThisRun: 0 }. `fetcher`
+// defaults to fetchArticlePreview and is injectable for tests.
+// Returns one of: "enriched" | "blocked" | "rejected" | "rate-limited" | "pending".
+async function enrichOneProposal(prop, runState, fetcher = fetchArticlePreview) {
+  const PER_PROPOSAL_BACKOFF_MS = config.SCAN_PROPOSAL_BACKOFF_MS;
+  let preview = null, blocked = false;
+  try {
+    const result = await fetcher(prop, { domain: prop.sourceDomain });
+    preview = result.text;
+    blocked = !!result.blocked;
+  } catch { /* best effort */ }
+  // Record the attempt even on failure so the cooldown guards against
+  // re-hammering a URL the resolver can't currently resolve.
+  prop.lastPreviewAttempt = new Date().toISOString();
+  if (blocked) {
+    // Cache hygiene (#5): do NOT overwrite a previously good preview; flag for
+    // manual review and keep any existing good styledSummary untouched.
+    prop.fetchStatus = "blocked";
+    return "blocked";
+  }
+  prop.fetchStatus = "ok";
+  if (preview) {
+    // Cache hygiene (#5): only overwrite the preview when we have content.
+    prop.preview = preview;
+    if (prop.detectedAction === "new") {
+      prop.targetCategory = detectKnowledgeCategory(`${prop.title} ${preview}`, prop.category);
+    }
+  }
+  // (C) Re-validate language on the REAL article text.
+  const baseText = preview || stripHtml(prop.snippet || prop.description || "");
+  if (baseText && looksNonEnglish(baseText, 3)) {
+    prop.rejectedByLanguage = true;
+    prop.status = "rejected";
+    return "rejected";
+  }
+  if (!baseText) {
+    // Nothing to work with: the live preview fetch failed and there is no usable
+    // snippet. Leave an honest "pending" state so a later scan retries.
+    prop.enrichStatus = "pending";
+    return "pending";
+  }
+  let enriched = null;
+  // Three gates before we are allowed to spend a request.
+  const outOfRunBudget = runState.callsThisRun >= SCAN_CALLS_PER_RUN_CAP;
+  const outOfDayBudget = scanBudgetRemaining() <= 0;
+  if (!isScanRateLimited() && !outOfRunBudget && !outOfDayBudget) {
+    // Pace the call so we can never exceed the provider's per-minute ceiling,
+    // and count it before it is issued (a failed attempt still consumes quota).
+    await paceScanModelCall();
+    runState.callsThisRun++;
+    consumeScanBudget();
+    try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
+  } else if (outOfRunBudget || outOfDayBudget) {
+    // Budget exhausted — do NOT set a cooldown. The proposal stays eligible so
+    // the next scan (or the next UTC day) can finish it.
+    if (!prop.styledSummary) prop.enrichStatus = "pending";
+    return "pending";
+  }
+  if (enriched && enriched.rateLimited) {
+    // Model hit a rate limit: set a per-proposal backoff (deliberately longer
+    // than the engine cooldown so parked proposals re-eligible a few at a time).
+    prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
+    prop.enrichStatus = "rate-limited";
+    return "rate-limited";
+  }
+  if (enriched && enriched.rejected) {
+    // Option B: the model determined this is not a substantive AI-regulation/
+    // policy development. Drop it from the queue so it never reaches review.
+    prop.rejectedByModel = true;
+    prop.status = "rejected";
+    return "rejected";
+  }
+  if (enriched && enriched.blocked) {
+    // Quality gate failed on both attempts -> manual review, not a bad publish.
+    prop.fetchStatus = "blocked";
+    if (enriched.partial) {
+      prop.styledSummary = enriched.partial.styledSummary || prop.styledSummary || null;
+      prop.jurisdiction = enriched.partial.jurisdiction || null;
+      prop.whyItMatters = enriched.partial.whyItMatters || null;
+    }
+    if (!prop.styledSummary) prop.enrichStatus = "done";
+    return "blocked";
+  }
+  if (!enriched) {
+    // Don't clobber a prior good AI summary if the model just hiccuped.
+    if (prop.styledSummary) { prop.enrichStatus = "done"; return "enriched"; }
+    // No styled summary and model unavailable -> honest pending state; the next
+    // scan (past the per-proposal backoff) retries.
+    prop.enrichStatus = "rate-limited";
+    prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
+    return "rate-limited";
+  }
+  // Success: persist the model output and mark done.
+  prop.updateCategory = enriched.updateCategory;
+  prop.updateReason = enriched.updateReason;
+  prop.styledSummary = enriched.styledSummary || null;
+  prop.jurisdiction = enriched.jurisdiction || null;
+  prop.whyItMatters = enriched.whyItMatters || null;
+  prop.enrichStatus = "done";
+  const styled = enriched.styledSummary;
+  prop.suggestedEdit = prop.detectedAction === "new"
+    ? draftNewRecord(prop, prop.publisher, prop.publishedLabel, prop.targetCategory, styled)
+    : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, styled);
+  return "enriched";
+}
+
 // Drop obvious recruitment / non-substantive content before the scan model is
 // ever called. This keeps job postings, career pages, "we're hiring" blurbs and
 // internship listings out of the Suggested Updates queue (Option A of the
@@ -3644,14 +3769,14 @@ async function runSourceScan({ force = false } = {}) {
       if (retryAdded >= RETRY_CAP) break;
       if (newIds.has(prop.id)) continue; // already covered by the newProps pass
       if (prop.status !== "pending") continue;
-      const hasPreview = prop.preview && prop.preview.length;
-      const hasReason = prop.updateCategory && UPDATE_REASON_LABELS[prop.updateCategory];
-      const hasStyled = prop.styledSummary && prop.styledSummary.length;
-      // Skip only when FULLY enriched: preview + model reason + a styled summary.
-      // A proposal that got a heuristic category but no styledSummary (e.g. the
-      // model was offline on its first scan) must be retried so it can later
-      // receive the AI "Proposed Entry" summary once the model key is available.
-      if (hasPreview && hasReason && hasStyled) continue;
+      // Skip only when FULLY enriched under the #81 schema (preview + heuristic
+      // reason + >=80-char summary + jurisdiction/whyItMatters). Items written by
+      // the pre-#81 code (no jurisdiction/whyItMatters, or a short legacy summary)
+      // are re-eligible so the newer, quality-gated prompt upgrades them; a
+      // proposal that got a heuristic category but no styledSummary is retried so
+      // it can later receive the AI "Proposed Entry" summary once the model key
+      // is available.
+      if (!needsEnrichment(prop)) continue;
       // Skip proposals still inside a model rate-limit cooldown — re-calling the
       // model now would just 429 again and burn the daily token quota.
       if (prop.enrichCooldownUntil && Date.now() < new Date(prop.enrichCooldownUntil).getTime()) continue;
@@ -3665,7 +3790,7 @@ async function runSourceScan({ force = false } = {}) {
 
     // Model calls spent by THIS scan run — the in-process ceiling that still
     // holds even when the persisted daily counter has been wiped by a restart.
-    let callsThisRun = 0;
+    const runState = { callsThisRun: 0 };
 
     if (toEnrich.length) {
       // Per-proposal cooldown set when a scan call is rate-limited.
@@ -3680,160 +3805,13 @@ async function runSourceScan({ force = false } = {}) {
       // paced gap between model calls this makes the per-minute ceiling
       // structurally unreachable.
       await mapWithConcurrency(toEnrich, 1, async (prop) => {
-        // (a) Fetch a real preview of the source article. A bot-wall / anti-scrape
-        // block is recorded as fetchStatus:"blocked" so the UI can ask for manual
-        // review instead of caching garbage (#3) or presenting raw scraped text.
-        let preview = null;
-        let blocked = false;
-        try {
-          const result = await fetchArticlePreview(prop, { domain: prop.sourceDomain });
-          preview = result.text;
-          blocked = !!result.blocked;
-        } catch { /* best effort */ }
-        // Record the attempt even on failure so the cooldown guards against
-        // re-hammering a URL that the resolver can't currently resolve.
-        prop.lastPreviewAttempt = new Date().toISOString();
-
-        if (blocked) {
-          // Cache hygiene (#5): do NOT overwrite a previously good preview with
-          // the bot-wall page, and do not set a finished suggestion. Flag for
-          // manual review; keep any existing good styledSummary untouched.
-          prop.fetchStatus = "blocked";
-          return;
+        const status = await enrichOneProposal(prop, runState);
+        // Scan-discovery accounting: only newly-proposed items that the model
+        // rejects (language or non-substantive) decrement the discovery counters.
+        if (status === "rejected" && prop._newlyProposed) {
+          proposed = Math.max(0, proposed - 1);
+          counts[prop.detectedAction] = Math.max(0, (counts[prop.detectedAction] || 1) - 1);
         }
-        prop.fetchStatus = "ok";
-
-        if (preview) {
-          // Cache hygiene (#5): only overwrite the preview when we have content.
-          prop.preview = preview;
-          if (prop.detectedAction === "new") {
-            prop.targetCategory = detectKnowledgeCategory(`${prop.title} ${preview}`, prop.category);
-          }
-        }
-
-        // (b) Combined enrichment: model-based rewrite + reason. We NEVER present
-        // the raw source excerpt (baseText) as the finished suggestion (#4). When
-        // the model can't produce a styled summary we mark the proposal as
-        // pending / rate-limited so the UI shows an honest notice and the next
-        // scan retries it (with the short per-proposal backoff) instead of dumping
-        // raw scraped text into the review panel.
-        const baseText = preview || stripHtml(prop.snippet || prop.description || "");
-        // (C) Re-validate language on the REAL article text. The original gate
-        // only saw the RSS title/description, which Google News may auto-translate
-        // to English even when the source article is non-English. If the fetched
-        // body is non-English, reject the proposal so it never reaches the review
-        // panel (and is purged from the persisted queue).
-        if (baseText && looksNonEnglish(baseText, 3)) {
-          prop.rejectedByLanguage = true;
-          prop.status = "rejected";
-          if (prop._newlyProposed) {
-            proposed = Math.max(0, proposed - 1);
-            counts[prop.detectedAction] = Math.max(0, (counts[prop.detectedAction] || 1) - 1);
-          }
-          return;
-        }
-        if (!baseText) {
-          // Nothing to work with: the live preview fetch failed (e.g. the
-          // resolver couldn't reach the publisher) and there is no usable
-          // snippet. Leave the proposal in an honest "pending" state so the UI
-          // does not show the misleading "No extractable summary" copy, and the
-          // next scan retries it once the source becomes reachable.
-          prop.enrichStatus = "pending";
-          return;
-        }
-
-        let enriched = null;
-        // Three gates before we are allowed to spend a request:
-        //   - the engine's cooldown (a 429 already happened; don't pile on),
-        //   - this run's call cap, and
-        //   - the remaining daily budget.
-        // Anything blocked here is left in an honest "pending" state and picked
-        // up by a later scan, rather than being filled with raw scraped text.
-        const outOfRunBudget = callsThisRun >= SCAN_CALLS_PER_RUN_CAP;
-        const outOfDayBudget = scanBudgetRemaining() <= 0;
-        if (!isScanRateLimited() && !outOfRunBudget && !outOfDayBudget) {
-          // Pace the call so we can never exceed the provider's per-minute
-          // ceiling, and count it before it is issued (a failed attempt still
-          // consumes provider quota).
-          await paceScanModelCall();
-          callsThisRun++;
-          consumeScanBudget();
-          try { enriched = await enrichWithModel(prop, baseText); } catch { /* best effort */ }
-        } else if (outOfRunBudget || outOfDayBudget) {
-          // Budget exhausted — do NOT set a cooldown. The proposal stays eligible
-          // so the next scan (or the next UTC day) can finish it.
-          if (!prop.styledSummary) prop.enrichStatus = "pending";
-          return;
-        }
-
-        if (enriched && enriched.rateLimited) {
-          // Model hit a rate limit on this call. Set a per-proposal backoff
-          // (default 45 min — deliberately LONGER than the engine's ~1h cooldown
-          // so parked proposals re-eligible a few at a time, never all at once)
-          // before retrying this proposal, rather than inheriting the engine's
-          // full cooldown.
-          prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
-          prop.enrichStatus = "rate-limited";
-          // Cache hygiene (#5): keep any previously-good styled summary; do not
-          // rewrite with raw text.
-          return;
-        }
-
-        if (enriched && enriched.rejected) {
-          // Option B: the model determined this is not a substantive
-          // AI-regulation/policy development (job posting, careers page, event
-          // invite, etc). Mark it and drop it from the queue so it never reaches
-          // the review panel. It was already added to the `seen` set, so it won't
-          // be re-scanned — and we saved the rest of the enrichment pipeline.
-          prop.rejectedByModel = true;
-          prop.status = "rejected";
-          if (prop._newlyProposed) {
-            proposed = Math.max(0, proposed - 1);
-            counts[prop.detectedAction] = Math.max(0, (counts[prop.detectedAction] || 1) - 1);
-          }
-          return;
-        }
-
-        // Quality gate failed on BOTH attempts: the model could not produce a
-        // schema-complete, substantive update. Flag for manual review rather
-        // than publishing a low-quality suggestion (#overhaul). The UI already
-        // renders fetchStatus:"blocked" as "Manual review required".
-        if (enriched && enriched.blocked) {
-          prop.fetchStatus = "blocked";
-          if (enriched.partial) {
-            prop.styledSummary = enriched.partial.styledSummary || prop.styledSummary || null;
-            prop.jurisdiction = enriched.partial.jurisdiction || null;
-            prop.whyItMatters = enriched.partial.whyItMatters || null;
-          }
-          if (!prop.styledSummary) prop.enrichStatus = "done";
-          return;
-        }
-
-        if (!enriched) {
-          // Don't clobber a prior good AI summary if the model just hiccuped.
-          if (prop.styledSummary) {
-            prop.enrichStatus = "done";
-            return;
-          }
-          // No styled summary and model unavailable → honest pending state. The
-          // UI shows "AI rewrite temporarily unavailable (quota); will auto-enrich
-          // when capacity recovers." The next scan (past the per-proposal backoff) retries.
-          prop.enrichStatus = "rate-limited";
-          prop.enrichCooldownUntil = new Date(Date.now() + PER_PROPOSAL_BACKOFF_MS).toISOString();
-          return;
-        }
-
-        // Success: persist the model output and mark done.
-        prop.updateCategory = enriched.updateCategory;
-        prop.updateReason = enriched.updateReason;
-        prop.styledSummary = enriched.styledSummary || null;
-        prop.jurisdiction = enriched.jurisdiction || null;
-        prop.whyItMatters = enriched.whyItMatters || null;
-        prop.enrichStatus = "done";
-        const styled = enriched.styledSummary;
-        prop.suggestedEdit = prop.detectedAction === "new"
-          ? draftNewRecord(prop, prop.publisher, prop.publishedLabel, prop.targetCategory, styled)
-          : draftEdit(prop, prop.detectedAction, prop.publisher, prop.publishedLabel, styled);
       });
     }
 
@@ -3855,7 +3833,7 @@ async function runSourceScan({ force = false } = {}) {
       counts,
       // Request accounting — makes it obvious from the logs alone whether a scan
       // was throttled by the run cap, the daily budget, or a provider 429.
-      modelCalls: callsThisRun,
+      modelCalls: runState.callsThisRun,
       dailyBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET },
       durationMs: Date.now() - startedAt,
     };
@@ -3993,6 +3971,38 @@ app.post("/api/source-scan", (req, res) => {
     .then(r => console.log("[source-scan] completed:", JSON.stringify(r)))
     .catch(err => console.warn("[source-scan] failed:", err.message));
   res.json({ success: true, started: true, scanning: sourceScanInFlight });
+});
+
+// Admin: immediately re-enrich stale (pre-#81) and rate-limited pending
+// proposals without waiting for the next scheduled scan tick. Reuses the shared
+// enrichOneProposal helper, so it applies the same quality-gated prompt and
+// language gate as the background scan. Respects the per-run call cap, the daily
+// budget, and per-proposal cooldowns unless force:true. Molly can use this after
+// a deploy to upgrade frozen items and recover the "stuck rate-limited" queue.
+app.post("/api/admin/proposed/reenrich", requireAdmin, async (req, res) => {
+  const force = !!(req.body && req.body.force);
+  const items = (proposedChanges.items || []).filter(i => i.status === "pending");
+  const toRe = items.filter(p =>
+    needsEnrichment(p) || p.enrichStatus === "rate-limited" || (force && p.fetchStatus === "blocked"));
+  const runState = { callsThisRun: 0 };
+  const counts = {
+    selected: toRe.length, enriched: 0, rateLimited: 0,
+    blocked: 0, rejected: 0, pending: 0, skipped: 0,
+  };
+  for (const prop of toRe) {
+    if (!force && prop.enrichCooldownUntil && Date.now() < new Date(prop.enrichCooldownUntil).getTime()) {
+      counts.skipped++;
+      continue;
+    }
+    const status = await enrichOneProposal(prop, runState);
+    if (counts[status] !== undefined) counts[status]++;
+    else counts.skipped++;
+  }
+  saveProposed();
+  res.json({
+    success: true, ...counts,
+    dailyBudget: { used: scanBudget().used, limit: SCAN_DAILY_CALL_BUDGET },
+  });
 });
 
 // List pending proposed changes for the review panel.
@@ -4418,6 +4428,8 @@ module.exports = {
   looksNonEnglish,
   enrichmentFailure,
   enrichWithModel,
+  needsEnrichment,
+  enrichOneProposal,
   sourceLanguageAllowed,
   proposalLanguageOk,
   overlap,
@@ -4450,6 +4462,7 @@ module.exports = {
   persistProposedStore,
   getProposedChanges,
   setProposedChanges,
+  getSourceState,
 
   // Text segmentation
   splitSentences,
