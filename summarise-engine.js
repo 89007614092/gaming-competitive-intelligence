@@ -43,6 +43,24 @@ const QA_FAILOVER_ENABLED =
 // SUMMARY_DISABLE_SCAN gates ONLY the background scan lane.
 const QA_MODEL_DISABLED = process.env.SUMMARY_DISABLE_MODEL === "1" || !OPEN_MODEL_API_KEY;
 const SCAN_MODEL_DISABLED = process.env.SUMMARY_DISABLE_SCAN === "1" || !OPEN_MODEL_API_KEY_SCAN;
+
+// Scan-lane failover (mirrors the same-account Q&A failover from PR #67). When
+// the scan model is rate-limited or errors, try the Q&A fallback model first
+// (OPEN_MODEL_NAME_FALLBACK), or the Q&A primary (DEFAULT_MODEL) when no
+// fallback is configured. The fallback always runs on the Q&A key/base URL, so a
+// scan-provider outage (e.g. a throttled OpenRouter free-tier model) can no
+// longer permanently stall background enrichment — it degrades to the working
+// Q&A model instead. Candidates are built lazily so the set reflects the live
+// env at call time.
+function getScanCandidates() {
+  const primary = { model: OPEN_MODEL_NAME_SCAN, apiKey: OPEN_MODEL_API_KEY_SCAN, baseUrl: OPEN_MODEL_BASE_URL_SCAN };
+  const fbName =
+    (OPEN_MODEL_NAME_FALLBACK && OPEN_MODEL_NAME_FALLBACK !== OPEN_MODEL_NAME_SCAN)
+      ? OPEN_MODEL_NAME_FALLBACK
+      : (DEFAULT_MODEL !== OPEN_MODEL_NAME_SCAN ? DEFAULT_MODEL : null);
+  if (!fbName) return [primary];
+  return [primary, { model: fbName, apiKey: OPEN_MODEL_API_KEY, baseUrl: OPEN_MODEL_BASE_URL }];
+}
 const DATA_DIR = path.join(__dirname, "data");
 const STOP_WORDS = new Set([
   "about", "after", "again", "also", "and", "are", "because", "been", "before", "being", "between",
@@ -526,12 +544,15 @@ function generateOpenSourceAnswer(question, evidence) {
 // cooldown. Pass lane: "scan" from the background enrichment path.
 async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, temperature = 0.2, json = false, timeoutMs = 60000, lane = "qa" } = {}) {
   const isScan = lane === "scan";
-  const apiKey = isScan ? OPEN_MODEL_API_KEY_SCAN : OPEN_MODEL_API_KEY;
-  const baseUrl = isScan ? OPEN_MODEL_BASE_URL_SCAN : OPEN_MODEL_BASE_URL;
-  const modelName = isScan ? OPEN_MODEL_NAME_SCAN : DEFAULT_MODEL;
   const queue = isScan ? scanQueue : qaQueue;
   const disabled = isScan ? SCAN_MODEL_DISABLED : QA_MODEL_DISABLED;
   if (disabled) return null;
+  // The Q&A lane has a single candidate (its failover lives in
+  // postQaChatCompletions); the scan lane iterates getScanCandidates() so a
+  // throttled scan model can fall back to the working Q&A model.
+  const candidates = isScan
+    ? getScanCandidates()
+    : [{ model: DEFAULT_MODEL, apiKey: OPEN_MODEL_API_KEY, baseUrl: OPEN_MODEL_BASE_URL }];
   const messages = [
     { role: "system", content: json ? `${systemPrompt}\nRespond with ONLY valid JSON, no prose, no markdown code fences.` : systemPrompt },
     { role: "user", content: userPrompt },
@@ -539,38 +560,50 @@ async function runModelChat(systemPrompt, userPrompt, { maxTokens = 600, tempera
   const task = queue
     .catch(() => undefined)
     .then(async () => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const chatBody = { model: modelName, messages, max_tokens: maxTokens, temperature };
-        if (modelNeedsNoReasoning(modelName)) chatBody.reasoning_effort = "low";
-        const resp = await fetch(`${baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify(chatBody),
-          signal: controller.signal,
-        });
-        if (!resp.ok) {
-          const txt = await resp.text().catch(() => "");
-          if (resp.status === 429) {
-            const cooldownMs = cooldownFrom429(resp, txt);
-            if (isScan) scanRateLimitedUntil = Date.now() + cooldownMs;
-            else qaRateLimitedUntil = Date.now() + cooldownMs;
-            const until = isScan ? scanRateLimitedUntil : qaRateLimitedUntil;
-            console.warn(`[model:${lane}] rate limited (HTTP 429) — ${lane} calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(until).toISOString()}`);
-            return { rateLimited: true };
+      for (let ci = 0; ci < candidates.length; ci++) {
+        const cand = candidates[ci];
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const chatBody = { model: cand.model, messages, max_tokens: maxTokens, temperature };
+          if (modelNeedsNoReasoning(cand.model)) chatBody.reasoning_effort = "low";
+          if (modelNeedsQwen3ThinkingDisabled(cand.model)) chatBody.thinking = { type: "disabled" };
+          const resp = await fetch(`${cand.baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${cand.apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify(chatBody),
+            signal: controller.signal,
+          });
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => "");
+            if (resp.status === 429) {
+              const cooldownMs = cooldownFrom429(resp, txt);
+              const isLast = ci === candidates.length - 1;
+              if (isLast) {
+                if (isScan) scanRateLimitedUntil = Date.now() + cooldownMs;
+                else qaRateLimitedUntil = Date.now() + cooldownMs;
+                const until = isScan ? scanRateLimitedUntil : qaRateLimitedUntil;
+                console.warn(`[model:${lane}] rate limited (HTTP 429) on all candidates — ${lane} calls paused for ${Math.round(cooldownMs / 60000)}m until ${new Date(until).toISOString()}`);
+                return { rateLimited: true };
+              }
+              console.warn(`[model:${lane}] ${cand.model} rate limited (HTTP 429) — falling back to next candidate`);
+              continue;
+            }
+            console.error(`[model:${lane}] chat completion HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+            if (ci < candidates.length - 1) continue;
+            return null;
           }
-          console.error(`[model:${lane}] chat completion HTTP ${resp.status}: ${txt.slice(0, 200)}`);
+          const j = await resp.json().catch(() => null);
+          return j?.choices?.[0]?.message?.content?.trim() || null;
+        } catch (err) {
+          console.error(`[model:${lane}] chat completion request failed on ${cand.model}: ${err && err.message ? err.message : err}`);
+          if (ci < candidates.length - 1) continue;
           return null;
+        } finally {
+          clearTimeout(timeout);
         }
-        const j = await resp.json().catch(() => null);
-        return j?.choices?.[0]?.message?.content?.trim() || null;
-      } catch (err) {
-        console.error(`[model:${lane}] chat completion request failed: ${err && err.message ? err.message : err}`);
-        return null;
-      } finally {
-        clearTimeout(timeout);
       }
+      return null;
     });
   if (isScan) scanQueue = task.catch(() => undefined);
   else qaQueue = task.catch(() => undefined);
@@ -796,6 +829,7 @@ module.exports = {
   OPEN_MODEL_NAME_SCAN,
   OPEN_MODEL_NAME_FALLBACK,
   QA_FAILOVER_ENABLED,
+  getScanCandidates,
   buildCorpus,
   retrieveApplicationEvidence,
   generateOpenSourceAnswer,
