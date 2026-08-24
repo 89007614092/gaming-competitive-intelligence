@@ -1,0 +1,128 @@
+// Re-enrichment tests (Step 0 + Step 1 of the Suggested Updates recovery):
+//  - needsEnrichment() flags pre-#81 items (no jurisdiction/whyItMatters) and
+//    short/legacy summaries so scans + the admin re-enrich endpoint upgrade them.
+//  - enrichOneProposal() re-enriches a stale item into the full #81 schema
+//    (jurisdiction + whyItMatters), and correctly routes rate-limited / blocked
+//    / non-English outcomes.
+process.env.SCAN_MODEL_MIN_GAP_MS = "10"; // keep paced calls fast
+
+const test = require("node:test");
+const assert = require("node:assert");
+
+const summariseEngine = require("../summarise-engine");
+const srv = require("../server");
+
+const resetBudget = () => {
+  const ss = srv.getSourceState();
+  ss.scanBudget = { day: new Date().toISOString().slice(0, 10), used: 0 };
+};
+
+const GOOD = JSON.stringify({
+  updateCategory: "new-development",
+  updateReason: "Regulator published new guidance.",
+  styledSummary:
+    "The OECD AI Policy Observatory set out a five-step roadmap to close the AI evaluation gap, covering benchmark methodology, independent auditing, incident reporting, red-teaming standards and public evaluation leaderboards for general-purpose models.",
+  jurisdiction: "global",
+  whyItMatters:
+    "It gives regulators a shared vocabulary for assessing model capability and safety, shaping how governments procure and govern high-risk AI.",
+});
+
+const fetcher = async (prop, opts) => ({
+  text: "The OECD AI Policy Observatory published a five-step roadmap to close the AI evaluation gap, covering benchmarking, auditing, incident reporting, red-teaming and public leaderboards.",
+  blocked: false,
+});
+
+const staleProp = () => ({
+  id: "stale1",
+  title: "OECD five-step roadmap to close the AI evaluation gap",
+  detectedAction: "new",
+  category: "regulation",
+  snippet: "A five-step roadmap to closing the AI evaluation gap",
+  publisher: "OECD AI Policy Observatory",
+  status: "pending",
+  enrichStatus: "done",
+  // Deliberately pre-#81: a legacy one-line summary, NO jurisdiction/whyItMatters.
+  styledSummary: "The OECD published a five-step roadmap to close the AI evaluation gap.",
+  preview: "old preview text",
+});
+
+test("needsEnrichment: false for a fully #81-enriched item", () => {
+  const full = {
+    preview: "p", updateCategory: "new-development",
+    styledSummary: "x".repeat(90), jurisdiction: "EU", whyItMatters: "y".repeat(40),
+  };
+  assert.strictEqual(srv.needsEnrichment(full), false);
+});
+
+test("needsEnrichment: true for pre-#81 item (no jurisdiction/whyItMatters)", () => {
+  const legacy = {
+    preview: "p", updateCategory: "new-development", styledSummary: "x".repeat(90),
+  };
+  assert.strictEqual(srv.needsEnrichment(legacy), true, "missing jurisdiction/whyItMatters must re-enrich");
+});
+
+test("needsEnrichment: true for a short/legacy summary", () => {
+  const short = {
+    preview: "p", updateCategory: "new-development",
+    styledSummary: "Too brief.", jurisdiction: "EU", whyItMatters: "y".repeat(40),
+  };
+  assert.strictEqual(srv.needsEnrichment(short), true, "sub-80-char summary must re-enrich");
+});
+
+test("needsEnrichment: true when the heuristic reason is missing", () => {
+  const noReason = {
+    preview: "p", styledSummary: "x".repeat(90), jurisdiction: "EU", whyItMatters: "y".repeat(40),
+  };
+  assert.strictEqual(srv.needsEnrichment(noReason), true);
+});
+
+test("enrichOneProposal upgrades a stale item to the full #81 schema", async () => {
+  resetBudget();
+  summariseEngine.runModelChat = async () => GOOD;
+  try {
+    const prop = staleProp();
+    const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, fetcher);
+    assert.strictEqual(status, "enriched", "stale item should re-enrich successfully");
+    assert.strictEqual(prop.jurisdiction, "global", "jurisdiction captured by re-enrichment");
+    assert.ok(prop.whyItMatters && prop.whyItMatters.length >= 30, "whyItMatters captured");
+    assert.ok(prop.styledSummary.length >= 80, "new summary is substantive, not the legacy one-liner");
+    assert.notStrictEqual(prop.styledSummary, staleProp().styledSummary, "legacy summary replaced");
+    assert.strictEqual(prop.enrichStatus, "done");
+  } finally {
+    delete summariseEngine.runModelChat;
+  }
+});
+
+test("enrichOneProposal returns rate-limited + sets a backoff on a 429", async () => {
+  resetBudget();
+  summariseEngine.runModelChat = async () => ({ rateLimited: true });
+  try {
+    const prop = { id: "rl1", title: "X", detectedAction: "new", category: "regulation", snippet: "y", status: "pending", enrichStatus: "rate-limited" };
+    const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, fetcher);
+    assert.strictEqual(status, "rate-limited");
+    assert.ok(prop.enrichCooldownUntil, "per-proposal backoff must be set");
+    assert.ok(new Date(prop.enrichCooldownUntil).getTime() > Date.now(), "backoff is in the future");
+    assert.strictEqual(prop.enrichStatus, "rate-limited");
+  } finally {
+    delete summariseEngine.runModelChat;
+  }
+});
+
+test("enrichOneProposal returns blocked when the fetch hits a bot-wall", async () => {
+  resetBudget();
+  const blockedFetcher = async () => ({ text: "", blocked: true });
+  const prop = { id: "blk", title: "X", detectedAction: "new", category: "regulation", snippet: "y", status: "pending" };
+  const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, blockedFetcher);
+  assert.strictEqual(status, "blocked");
+  assert.strictEqual(prop.fetchStatus, "blocked");
+});
+
+test("enrichOneProposal rejects a non-English (Latin-script) body", async () => {
+  resetBudget();
+  const itFetcher = async () => ({ text: "Linee guida sui tuoi diritti pubblicate dal governo", blocked: false });
+  const prop = { id: "it1", title: "X", detectedAction: "new", category: "regulation", snippet: "y", status: "pending" };
+  const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, itFetcher);
+  assert.strictEqual(status, "rejected");
+  assert.strictEqual(prop.status, "rejected");
+  assert.strictEqual(prop.rejectedByLanguage, true);
+});
