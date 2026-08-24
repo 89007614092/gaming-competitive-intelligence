@@ -4380,6 +4380,16 @@ async function renderReviewPanel() {
     const res = await fetch(`${API_BASE}/proposed-changes`);
     const json = res.ok ? await res.json() : { pending: [] };
     const items = json.pending || [];
+    const enriching = json.enrichingCount || 0;
+    const hintEl = document.getElementById("reviewEnrichingHint");
+    if (hintEl) {
+      if (enriching > 0) {
+        hintEl.textContent = `${enriching} update${enriching === 1 ? "" : "s"} still enriching and will appear here automatically.`;
+        hintEl.style.display = "";
+      } else {
+        hintEl.style.display = "none";
+      }
+    }
     if (!items.length) {
       listEl.innerHTML = "";
       if (emptyEl) emptyEl.style.display = "block";

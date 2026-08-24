@@ -3903,11 +3903,24 @@ app.post("/api/source-scan", (req, res) => {
 });
 
 // List pending proposed changes for the review panel.
+//
+// Only "presentable" items are returned: those with an AI-styled summary, OR
+// those blocked behind a manual-review wall (bot-wall the resolver couldn't
+// fetch). Rate-limited / quota placeholders — pending items with no summary —
+// are hidden until a later scan enriches them, so the panel never shows blank
+// "AI rewrite unavailable" cards. `enrichingCount` reports how many pending
+// items are still in that pipeline (for a subtle "M enriching…" hint) without
+// rendering them.
 app.get("/api/proposed-changes", (req, res) => {
-  const items = (proposedChanges.items || [])
-    .filter(i => i.status === "pending")
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json({ success: true, pending: items, pendingCount: items.length });
+  const pending = (proposedChanges.items || []).filter(i => i.status === "pending");
+  const isPresentable = (i) =>
+    (i.styledSummary && i.styledSummary.length) || i.fetchStatus === "blocked";
+  const presentable = pending.filter(isPresentable);
+  const enrichingCount = pending.filter(
+    (i) => !(i.styledSummary && i.styledSummary.length) && i.fetchStatus !== "blocked"
+  ).length;
+  presentable.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ success: true, pending: presentable, pendingCount: presentable.length, enrichingCount });
 });
 
 // Optional shared-secret auth for state-changing endpoints. DISABLED by default
