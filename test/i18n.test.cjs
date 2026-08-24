@@ -42,3 +42,25 @@ test('getLang reflects setLang', () => {
   setLang('en');
   assert.strictEqual(getLang(), 'en');
 });
+
+test('loading.webSearch substitutes the {query} var (used by news web search)', () => {
+  setLang('en');
+  assert.strictEqual(
+    t('loading.webSearch', { query: 'NetEase AI' }),
+    'Searching the web for “NetEase AI”…'
+  );
+  setLang('zh-CN');
+  assert.strictEqual(
+    t('loading.webSearch', { query: 'NetEase AI' }),
+    '正在联网搜索“NetEase AI”…'
+  );
+  setLang('en');
+});
+
+test('loading-state keys resolve to Simplified Chinese after setLang(zh-CN)', () => {
+  setLang('zh-CN');
+  assert.strictEqual(t('loading.knowledgeBase'), '正在加载知识库……');
+  assert.strictEqual(t('loading.proposedChanges'), '正在加载建议更新……');
+  assert.strictEqual(t('qna.sources'), '来源');
+  setLang('en');
+});
