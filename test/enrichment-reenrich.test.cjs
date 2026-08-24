@@ -1,9 +1,8 @@
-// Re-enrichment tests (Step 0 + Step 1 of the Suggested Updates recovery):
-//  - needsEnrichment() flags pre-#81 items (no jurisdiction/whyItMatters) and
-//    short/legacy summaries so scans + the admin re-enrich endpoint upgrade them.
-//  - enrichOneProposal() re-enriches a stale item into the full #81 schema
-//    (jurisdiction + whyItMatters), and correctly routes rate-limited / blocked
-//    / non-English outcomes.
+// Re-enrichment tests (Step 0 + Step 1 of the Suggested Updates recovery), and
+// the Step 2 full-body enrichment. Rebuild (PR #85) simplified the schema to a
+// single combined `styledSummary` (the "why it matters" rationale is folded in)
+// plus `jurisdiction` + `updateCategory`. There is NO separate whyItMatters /
+// updateReason field anymore.
 process.env.SCAN_MODEL_MIN_GAP_MS = "10"; // keep paced calls fast
 
 const test = require("node:test");
@@ -17,14 +16,12 @@ const resetBudget = () => {
   ss.scanBudget = { day: new Date().toISOString().slice(0, 10), used: 0 };
 };
 
+// The combined entry: what the source says AND why it matters as an update.
 const GOOD = JSON.stringify({
   updateCategory: "new-development",
-  updateReason: "Regulator published new guidance.",
   styledSummary:
-    "The OECD AI Policy Observatory set out a five-step roadmap to close the AI evaluation gap, covering benchmark methodology, independent auditing, incident reporting, red-teaming standards and public evaluation leaderboards for general-purpose models.",
+    "The OECD AI Policy Observatory set out a five-step roadmap to close the AI evaluation gap, covering benchmark methodology, independent auditing, incident reporting, red-teaming standards and public evaluation leaderboards for general-purpose models. It gives regulators a shared vocabulary for assessing model capability and safety, shaping how governments procure and govern high-risk AI.",
   jurisdiction: "global",
-  whyItMatters:
-    "It gives regulators a shared vocabulary for assessing model capability and safety, shaping how governments procure and govern high-risk AI.",
 });
 
 const fetcher = async (prop, opts) => ({
@@ -41,42 +38,42 @@ const staleProp = () => ({
   publisher: "OECD AI Policy Observatory",
   status: "pending",
   enrichStatus: "done",
-  // Deliberately pre-#81: a legacy one-line summary, NO jurisdiction/whyItMatters.
+  // Deliberately pre-rebuild: a legacy one-line summary, NO jurisdiction.
   styledSummary: "The OECD published a five-step roadmap to close the AI evaluation gap.",
   preview: "old preview text",
 });
 
-test("needsEnrichment: false for a fully #81-enriched item", () => {
+test("needsEnrichment: false for a fully enriched item", () => {
   const full = {
     preview: "p", updateCategory: "new-development",
-    styledSummary: "x".repeat(90), jurisdiction: "EU", whyItMatters: "y".repeat(40),
+    styledSummary: "x".repeat(90), jurisdiction: "EU",
   };
   assert.strictEqual(srv.needsEnrichment(full), false);
 });
 
-test("needsEnrichment: true for pre-#81 item (no jurisdiction/whyItMatters)", () => {
+test("needsEnrichment: true for pre-rebuild item (no jurisdiction)", () => {
   const legacy = {
     preview: "p", updateCategory: "new-development", styledSummary: "x".repeat(90),
   };
-  assert.strictEqual(srv.needsEnrichment(legacy), true, "missing jurisdiction/whyItMatters must re-enrich");
+  assert.strictEqual(srv.needsEnrichment(legacy), true, "missing jurisdiction must re-enrich");
 });
 
 test("needsEnrichment: true for a short/legacy summary", () => {
   const short = {
     preview: "p", updateCategory: "new-development",
-    styledSummary: "Too brief.", jurisdiction: "EU", whyItMatters: "y".repeat(40),
+    styledSummary: "Too brief.", jurisdiction: "EU",
   };
   assert.strictEqual(srv.needsEnrichment(short), true, "sub-80-char summary must re-enrich");
 });
 
 test("needsEnrichment: true when the heuristic reason is missing", () => {
   const noReason = {
-    preview: "p", styledSummary: "x".repeat(90), jurisdiction: "EU", whyItMatters: "y".repeat(40),
+    preview: "p", styledSummary: "x".repeat(90), jurisdiction: "EU",
   };
   assert.strictEqual(srv.needsEnrichment(noReason), true);
 });
 
-test("enrichOneProposal upgrades a stale item to the full #81 schema", async () => {
+test("enrichOneProposal upgrades a stale item to the combined schema", async () => {
   resetBudget();
   summariseEngine.runModelChat = async () => GOOD;
   try {
@@ -84,8 +81,8 @@ test("enrichOneProposal upgrades a stale item to the full #81 schema", async () 
     const status = await srv.enrichOneProposal(prop, { callsThisRun: 0 }, fetcher);
     assert.strictEqual(status, "enriched", "stale item should re-enrich successfully");
     assert.strictEqual(prop.jurisdiction, "global", "jurisdiction captured by re-enrichment");
-    assert.ok(prop.whyItMatters && prop.whyItMatters.length >= 30, "whyItMatters captured");
     assert.ok(prop.styledSummary.length >= 80, "new summary is substantive, not the legacy one-liner");
+    assert.ok(prop.styledSummary.includes("govern"), "rationale is folded into the combined entry");
     assert.notStrictEqual(prop.styledSummary, staleProp().styledSummary, "legacy summary replaced");
     assert.strictEqual(prop.enrichStatus, "done");
   } finally {
