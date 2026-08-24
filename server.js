@@ -2649,6 +2649,32 @@ function isLikelyEnglish(text) {
   return latin / tokens.length >= 0.6;
 }
 
+// (A2) Genuine-language gate. isLikelyEnglish only rejects NON-LATIN scripts,
+// so Latin-script European languages (Italian, French, German, Spanish, ...) slip
+// through and pollute Suggested Updates with non-English items. looksNonEnglish
+// detects them via per-language function-word fingerprints (and the non-Latin
+// guard), so an item is admitted only when it clearly reads as English.
+const EU_LANG_STOPWORDS = {
+  es: new Set(["la","de","el","y","en","que","los","las","una","por","con","para","del","se","su","al","lo","le","este","esta","son"]),
+  fr: new Set(["le","la","de","et","un","une","les","des","du","en","est","pour","avec","sur","au","ce","cette","dans","qui"]),
+  de: new Set(["der","die","das","und","in","den","von","zu","mit","fur","ist","ein","eine","auf","im","am","dem","des","nicht"]),
+  it: new Set(["il","di","la","e","che","una","per","con","del","al","alla","della","sono","nel","nella","dei","questo","questa","come","piu","sul","linee","guida","tuoi","diritti"]),
+  pt: new Set(["a","o","de","e","que","do","da","em","um","uma","para","com","se","nao","no"]),
+  nl: new Set(["de","het","en","van","in","is","op","te","dat","die","een","voor","met","zijn"]),
+};
+function looksNonEnglish(text, minHits = 2) {
+  if (!text) return false;
+  if ((String(text).match(NON_LATIN) || []).length > 6) return true; // non-Latin -> non-English
+  const words = String(text).toLowerCase().match(/[a-zà-ÿ]+/g) || [];
+  if (words.length < 3) return false; // too short to judge reliably; admit
+  for (const set of Object.values(EU_LANG_STOPWORDS)) {
+    let hits = 0;
+    for (const w of words) if (set.has(w)) hits++;
+    if (hits >= minHits) return true;
+  }
+  return false;
+}
+
 // (B) Source-language whitelist. Each monitored source may declare a `language`
 // in data/sources.json (ISO-ish code). Only English-declared sources may feed
 // the proposal queue; any other language is dropped at the classify step so a
@@ -3248,6 +3274,33 @@ function existingRecordContent(matched) {
 // pass the existing entry so the rewrite reads as a delta. Returns null on any
 // failure so the caller keeps the heuristic category and a pending/rate-limited
 // status — the raw excerpt is NEVER presented as the finished suggestion.
+// Quality gate for an enriched model result. Returns null when valid, or a
+// human-readable reason string when the output must be rejected/retried. Guards
+// the structured schema from the overhaul: every enriched update must carry a
+// substantive English summary, a jurisdiction, and a "why it matters" impact
+// statement — and must not merely restate the headline.
+function enrichmentFailure(obj, prop) {
+  if (!obj || typeof obj !== "object") return "no structured output";
+  const summary = typeof obj.styledSummary === "string" ? obj.styledSummary.trim() : "";
+  if (!summary) return "missing styledSummary";
+  if (summary.length < 80) return "styledSummary too short (<80 chars)";
+  const jurisdiction = typeof obj.jurisdiction === "string" ? obj.jurisdiction.trim() : "";
+  if (jurisdiction.length < 2) return "missing jurisdiction";
+  const why = typeof obj.whyItMatters === "string" ? obj.whyItMatters.trim() : "";
+  if (why.length < 30) return "missing or thin whyItMatters";
+  // Restatement guard: a good summary must add materially beyond the headline.
+  const title = String((prop && prop.title) || "").toLowerCase();
+  if (title.length > 12) {
+    const sumTok = new Set(summary.toLowerCase().match(/[a-z]+/g) || []);
+    const titleTok = new Set(title.match(/[a-z]+/g) || []);
+    let novel = 0;
+    for (const t of sumTok) if (!titleTok.has(t)) novel++;
+    const novelFrac = sumTok.size ? novel / sumTok.size : 0;
+    if (novelFrac < 0.3) return "summary restates the headline without new content";
+  }
+  return null;
+}
+
 async function enrichWithModel(prop, excerpt, opts = {}) {
   const allowReject = opts.allowReject !== false; // scan lane honours rejections; manual lane forces a summary
   const text = (excerpt || stripHtml(prop.snippet || prop.description || "")).trim();
@@ -3257,40 +3310,61 @@ async function enrichWithModel(prop, excerpt, opts = {}) {
     : "";
   // Manual submissions are analyst-curated, so we tell the model to always
   // produce a styledSummary and never reject them as non-substantive.
-  const forceNote = allowReject ? "" : "\n\nThis item was manually submitted by an analyst for the AI & gaming competitive-intelligence knowledge base. It is always substantive — produce a styledSummary and do NOT set rejected:true.";
-  const system = `You rewrite AI-regulation/policy news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-3 sentences; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}${forceNote}`;
-  const user = `Classify why this update is proposed and rewrite the source excerpt into ONE knowledge-base entry in house style.${existing}
-NEW SOURCE (${prop.publisher || "unknown"}): ${prop.title}
+  const forceNote = allowReject ? "" : "\n\nThis item was manually submitted by an analyst for the AI & gaming competitive-intelligence knowledge base. It is always substantive — produce a full styledSummary and do NOT set rejected:true.";
+  const system = `You rewrite AI-regulation/policy news into the house style of a curated competitive-intelligence knowledge base. House style: formal, neutral, third-person, factual; state concrete figures, dates and regulation/article references; 2-3 sentences (around 60-110 words) that describe what the document ACTUALLY SAYS — never merely echo the headline; no promotional or journalistic language; never invent facts not in the source. ${STYLE_EXAMPLES}${forceNote}`;
+  const user = `Analyse this AI-regulation/policy source and return ONE structured knowledge-base entry.${existing}
+SOURCE TITLE (${prop.publisher || "unknown"}): ${prop.title}
+SOURCE TEXT:
 ${text}
 
 Return ONLY valid JSON:
 {
   "updateCategory": one of "information-outdated" | "additional-information" | "new-case-study" | "new-deadline" | "new-development",
   "updateReason": one short sentence (max 20 words) explaining why this is suggested,
-  "styledSummary": the rewritten entry in house style (max 600 chars). Do NOT add a citation line — the app appends the source.
+  "styledSummary": 2-3 sentences in English describing the document's actual content and concrete implications (not a restatement of the title). Max 600 chars. Do NOT add a citation line — the app shows the source link.
+  "jurisdiction": the relevant legal scope, e.g. "EU", "United Kingdom", "United States", "France", "global" (use "unknown" only if genuinely unspecified),
+  "whyItMatters": 1-2 sentences in English on the concrete impact for AI governance / AI policy / gaming+AI,
   "rejected": true ONLY if this is a job posting, a hiring/careers page, an event invitation, or otherwise not a substantive AI-regulation/policy development. If rejected, set styledSummary to "" and updateCategory to null.
 }`;
-  const raw = await summariseEngine.runModelChat(system, user, { maxTokens: 500, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
+  const build = (obj) => ({
+    updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
+    updateReason: String(obj.updateReason || "").slice(0, 240),
+    styledSummary: obj.styledSummary.slice(0, 600).trim(),
+    jurisdiction: String(obj.jurisdiction || "unknown").slice(0, 80).trim(),
+    whyItMatters: String(obj.whyItMatters || "").slice(0, 400).trim(),
+  });
+  const parse = (raw) => { try { return extractJson(raw); } catch { return null; } };
+
+  const raw = await summariseEngine.runModelChat(system, user, { maxTokens: 600, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
   if (raw && raw.rateLimited) return { rateLimited: true };
   if (!raw) return null;
-  try {
-    const obj = extractJson(raw);
-    if (obj && obj.rejected === true) {
-      // Forced (manual) path: still use a summary if the model provided one.
-      if (!allowReject && obj.styledSummary && obj.styledSummary.trim()) {
-        return { styledSummary: obj.styledSummary.slice(0, 600).trim() };
-      }
-      return { rejected: true }; // Option B: model judged this non-substantive
-    }
-    if (!obj || typeof obj.styledSummary !== "string" || !obj.styledSummary.trim()) return null;
-    return {
-      updateCategory: UPDATE_REASON_KEYS.includes(obj.updateCategory) ? obj.updateCategory : (prop.detectedAction === "deadline" ? "new-deadline" : "new-development"),
-      updateReason: String(obj.updateReason || "").slice(0, 240),
-      styledSummary: obj.styledSummary.slice(0, 600).trim(),
-    };
-  } catch {
-    return null;
+  const obj = parse(raw);
+  if (obj && obj.rejected === true) {
+    // Forced (manual) path: still use the summary if the model provided one.
+    if (!allowReject && obj.styledSummary && obj.styledSummary.trim()) return build(obj);
+    return { rejected: true }; // Option B: model judged this non-substantive
   }
+  if (!obj) return null;
+  const fail = enrichmentFailure(obj, prop);
+  if (!fail) return build(obj);
+
+  // Quality gate failed. The scan lane gets ONE stricter retry (paced like the
+  // first call); the manual (forced) lane returns best-effort rather than
+  // blocking an analyst-curated item.
+  if (!allowReject) return build(obj);
+  await paceScanModelCall();
+  const retryUser = user + `\n\nPREVIOUS OUTPUT FAILED VALIDATION: ${fail}. Rewrite with a substantive 2-3 sentence English summary describing the document's actual content and concrete impact, a real "jurisdiction", and a "whyItMatters" impact statement. Do not merely rephrase the headline.`;
+  const raw2 = await summariseEngine.runModelChat(system, retryUser, { maxTokens: 600, temperature: 0.2, json: true, timeoutMs: 25000, lane: "scan" });
+  if (raw2 && raw2.rateLimited) return { rateLimited: true };
+  const obj2 = parse(raw2);
+  if (obj2 && obj2.rejected === true) return { rejected: true };
+  if (obj2) {
+    const fail2 = enrichmentFailure(obj2, prop);
+    if (!fail2) return build(obj2);
+  }
+  // Both attempts failed validation -> flag for manual review (UI shows it as
+  // "Manual review required"); surface any partial fields for the reviewer.
+  return { blocked: true, partial: build(obj2 || obj) };
 }
 
 // Generate an AI styledSummary for a stored (manual) item when one is missing.
@@ -3310,6 +3384,8 @@ async function summariseStoredItem(prop, { force = true } = {}) {
       prop.enrichStatus = "done";
       if (enriched.updateCategory) prop.updateCategory = enriched.updateCategory;
       if (enriched.updateReason) prop.updateReason = enriched.updateReason;
+      if (enriched.jurisdiction) prop.jurisdiction = enriched.jurisdiction;
+      if (enriched.whyItMatters) prop.whyItMatters = enriched.whyItMatters;
       return enriched.styledSummary;
     }
   } catch (_) { /* best effort */ }
@@ -3331,7 +3407,7 @@ function looksLikeJobPosting(text) {
 function classifyItem(source, item, index) {
   const text = `${item.title} ${item.description || ""}`;
   if (!sourceLanguageAllowed(source)) return null; // (B) drop non-English-declared source
-  if (!isLikelyEnglish(text)) return null; // (a) drop non-English
+  if (looksNonEnglish(text, 2)) return null; // (a) drop non-English (incl. Latin-script EU languages)
   if (looksLikeJobPosting(text)) return null; // (a2) drop recruitment / non-substantive noise
   const itemTokens = new Set(tokenize(text));
   if (itemTokens.size < 2) return null;
@@ -3647,7 +3723,7 @@ async function runSourceScan({ force = false } = {}) {
         // to English even when the source article is non-English. If the fetched
         // body is non-English, reject the proposal so it never reaches the review
         // panel (and is purged from the persisted queue).
-        if (baseText && !isLikelyEnglish(baseText)) {
+        if (baseText && looksNonEnglish(baseText, 3)) {
           prop.rejectedByLanguage = true;
           prop.status = "rejected";
           if (prop._newlyProposed) {
@@ -3718,6 +3794,21 @@ async function runSourceScan({ force = false } = {}) {
           return;
         }
 
+        // Quality gate failed on BOTH attempts: the model could not produce a
+        // schema-complete, substantive update. Flag for manual review rather
+        // than publishing a low-quality suggestion (#overhaul). The UI already
+        // renders fetchStatus:"blocked" as "Manual review required".
+        if (enriched && enriched.blocked) {
+          prop.fetchStatus = "blocked";
+          if (enriched.partial) {
+            prop.styledSummary = enriched.partial.styledSummary || prop.styledSummary || null;
+            prop.jurisdiction = enriched.partial.jurisdiction || null;
+            prop.whyItMatters = enriched.partial.whyItMatters || null;
+          }
+          if (!prop.styledSummary) prop.enrichStatus = "done";
+          return;
+        }
+
         if (!enriched) {
           // Don't clobber a prior good AI summary if the model just hiccuped.
           if (prop.styledSummary) {
@@ -3736,6 +3827,8 @@ async function runSourceScan({ force = false } = {}) {
         prop.updateCategory = enriched.updateCategory;
         prop.updateReason = enriched.updateReason;
         prop.styledSummary = enriched.styledSummary || null;
+        prop.jurisdiction = enriched.jurisdiction || null;
+        prop.whyItMatters = enriched.whyItMatters || null;
         prop.enrichStatus = "done";
         const styled = enriched.styledSummary;
         prop.suggestedEdit = prop.detectedAction === "new"
@@ -4322,6 +4415,9 @@ module.exports = {
 
   // Pure classification / matching helpers
   isLikelyEnglish,
+  looksNonEnglish,
+  enrichmentFailure,
+  enrichWithModel,
   sourceLanguageAllowed,
   proposalLanguageOk,
   overlap,
