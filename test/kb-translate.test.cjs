@@ -205,3 +205,19 @@ test("retranslateAllKb: key absent reports keyPresent false, no results", async 
   assert.strictEqual(report.results.length, 0);
   process.env.DEEPL_API_KEY = prev;
 });
+
+test("retranslateAllKb: DeepL 200 English-echo reports changed:false and no Chinese", async () => {
+  // Simulates a live DeepL that returns HTTP 200 but echoes the English source
+  // (no translation). Before the deep-equal fix this wrongly reported
+  // changed:true (object-reference comparison); it must now report changed:false
+  // so the operator sees the truth: nothing was actually translated.
+  const orig = mt.translateBatch;
+  mt.translateBatch = async (texts) => texts.map((t) => t); // echo
+  for (const n of kb.KB_DATASET_NAMES) fakeData[n] = { a: "Hello world", b: "Some product prose" };
+  const report = await kb.retranslateAllKb("zh-CN");
+  assert.strictEqual(report.keyPresent, true);
+  assert.ok(report.results.every((r) => r.ok === false), "no Chinese produced -> not ok");
+  assert.ok(report.results.every((r) => r.changed === false), "English echo must report changed:false (deep-equal)");
+  assert.ok(report.results.every((r) => (r.chineseCharsAdded || 0) === 0));
+  mt.translateBatch = orig;
+});

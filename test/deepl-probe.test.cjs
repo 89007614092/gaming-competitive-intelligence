@@ -33,6 +33,7 @@ function deeplBody(text) {
 
 beforeEach(() => {
   delete process.env.DEEPL_API_KEY;
+  if (mt.clearLastDeeplError) mt.clearLastDeeplError();
 });
 afterEach(restoreFetch);
 
@@ -75,4 +76,42 @@ test("getDeeplStatus caches and respects TTL (no second probe while fresh)", asy
   await mt.ensureDeeplStatus();
   assert.strictEqual(mt.getDeeplStatus(), true);
   assert.strictEqual(fetchCalls, 1); // only one real probe occurred
+});
+
+test("getLastDeeplError captures the HTTP status on a 456 (Free quota exceeded)", async () => {
+  process.env.DEEPL_API_KEY = "test:fx";
+  mt.clearLastDeeplError();
+  setFetch(deeplBody("err"), 456);
+  assert.strictEqual(await mt.probeDeepl(), false);
+  const err = mt.getLastDeeplError();
+  assert.ok(err && /456/.test(err), `expected a 456 error, got: ${err}`);
+});
+
+test("getLastDeeplError captures the HTTP status on a 403 (wrong/expired key)", async () => {
+  process.env.DEEPL_API_KEY = "test:fx";
+  mt.clearLastDeeplError();
+  setFetch(deeplBody("err"), 403);
+  assert.strictEqual(await mt.probeDeepl(), false);
+  const err = mt.getLastDeeplError();
+  assert.ok(err && /403/.test(err), `expected a 403 error, got: ${err}`);
+});
+
+test("getLastDeeplError captures a network failure", async () => {
+  process.env.DEEPL_API_KEY = "test:fx";
+  mt.clearLastDeeplError();
+  savedFetch = global.fetch;
+  global.fetch = async () => { throw new Error("getaddrinfo ENOTFOUND api-free.deepl.com"); };
+  assert.strictEqual(await mt.probeDeepl(), false);
+  const err = mt.getLastDeeplError();
+  assert.ok(err && /network error/i.test(err), `expected a network error, got: ${err}`);
+  global.fetch = savedFetch;
+});
+
+test("clearLastDeeplError resets the captured error to null", async () => {
+  process.env.DEEPL_API_KEY = "test:fx";
+  setFetch(deeplBody("err"), 403);
+  await mt.probeDeepl();
+  assert.ok(mt.getLastDeeplError());
+  mt.clearLastDeeplError();
+  assert.strictEqual(mt.getLastDeeplError(), null);
 });
