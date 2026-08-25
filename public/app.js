@@ -4,6 +4,17 @@
 
 const API_BASE = "/api";
 
+// Current UI language (mirrors the sidebar toggle, stored in localStorage "LANG").
+function currentUiLang() {
+  try { return localStorage.getItem("LANG") === "zh-CN" ? "zh-CN" : "en"; } catch (_) { return "en"; }
+}
+// Append ?lang=zh-CN to a server URL when the UI is Chinese, so the backend
+// serves the cached Chinese KB / news (PR #91). No-op for English.
+function withLang(url) {
+  if (currentUiLang() !== "zh-CN") return url;
+  return url + (url.includes("?") ? "&" : "?") + "lang=zh-CN";
+}
+
 // Wraps fetch for the state-changing endpoints. Sends the optional admin key
 // (from localStorage) in the X-Admin-Key header. If the server answers 401
 // (ADMIN_API_KEY is set there), prompts once for the key, remembers it, and
@@ -944,6 +955,11 @@ async function loadNews(forceRefresh = false) {
   try {
     const params = new URLSearchParams({ competitors: selectedNewsCompetitorIds.join(",") });
     if (forceRefresh) params.set("refresh", Date.now().toString());
+    if (currentUiLang() === "zh-CN") {
+      params.set("lang", "zh-CN");
+      const saved = loadSavedNewsArticles().map((a) => a.id).filter(Boolean);
+      if (saved.length) params.set("savedIds", saved.join(","));
+    }
     const res = await fetch(`${API_BASE}/news?${params.toString()}`, { cache: "no-store" });
     const data = await res.json();
 
@@ -2003,7 +2019,7 @@ async function loadKnowledgeBase(category = null, search = null) {
     if (search) params.push(`search=${encodeURIComponent(search)}`);
     if (params.length) url += "?" + params.join("&");
 
-    const res = await fetch(url);
+    const res = await fetch(withLang(url));
     const result = await res.json();
 
     if (!result.success) {
@@ -2292,7 +2308,7 @@ async function loadSpiderWeb() {
 
   try {
     if (!spiderData) {
-      const res = await fetch(`${API_BASE}/network`);
+      const res = await fetch(withLang(`${API_BASE}/network`));
       const result = await res.json();
       if (!result.success) throw new Error(result.error || "Failed to load network data");
       spiderData = result.data;
@@ -2668,7 +2684,7 @@ async function loadCompanyMap() {
   loadTencentMapSDK();
 
   try {
-    const res = await fetch("/api/company-locations");
+    const res = await fetch(withLang("/api/company-locations"));
     const json = await res.json();
     if (!json.success) throw new Error("Failed to load location data");
     const data = json.data;
@@ -2900,7 +2916,7 @@ async function loadTencentProducts() {
 
   loading.style.display = "flex";
   try {
-    const res = await fetch(`${API_BASE}/tencent-products`);
+    const res = await fetch(withLang(`${API_BASE}/tencent-products`));
     const json = await res.json();
     if (json.success) {
       tencentProductsData = json.data;
@@ -3103,7 +3119,7 @@ async function loadCurrentUseCases() {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/current-use-cases`);
+    const res = await fetch(withLang(`${API_BASE}/current-use-cases`));
     const json = await res.json();
     if (!json.success) throw new Error(json.error || "Unable to load use cases");
     currentUseCasesData = json.data;
@@ -3261,7 +3277,7 @@ async function loadGamingTrends() {
   grid.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.gamingTrends')}</p></div>`;
 
   try {
-    const res = await fetch(`${API_BASE}/gaming-trends`);
+    const res = await fetch(withLang(`${API_BASE}/gaming-trends`));
     const json = await res.json();
     if (json.success) {
       gamingTrendsData = json.data;
@@ -3508,7 +3524,7 @@ async function loadRegulatoryTimeline() {
   content.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.regulatoryTimeline')}</p></div>`;
 
   try {
-    const res = await fetch(`${API_BASE}/regulatory-timeline`);
+    const res = await fetch(withLang(`${API_BASE}/regulatory-timeline`));
     const json = await res.json();
     if (json.success) {
       regulatoryTimelineData = json.data;
@@ -3584,7 +3600,7 @@ async function loadRisks() {
   categoriesEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.riskAnalysis')}</p></div>`;
 
   try {
-    const res = await fetch(`${API_BASE}/risks`);
+    const res = await fetch(withLang(`${API_BASE}/risks`));
     const json = await res.json();
     if (json.success) {
       risksData = json.data;
