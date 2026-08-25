@@ -87,16 +87,8 @@ function setupNavigation() {
       // Reset sub-tabs for the newly activated view
       resetSubTabForView(viewId);
 
-      if (viewId === "news-view") { loadNews(); loadTeamSources(); }
-      if (viewId === "knowledge-base") loadKnowledgeBase();
-      if (viewId === "spider-web") loadSpiderWeb();
-      if (viewId === "tencent-products") loadTencentProducts();
-      if (viewId === "gaming-trends") loadGamingTrends();
-      if (viewId === "current-use-cases") loadCurrentUseCases();
-      if (viewId === "regulatory-timeline") loadRegulatoryTimeline();
-      if (viewId === "risks") loadRisks();
-      if (viewId === "company-map") loadCompanyMap();
-      if (viewId === "patents") loadPatents();
+      if (viewId === "summarise-view") return; // Q&A answer is language-locked to its question
+      reloadView(viewId);
     });
   });
 
@@ -129,6 +121,30 @@ function setupNavigation() {
   // Clear an active search and return to the live feed
   document.getElementById("clearSearchBtn")?.addEventListener("click", clearSearch);
 }
+
+// Re-run the loader for a given view. Shared by tab clicks and the language
+// toggle (langchange) so every data view re-fetches in the active language
+// without a full page refresh (PR #99).
+function reloadView(viewId) {
+  if (viewId === "news-view")        { loadNews(); loadTeamSources(); }
+  if (viewId === "knowledge-base")   loadKnowledgeBase();
+  if (viewId === "spider-web")       loadSpiderWeb();
+  if (viewId === "tencent-products") loadTencentProducts();
+  if (viewId === "gaming-trends")    loadGamingTrends();
+  if (viewId === "current-use-cases")loadCurrentUseCases();
+  if (viewId === "regulatory-timeline") loadRegulatoryTimeline();
+  if (viewId === "risks")            loadRisks();   // cache guard → re-renders via renderRisks()
+  if (viewId === "company-map")      loadCompanyMap();
+  if (viewId === "patents")          loadPatents();
+}
+
+// When the language toggle fires, re-render the currently active data view in
+// the new language. The Summarise (Q&A) view is intentionally excluded — its
+// answer is locked to the language of the original question.
+window.addEventListener('langchange', () => {
+  const active = document.querySelector('.nav-btn.active');
+  if (active && active.dataset.view) reloadView(active.dataset.view);
+});
 
 // ===== Smart Summary =====
 function setupQA() {

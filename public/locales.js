@@ -508,6 +508,12 @@
       if (typeof localStorage !== 'undefined') localStorage.setItem('LANG', currentLang);
     } catch (e) { /* ignore */ }
     applyLang();
+    // Signal data-driven views (KB, News, Patents, Risks, …) so they can
+    // re-fetch/re-render in the chosen language WITHOUT a page refresh.
+    // Kept decoupled: locales.js only broadcasts; app.js owns the reload.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('langchange', { detail: { lang: currentLang } }));
+    }
   }
 
   function t(key, vars) {
