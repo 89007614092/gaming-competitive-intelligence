@@ -9,25 +9,52 @@
 //   - an mtime change forces a fresh re-read, so on-disk edits are picked up
 //     without a process restart (R1 — fixes the old stale-cache bug)
 //
-// risks.json is mutated on disk during two of these tests; it is always
-// restored (per-test finally + suite after) so the working tree stays clean.
+// IMPORTANT (test isolation): node --test runs test FILES in parallel. This
+// suite previously mutated the SHARED real data/risks.json on disk (writing a
+// corrupt payload, then restoring). When api-contract.test.cjs hit
+// GET /api/risks during that window, getDataset read the corrupt file and the
+// contract test 500'd — a flaky, order-dependent failure unrelated to the code
+// under test. We now redirect getDataset("risks") to a private, process-unique
+// temp file inside data/, so this suite never touches the shared dataset the
+// other suites read. The assertions below are unchanged in intent.
 
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("fs");
 const path = require("path");
 
-const { getDataset, clearDatasetCache } = require("../lib/datasets");
+const datasetsMod = require("../lib/datasets");
+const { getDataset, clearDatasetCache } = datasetsMod;
 
-const RISKS_FILE = path.join(__dirname, "..", "data", "risks.json");
+const DATA_DIR = path.join(__dirname, "..", "data");
+const REAL_RISKS_PATH = datasetsMod.DATASET_FILE.risks;
+// Process-unique file so concurrent test processes can never collide.
+const ISOLATED_NAME = `risks.isolated.${process.pid}.json`;
+const RISKS_FILE = path.join(DATA_DIR, ISOLATED_NAME);
+
+// Redirect the "risks" dataset to our isolated file for the whole suite.
+// (DATASET_FILE is a shared object but its properties are mutable; this only
+// affects THIS test process, so other suites keep using the real file.)
+datasetsMod.DATASET_FILE.risks = ISOLATED_NAME;
+
 let originalRisks = null;
 
 test.before(() => {
-  originalRisks = fs.readFileSync(RISKS_FILE, "utf8");
+  // Seed the isolated file with valid content (copied from the real dataset so
+  // the "matches a direct read" assertion stays meaningful).
+  const seed = fs.readFileSync(path.join(DATA_DIR, REAL_RISKS_PATH), "utf8");
+  fs.writeFileSync(RISKS_FILE, seed);
+  originalRisks = seed;
 });
 
 test.after(() => {
-  if (originalRisks !== null) fs.writeFileSync(RISKS_FILE, originalRisks);
+  // Restore the mapping and remove our temp file so the working tree stays clean.
+  datasetsMod.DATASET_FILE.risks = REAL_RISKS_PATH;
+  try {
+    fs.unlinkSync(RISKS_FILE);
+  } catch (_) {
+    /* already gone */
+  }
 });
 
 test("getDataset returns parsed data matching a direct read", () => {
