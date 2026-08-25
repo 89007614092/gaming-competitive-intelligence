@@ -3887,7 +3887,6 @@ async function runSourceScan({ force = false } = {}) {
 
     return {
       scanned,
-      due: due.length,
       considered,
       proposed,
       counts,
