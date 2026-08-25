@@ -1250,6 +1250,10 @@ app.get("/api/summarise/status", (req, res) => {
 app.post("/api/summarise", async (req, res) => {
   try {
     const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
+    // PR #90 — Hybrid translation: the client sends the active UI language so
+    // the model can answer in-language. Only 'zh-CN' triggers Chinese output;
+    // anything else (including an unset body) defaults to English.
+    const lang = req.body?.lang === "zh-CN" ? "zh-CN" : "en";
     const useInternet = req.body?.useInternet === true;
     // AI now runs on every answer by default. An explicit useModel:false is the
     // only opt-out (reserved); the UI always sends true.
@@ -1392,7 +1396,7 @@ app.post("/api/summarise", async (req, res) => {
         ]);
       };
       try {
-        answer = await raceModel(generateOpenSourceAnswer(question, evidence));
+        answer = await raceModel(generateOpenSourceAnswer(question, evidence, lang));
         // B2: deep-fetch full text ONLY for web sources the model actually
         // cited, then re-run once with the enriched evidence. If nothing was
         // cited, no extraction happens at all (the core token-saving fix). On
@@ -1410,7 +1414,7 @@ app.post("/api/summarise", async (req, res) => {
             const byId = new Map(enriched.map(e => [e.id, e]));
             const enrichedEvidence = evidence.map(e => byId.get(e.id) || e);
             try {
-              answer = await raceModel(generateOpenSourceAnswer(question, enrichedEvidence));
+              answer = await raceModel(generateOpenSourceAnswer(question, enrichedEvidence, lang));
             } catch (_) { /* keep the first answer on enrichment failure */ }
           }
         }

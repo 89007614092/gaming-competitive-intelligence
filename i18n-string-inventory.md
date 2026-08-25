@@ -478,3 +478,21 @@ Mechanism: `applyLang()` translates via a selector map (`I18N_MAP`) — `index.h
 **Out of scope for v1 (migrated incrementally in later PRs):** dynamically JS-rendered content — loading states ("Loading knowledge base..."), cards, the Q&A answer/evidence, the Suggested-updates count badge, icon-bearing filter buttons (Critical/High/Medium carry a `<span class="sev-dot">`), and the mixed "Suggested updates <count>" sidebar button. Those keep their English source until their render functions call `t()`. The AI-generated content (summaries, answers) stays English by design (locale-aware model output was deferred).
 
 Next step after merge+deploy: verify the switcher visibly flips the shell, then open incremental PRs per UI area, extending `I18N_MAP` + the `en`/`zh-CN` dictionaries.
+
+---
+
+## PR #89 — First dynamic migration (loading states + Q&A panel chrome)
+Seeded 12 loading-state keys + 3 Q&A-panel keys; extended `I18N_MAP` by 14 selectors covering the Q&A panel static chrome. `public/app.js` now calls `window.t('loading.X')` at render time for all 12 loading strings (knowledge base, competitor network, map, use cases, gaming trends, regulatory timeline, risk analysis, AI-model synthesising, scanning news, web search `{query}`, proposed changes, retrieving evidence). Full suite 215/215.
+- **Still English (deferred):** the AI-generated Q&A *answer* + evidence chips, all cards, the Suggested-updates count badge, and icon-bearing filter buttons. These render from data / server responses and need their render functions to call `t()` in later PRs.
+
+---
+
+## PR #90 — Hybrid translation (MT service for chrome + in-language LLM for Q&A)
+Lifts the 2026-08-24 deferral of **locale-aware AI output for Q&A answers only** (news `styledSummary` stays English/deferred). Two surfaces, two mechanisms:
+
+1. **UI chrome (static `en`/`zh-CN` dict in `public/locales.js`):** build-time MT via `lib/mtService.js` + `scripts/i18n-prefill.cjs`. DeepL primary (`DEEPL_API_KEY`, free `:fx` auto-detected), Google Translate fallback (`GOOGLE_TRANSLATE_KEY`). Idempotent + adds-only (never overwrites hand-authored zh-CN). Runs at build/commit time; the current dict is already fully mirrored so the first run is a no-op. The fidelity layer masks `[A#]/[W#]/[S#]/[T#]` chips + `{var}` placeholders before translate, restores after, and falls back to English per-string if chip count drifts.
+2. **Dynamic Q&A answer:** the existing Groq LLM answers IN-LANGUAGE. `summarise-engine.js runApiModelGeneration(q, ev, lang)` appends a Simplified-Chinese directive (via exported `applyLanguageInstruction`) when `lang==='zh-CN'`; `server.js POST /api/summarise` reads `req.body.lang`; `app.js` sends `localStorage.LANG`. No extra translate call, same approved trust boundary.
+
+- **Trust boundary:** MT service = a NEW data processor (chrome strings carry no PII, low risk); in-language LLM reuses the already-approved Groq boundary.
+- **Out of scope (still deferred):** news `styledSummary` display-time translate; locale-aware model output for cards/Suggested-updates badge/icon-filter buttons (those need their render functions to call `t()`).
+- Full suite: added `test/i18n-prefill.test.cjs` (mtService fidelity + prefill idempotency) and `test/i18n-lang-injection.test.cjs` (zh-CN directive injection).
