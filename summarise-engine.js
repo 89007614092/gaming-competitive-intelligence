@@ -465,6 +465,24 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
   }
 }
 
+// PR #90 — Hybrid translation: append a language directive to the Q&A system
+// prompt when the user's UI is Simplified Chinese. The base prompt is left
+// untouched by this function (it only ever APPENDS, and is a no-op for 'en'),
+// so the citation-gate logic and existing behaviour are unchanged. The
+// directive explicitly instructs the model to preserve every citation chip
+// ([A#]/[W#]/[S#]/[T#]) and every {placeholder} token verbatim — the same
+// fidelity requirement the build-time MT layer enforces.
+function applyLanguageInstruction(systemPrompt, lang = "en") {
+  if (lang !== "zh-CN") return systemPrompt;
+  return (
+    systemPrompt +
+    "\n\nLANGUAGE REQUIREMENT: The user's interface is set to Simplified Chinese (简体中文). " +
+    "Write your ENTIRE answer in Simplified Chinese. You MUST preserve every citation chip " +
+    "([A#], [W#], [S#], [T#]) and every {placeholder} token EXACTLY as written, in its original " +
+    "position — do not translate, transliterate, reorder, or drop them."
+  );
+}
+
 // Pure citation gate used by runApiModelGeneration and unit-tested directly.
 // Accepts a reasoned model answer when it cites at least one source; the
 // extractive fallback is reserved for a wholly uncited answer.
@@ -475,7 +493,7 @@ function evaluateCitationGate(answer, evidence) {
   return { pass: citationCount >= 1, citedUser, citationCount };
 }
 
-async function runApiModelGeneration(question, evidence) {
+async function runApiModelGeneration(question, evidence, lang = "en") {
   if (QA_MODEL_DISABLED) {
     throw new Error(
       process.env.SUMMARY_DISABLE_MODEL === "1"
@@ -497,6 +515,11 @@ async function runApiModelGeneration(question, evidence) {
       content: `Question: ${question}\n\nEvidence:\n${context}\n\nWrite the detailed, inline-cited answer now.\n\nLead with the user's attached [S#] sources, then supplement with [A#] (knowledge base), [W#] (internet, if provided), and [T#] (team-shared, if available). Ground every claim in the evidence you cite. Cite the sources that genuinely support each claim, and ensure every attached [S#] is reflected in your answer - you may cite it alongside another source to prove the same point. Do not force-cite evidence that does not bear on the question.`,
     },
   ];
+
+  // PR #90 — apply the language directive (no-op for 'en'; appends a
+  // Simplified-Chinese instruction when lang === 'zh-CN'). Kept as a post-build
+  // step so the large base prompt literal above is never duplicated/edited.
+  messages[0].content = applyLanguageInstruction(messages[0].content, lang);
 
   // Retry-after-aware Q&A resilience + same-account two-model failover are now
   // handled inside postQaChatCompletions: a short 429 throttle is waited out and
@@ -545,10 +568,10 @@ async function runApiModelGeneration(question, evidence) {
 
 // Serialise model calls so we never open two concurrent API requests at once
 // (keeps the host's rate limits happy and response ordering sane).
-function generateOpenSourceAnswer(question, evidence) {
+function generateOpenSourceAnswer(question, evidence, lang = "en") {
   const task = qaQueue
     .catch(() => undefined)
-    .then(() => runApiModelGeneration(question, evidence));
+    .then(() => runApiModelGeneration(question, evidence, lang));
   qaQueue = task.catch(() => undefined);
   return task;
 }
@@ -855,6 +878,7 @@ module.exports = {
   evaluateCitationGate,
   nudgeForUserSources,
   runApiModelGeneration,
+  applyLanguageInstruction,
   postQaChatCompletions,
   webResultRelevance,
   isModelReady,

@@ -341,6 +341,7 @@ async function runSummary() {
         useModel,
         userSources,
         teamSources,
+        lang: (typeof localStorage !== "undefined" && localStorage.getItem("LANG")) || "en",
       }),
     });
     const data = await response.json();
