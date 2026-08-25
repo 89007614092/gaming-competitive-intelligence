@@ -10,12 +10,15 @@ const mt = require("../lib/mtService");
 
 let savedFetch = null;
 let fetchCalls = 0;
+let lastReq = null;
 
 function setFetch(body, status = 200) {
   fetchCalls = 0;
+  lastReq = null;
   savedFetch = global.fetch;
-  global.fetch = async () => {
+  global.fetch = async (url, opts) => {
     fetchCalls += 1;
+    lastReq = { url, opts };
     return {
       ok: status >= 200 && status < 300,
       status,
@@ -46,6 +49,39 @@ test("probeDeepl returns true for a genuine ZH translation", async () => {
   setFetch(deeplBody("你好世界"));
   assert.strictEqual(await mt.probeDeepl(), true);
   assert.strictEqual(fetchCalls, 1);
+});
+
+test("deeplBaseUrl routes a Free (:fx) key to api-free.deepl.com", () => {
+  delete process.env.DEEPL_ENDPOINT;
+  process.env.DEEPL_API_KEY = "abc123:fx";
+  assert.strictEqual(mt.deeplBaseUrl(), "https://api-free.deepl.com");
+});
+
+test("deeplBaseUrl routes a Pro (no :fx) key to api.deepl.com", () => {
+  delete process.env.DEEPL_ENDPOINT;
+  process.env.DEEPL_API_KEY = "abc123-pro";
+  assert.strictEqual(mt.deeplBaseUrl(), "https://api.deepl.com");
+});
+
+test("deeplBaseUrl honours an explicit DEEPL_ENDPOINT override", () => {
+  process.env.DEEPL_ENDPOINT = "https://deepl-proxy.example.com/";
+  process.env.DEEPL_API_KEY = "abc123:fx";
+  assert.strictEqual(mt.deeplBaseUrl(), "https://deepl-proxy.example.com");
+  delete process.env.DEEPL_ENDPOINT;
+});
+
+test("translation request sends the DeepL-Auth-Key header AND legacy auth_key", async () => {
+  process.env.DEEPL_API_KEY = "abc123:fx";
+  setFetch(deeplBody("你好世界"));
+  await mt.probeDeepl();
+  assert.ok(lastReq, "a request should have been made");
+  const authz = lastReq.opts.headers.Authorization;
+  assert.strictEqual(authz, "DeepL-Auth-Key abc123:fx");
+  assert.ok(
+    /auth_key=abc123%3Afx|auth_key=abc123:fx/.test(lastReq.opts.body),
+    `expected legacy auth_key in body, got: ${lastReq.opts.body}`
+  );
+  assert.strictEqual(lastReq.url, "https://api-free.deepl.com/v2/translate");
 });
 
 test("probeDeepl returns false when DeepL echoes the source (no translation)", async () => {
