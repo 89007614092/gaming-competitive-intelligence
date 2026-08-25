@@ -3954,6 +3954,11 @@ app.get("/healthz", (req, res) => {
     // yet run (first few seconds after boot); boolean once warm. The probe is
     // cached with a TTL so healthz never blocks on the network.
     deeplWorking: mtService.getDeeplStatus(),
+    // The most recent DeepL failure reason (PR #96): when deeplWorking is false
+    // this tells you WHY — e.g. "DeepL HTTP 456: Quota exceeded" (Free plan
+    // exhausted), "DeepL HTTP 403: Forbidden" (wrong/expired key or wrong
+    // endpoint), or a network error. null = no failure observed yet.
+    deeplError: mtService.getLastDeeplError(),
     // Which search legs are configured, which one would answer next, and whether
     // any is circuit-broken. Makes a degraded search visible to a live probe
     // instead of only showing up as empty result sets.
