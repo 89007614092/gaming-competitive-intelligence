@@ -170,3 +170,38 @@ test("translateEvidence: translates free-text fields, keeps ids; en unchanged", 
   const out2 = await kb.translateEvidence(ev, "en");
   assert.strictEqual(out2[0].text, "Hello world");
 });
+
+// ---- retranslateAllKb (PR #95) -------------------------------------------
+
+test("retranslateAllKb: reports ok when translation produces Chinese", async () => {
+  const orig = mt.translateBatch;
+  // CJK-producing mock so the report shows success.
+  mt.translateBatch = async (texts) => texts.map((t) => "中文|" + t);
+  for (const n of kb.KB_DATASET_NAMES) fakeData[n] = { a: "Hello world" };
+  const report = await kb.retranslateAllKb("zh-CN");
+  assert.strictEqual(report.keyPresent, true);
+  assert.strictEqual(report.results.length, kb.KB_DATASET_NAMES.length);
+  assert.ok(report.results.every((r) => r.ok === true), "all datasets should report ok");
+  assert.ok(report.results.every((r) => (r.chineseCharsAdded || 0) > 0));
+  mt.translateBatch = orig;
+});
+
+test("retranslateAllKb: reports failure when translate throws (key broken)", async () => {
+  const orig = mt.translateBatch;
+  mt.translateBatch = async () => { throw new Error("DeepL 500"); };
+  for (const n of kb.KB_DATASET_NAMES) fakeData[n] = { a: "Hello world" };
+  const report = await kb.retranslateAllKb("zh-CN");
+  assert.strictEqual(report.keyPresent, true);
+  assert.ok(report.results.every((r) => r.ok === false), "all datasets should report failure");
+  assert.ok(report.results.every((r) => r.changed === false));
+  mt.translateBatch = orig;
+});
+
+test("retranslateAllKb: key absent reports keyPresent false, no results", async () => {
+  const prev = process.env.DEEPL_API_KEY;
+  delete process.env.DEEPL_API_KEY;
+  const report = await kb.retranslateAllKb("zh-CN");
+  assert.strictEqual(report.keyPresent, false);
+  assert.strictEqual(report.results.length, 0);
+  process.env.DEEPL_API_KEY = prev;
+});

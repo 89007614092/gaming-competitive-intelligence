@@ -227,6 +227,7 @@ const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
 const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool: datasetsGetDbPool, DATASET_FILE } = require("./lib/datasets");
 const kbTranslate = require("./lib/kbTranslate");
+const mtService = require("./lib/mtService");
 const patentsSource = require("./lib/patentsSource");
 const sources = require("./lib/sources");
 // Thread D reuses the governed reader pipeline (Jina + Thread F attribution) for
@@ -3948,6 +3949,11 @@ app.get("/healthz", (req, res) => {
     // (Render env vars require a redeploy to take effect on the running
     // instance) without exposing the secret value.
     deeplConfigured: !!process.env.DEEPL_API_KEY,
+    // Live signal (PR #95): did an ACTUAL tiny DeepL translation succeed? This
+    // proves the key is valid + reachable, not merely present. null = probe not
+    // yet run (first few seconds after boot); boolean once warm. The probe is
+    // cached with a TTL so healthz never blocks on the network.
+    deeplWorking: mtService.getDeeplStatus(),
     // Which search legs are configured, which one would answer next, and whether
     // any is circuit-broken. Makes a degraded search visible to a live probe
     // instead of only showing up as empty result sets.
@@ -4128,7 +4134,11 @@ app.post("/api/admin/purge-news-translations", requireAdmin, async (req, res) =>
 app.post("/api/admin/retranslate-kb", requireAdmin, async (req, res) => {
   try {
     const cleared = await kbTranslate.clearKbTranslations();
-    res.json({ success: true, cleared });
+    // Re-translate every KB dataset and report per-dataset success so a broken
+    // key is self-diagnosing (the response shows exactly which datasets failed
+    // to produce Chinese). On success this also warms the cache.
+    const report = await kbTranslate.retranslateAllKb("zh-CN");
+    res.json({ success: true, cleared, ...report });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -4530,6 +4540,11 @@ if (require.main === module) {
     patentsSource.primePatentsFromDb()
       .then(() => {})
       .catch((e) => console.warn("[patents] prime failed; refresh via admin endpoint:", e.message));
+    // DeepL liveness probe (PR #95): warm the cached status shortly after boot
+    // so /healthz reports deeplWorking without waiting for the first ping.
+    mtService.ensureDeeplStatus()
+      .then(() => {})
+      .catch((e) => console.warn("[deepl] liveness probe failed:", e.message));
   }
 }
 
