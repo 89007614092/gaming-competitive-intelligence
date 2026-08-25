@@ -3941,6 +3941,12 @@ app.get("/healthz", (req, res) => {
     callBudget: { used: scanModelCallsThisRun, limit: SCAN_CALLS_PER_RUN_CAP },
     stuckRateLimitedProposals: stuckRateLimited,
     resolver: { attempts: resolverStats.attempts, ok: resolverStats.ok, successRatePct: resolverSuccessRate },
+    // Signals whether the running process can see DEEPL_API_KEY. If false, the
+    // zh-CN KB / news / Q&A paths serve English by design. This lets a live
+    // probe confirm the key is actually present in the deployed environment
+    // (Render env vars require a redeploy to take effect on the running
+    // instance) without exposing the secret value.
+    deeplConfigured: !!process.env.DEEPL_API_KEY,
     // Which search legs are configured, which one would answer next, and whether
     // any is circuit-broken. Makes a degraded search visible to a live probe
     // instead of only showing up as empty result sets.
