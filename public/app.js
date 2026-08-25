@@ -96,8 +96,22 @@ function setupNavigation() {
       if (viewId === "regulatory-timeline") loadRegulatoryTimeline();
       if (viewId === "risks") loadRisks();
       if (viewId === "company-map") loadCompanyMap();
+      if (viewId === "patents") loadPatents();
     });
   });
+
+  // Patents tab (PR #94): company filter (debounced), KB-only toggle, refresh.
+  const patentFilter = document.getElementById("patentCompanyFilter");
+  if (patentFilter) {
+    patentFilter.addEventListener("input", () => {
+      clearTimeout(patentsDebounce);
+      patentsDebounce = setTimeout(fetchAndRenderPatents, 300);
+    });
+  }
+  const patentKbOnly = document.getElementById("patentKbOnly");
+  if (patentKbOnly) patentKbOnly.addEventListener("change", fetchAndRenderPatents);
+  const patentRefresh = document.getElementById("patentsRefresh");
+  if (patentRefresh) patentRefresh.addEventListener("click", fetchAndRenderPatents);
 
   // Refresh news — single explicit control; clears the live "new since you looked" badge.
   document.getElementById("refreshNewsBtn").addEventListener("click", () => {
@@ -555,7 +569,7 @@ const TAB_ORDER_KEY = "tabOrder";
 const DEFAULT_TAB_ORDER = [
   "knowledge-base", "news-view", "summarise-view",
   "spider-web", "tencent-products", "gaming-trends",
-  "current-use-cases", "regulatory-timeline", "risks", "company-map"
+  "current-use-cases", "regulatory-timeline", "risks", "company-map", "patents"
 ];
 
 function getTabOrder() {
@@ -2668,6 +2682,64 @@ document.addEventListener("DOMContentLoaded", () => {
     closeBtn.addEventListener("click", () => { unpinSpiderNode(); hideSpiderDetail(); });
   }
 });
+
+// ===== Patents (PR #94) =====
+let patentsDebounce = null;
+
+async function loadPatents() {
+  const list = document.getElementById("patentsList");
+  if (!list) return;
+  list.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.patents')}</p></div>`;
+  await fetchAndRenderPatents();
+}
+
+async function fetchAndRenderPatents() {
+  const list = document.getElementById("patentsList");
+  if (!list) return;
+  const company = document.getElementById("patentCompanyFilter")?.value.trim() || "";
+  const kbOnly = document.getElementById("patentKbOnly")?.checked || false;
+  const params = new URLSearchParams();
+  if (company) params.set("company", company);
+  if (kbOnly) params.set("kbOnly", "1");
+  try {
+    const res = await fetch(withLang(`/api/patents?${params.toString()}`));
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Failed to load patents");
+    renderPatents(json.patents || []);
+  } catch (err) {
+    list.innerHTML = `<div class="error-state"><p>Failed to load patents: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderPatents(patents) {
+  const list = document.getElementById("patentsList");
+  if (!list) return;
+  if (!patents.length) {
+    list.innerHTML = `<div class="empty-state"><p>${window.t('patents.empty')}</p></div>`;
+    return;
+  }
+  list.innerHTML = patents.map((p) => {
+    const company = escapeHtml(p.company || "Unknown");
+    const kbBadge = p.kbCompany ? `<span class="patent-kb-badge" title="Cross-referenced to your Knowledge Base">In my KB</span>` : "";
+    const title = escapeHtml(p.title || "Untitled patent report");
+    const snippet = escapeHtml(p.snippet || "");
+    const date = escapeHtml(p.publishedDate || "");
+    const link = escapeHtml(p.link || "#");
+    return `
+      <article class="patent-card">
+        <div class="patent-card-head">
+          <span class="patent-company">${company}</span>
+          ${kbBadge}
+        </div>
+        <a class="patent-title" href="${link}" target="_blank" rel="noopener">${title}</a>
+        ${snippet ? `<p class="patent-snippet">${snippet}</p>` : ""}
+        <div class="patent-meta">
+          ${date ? `<span class="patent-date">${date}</span>` : ""}
+          <a class="patent-link" href="${link}" target="_blank" rel="noopener">View report →</a>
+        </div>
+      </article>`;
+  }).join("");
+}
 
 // ===== Company Map =====
 async function loadCompanyMap() {
