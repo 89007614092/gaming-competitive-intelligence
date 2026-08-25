@@ -62,6 +62,7 @@
       'useCases.catalogueTitle': 'Game Catalogue',
       'risks.companyProfiles': 'Company Risk Profiles',
       'risks.categories': 'Risk Categories & Detailed Analysis',
+      'risks.affected': 'Affected',
       'reader.splitTitle': 'Read the article & write a summary',
       'reader.openOriginal': 'Open original ↗',
       'common.visitProductPage': 'Visit product page',
@@ -121,6 +122,7 @@
       'filter.critical': 'Critical',
       'filter.high': 'High',
       'filter.medium': 'Medium',
+      'filter.low': 'Low',
       'news.recentTab': 'Recent News & Updates',
       'news.savedTab': 'Saved Articles',
       'spider.networkTab': 'Competitor Network',
@@ -271,6 +273,7 @@
       'filter.critical': '严重',
       'filter.high': '高',
       'filter.medium': '中',
+      'filter.low': '低',
       'news.recentTab': '最新新闻与更新',
       'news.savedTab': '已保存文章',
       'spider.networkTab': '竞争对手网络',
@@ -284,6 +287,7 @@
       'useCases.catalogueTab': '游戏目录',
       'risks.profilesTab': '公司风险档案',
       'risks.categoriesTab': '风险类别与分析',
+      'risks.affected': '受影响',
 
       // Footer
       'footer.aiTransparency': '本功能使用 AI 模型辅助回答与后台更新。请注意，回答在一定程度上由 AI 生成，因此无法保证信息的准确性。',
@@ -389,6 +393,9 @@
     { sel: '#reviewPanelTitle', key: 'modal.review.title' },
     { sel: '#reviewPanelOverlay .modal-subtitle', key: 'modal.review.subtitle' },
     { sel: '#reviewPanelEmpty p', key: 'review.empty' },
+    // Sidebar "Suggested updates" button keeps its count <span>, so target the
+    // label span only.
+    { sel: '#suggestedUpdatesBtn .i18n-label', key: 'common.suggestedUpdates' },
 
     // Q&A panel (summarise-view) static chrome
     { sel: '#summaryUseModel + span', key: 'common.includeInternet' },
@@ -432,6 +439,12 @@
     { sel: '.timeline-filter-btn[data-filter="UK"]', key: 'filter.uk' },
     { sel: '.timeline-filter-btn[data-filter="Both"]', key: 'filter.both' },
     { sel: '.risks-filter-btn[data-filter="all"]', key: 'filter.all' },
+    // Severity filter buttons carry a <span class="sev-dot"> icon, so we must
+    // target the label span (not the button) to avoid wiping the icon.
+    { sel: '.risks-filter-btn[data-filter="critical"] .i18n-label', key: 'filter.critical' },
+    { sel: '.risks-filter-btn[data-filter="high"] .i18n-label', key: 'filter.high' },
+    { sel: '.risks-filter-btn[data-filter="medium"] .i18n-label', key: 'filter.medium' },
+    { sel: '.timeline-filter-btn[data-filter="Critical Deadline"] .i18n-label', key: 'filter.critical' },
     { sel: '#news-view .sub-tab-btn[data-news-mode="recent"]', key: 'news.recentTab' },
     { sel: '#spider-web .sub-tab-btn[data-target="spiderContainerSection"]', key: 'spider.networkTab' },
     { sel: '#tencent-products .sub-tab-btn[data-target="tencentProductsContainerSection"]', key: 'tencent.productMap' },
