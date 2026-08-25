@@ -32,6 +32,7 @@
       'nav.timeline': 'AI Regulatory Timeline',
       'nav.risks': 'AI Use Risks',
       'nav.companyMap': 'Company Map',
+      'nav.patents': 'Patents',
 
       // View titles
       'view.kb.title': 'Knowledge Base',
@@ -54,6 +55,8 @@
       'view.risks.subtitle': 'Cross-referenced risk analysis for products and companies — drawn from the Knowledge Base, Competitor Web, EU AI Act, UK regulation, and proprietary research documents',
       'view.companyMap.title': 'Company & Studio Map',
       'view.companyMap.subtitle': 'Selected development, research, engine, and regulatory locations directly connected to competitor products and current game-AI use cases across the UK, EU, and North America',
+      'view.patents.title': 'Patents',
+      'view.patents.subtitle': 'Gaming & AI patent reports published by Future of Gaming — pulled from futureofgaming.com. Each report covers a patent applied for by a gaming/AI company.',
 
       // Sections / panels
       'news.recentTitle': 'Recent News & Updates',
@@ -158,6 +161,8 @@
       'loading.webSearch': 'Searching the web for “{query}”…',
       'loading.proposedChanges': 'Loading proposed changes…',
       'loading.retrievingEvidence': 'Retrieving application evidence...',
+      'loading.patents': 'Loading patents…',
+      'patents.empty': 'No patents match your filters.',
 
       // Placeholders
       'ph.newsSearch': 'Search articles, e.g., NetEase AI game engine partnership 2026',
@@ -184,6 +189,7 @@
       'nav.timeline': 'AI 监管时间表',
       'nav.risks': 'AI 使用风险',
       'nav.companyMap': '公司与工作室地图',
+      'nav.patents': '专利',
 
       // View titles
       'view.kb.title': '知识库',
@@ -206,6 +212,8 @@
       'view.risks.subtitle': '针对产品与公司的交叉引用风险分析——来源包括知识库、竞争对手关系网、欧盟《人工智能法案》、英国监管及自有研究文档',
       'view.companyMap.title': '公司与工作室地图',
       'view.companyMap.subtitle': '与竞争对手产品及当前游戏 AI 应用案例直接相关的精选开发、研究、引擎与监管地点，覆盖英国、欧盟与北美',
+      'view.patents.title': '专利',
+      'view.patents.subtitle': '由 Future of Gaming 发布的游戏与 AI 专利报告——抓取自 futureofgaming.com。每份报告涵盖某家游戏 / AI 公司申请的专利。',
 
       // Sections / panels
       'news.recentTitle': '最新新闻与更新',
@@ -310,6 +318,8 @@
       'loading.webSearch': '正在联网搜索“{query}”…',
       'loading.proposedChanges': '正在加载建议更新……',
       'loading.retrievingEvidence': '正在检索应用证据……',
+      'loading.patents': '正在加载专利……',
+      'patents.empty': '没有符合筛选条件的专利。',
 
       // Placeholders
       'ph.newsSearch': '搜索文章，例如：网易 AI 游戏引擎合作 2026',
@@ -343,6 +353,7 @@
     { sel: '.nav-btn[data-view="regulatory-timeline"]', key: 'nav.timeline' },
     { sel: '.nav-btn[data-view="risks"]', key: 'nav.risks' },
     { sel: '.nav-btn[data-view="company-map"]', key: 'nav.companyMap' },
+    { sel: '.nav-btn[data-view="patents"]', key: 'nav.patents' },
 
     // View titles
     { sel: '#knowledge-base .page-header h1', key: 'view.kb.title' },
@@ -367,6 +378,11 @@
     { sel: '#current-use-cases .subtitle', key: 'view.useCases.subtitle' },
     { sel: '#risks .subtitle', key: 'view.risks.subtitle' },
     { sel: '#company-map .subtitle', key: 'view.companyMap.subtitle' },
+    { sel: '#patents .page-header h1', key: 'view.patents.title' },
+    { sel: '#patents .subtitle', key: 'view.patents.subtitle' },
+    { sel: '#patentsRefresh', key: 'patents.refresh' },
+    { sel: '#patentCompanyFilter', key: 'patents.filterPlaceholder', attr: 'placeholder' },
+    { sel: '.patents-kb-toggle .i18n-label', key: 'patents.kbOnly' },
 
     // Sections / panels
     { sel: '#newsSectionTitle', key: 'news.recentTitle' },

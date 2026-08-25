@@ -56,6 +56,9 @@
         <button class="nav-btn" data-view="company-map" draggable="true">
           Company Map
         </button>
+        <button class="nav-btn" data-view="patents" draggable="true">
+          Patents
+        </button>
       </nav>
       <div class="sidebar-footer">
         <button class="suggested-updates-btn" id="suggestedUpdatesBtn" type="button" style="display:none;">
@@ -652,6 +655,21 @@
 
         <div class="map-legend" id="mapLegend"></div>
         <p class="map-hint">Hover to preview each office's function. Click a pin to keep the complete role, relevant products, and source links open.</p>
+      </section>
+
+      <section class="view" id="patents">
+        <header class="page-header">
+          <h1 id="patentsTitle">Patents</h1>
+          <p class="subtitle" id="patentsSubtitle">Gaming &amp; AI patent reports published by Future of Gaming — pulled from futureofgaming.com. Each report covers a patent applied for by a gaming/AI company.</p>
+        </header>
+        <div class="patents-toolbar">
+          <input type="text" id="patentCompanyFilter" class="patent-filter-input" placeholder="Filter by company…" />
+          <label class="patents-kb-toggle"><input type="checkbox" id="patentKbOnly" /> <span class="i18n-label">In my KB only</span></label>
+          <button class="btn btn-sm" id="patentsRefresh" type="button">Refresh feed</button>
+        </div>
+        <div class="patents-list" id="patentsList">
+          <div class="loading-state"><div class="spinner"></div><p>Loading patents…</p></div>
+        </div>
       </section>
     </main>
   </div>
