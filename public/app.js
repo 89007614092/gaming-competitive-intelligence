@@ -995,7 +995,7 @@ async function loadNews(forceRefresh = false) {
     filterDiv.innerHTML = "";
     const allTag = document.createElement("span");
     allTag.className = "filter-tag active";
-    allTag.textContent = "All";
+    allTag.textContent = t("filter.all");
     allTag.addEventListener("click", () => filterNews(null, allTag));
     filterDiv.appendChild(allTag);
 
@@ -3575,7 +3575,7 @@ function renderRegulatoryTimeline(filter) {
         <div class="timeline-date">${e.label}</div>
         <h3>
           ${e.title}
-          <span class="timeline-badge ${badgeClass}">${e.category === "Critical Deadline" ? '<span class="sev-dot sev-critical"></span>Critical' : e.jurisdiction}</span>
+          <span class="timeline-badge ${badgeClass}">${e.category === "Critical Deadline" ? '<span class="sev-dot sev-critical"></span>' + t("filter.critical") : e.jurisdiction}</span>
           <span class="event-cat">${e.category}</span>
         </h3>
         <p>${e.description}</p>
@@ -3620,6 +3620,12 @@ function setupRisksFilters() {
       renderRisks(btn.dataset.filter);
     });
   });
+}
+
+// Severity is a controlled vocabulary (not an entity name), so it belongs in the
+// chrome dictionary. Reuses the existing filter.* keys (en + zh-CN mirrored).
+function severityLabel(sev) {
+  return t("filter." + sev);
 }
 
 // ===== Item 3: expandable count-stat cards (view-only detail lists) =====
@@ -3782,7 +3788,7 @@ function renderRisks(filter = "all") {
     if (filteredRisks.length === 0) return;
 
     const sevClass = cat.severity;
-    const sevLabel = cat.severity.toUpperCase();
+    const sevLabel = severityLabel(cat.severity);
 
     catHtml += `
       <div class="risk-category-card" data-severity="${cat.severity}">
@@ -3803,12 +3809,12 @@ function renderRisks(filter = "all") {
             return `
             <div class="risk-item">
               <div class="risk-item-header">
-                <span class="risk-item-severity ${r.severity}">${r.severity.toUpperCase()}</span>
+                <span class="risk-item-severity ${r.severity}">${severityLabel(r.severity)}</span>
                 <h4 class="risk-item-title">${r.title}</h4>
               </div>
               <p class="risk-item-desc">${r.description}</p>
               <div class="risk-item-meta">
-                ${comps.length > 0 ? `<span class="risk-meta-label">Affected:</span>
+                ${comps.length > 0 ? `<span class="risk-meta-label">${t("risks.affected")}:</span>
                 <span class="risk-affected-companies">${comps.join(", ")}${moreCount > 0 ? ` +${moreCount} more` : ""}</span>` : ""}
               </div>
               ${r.products && r.products.length > 0 ? `
