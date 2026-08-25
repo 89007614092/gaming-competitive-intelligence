@@ -226,6 +226,7 @@ const { createExtractor } = require("./lib/extractor");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
 const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool: datasetsGetDbPool, DATASET_FILE } = require("./lib/datasets");
+const kbTranslate = require("./lib/kbTranslate");
 const sources = require("./lib/sources");
 // Thread D reuses the governed reader pipeline (Jina + Thread F attribution) for
 // ingestion, so inject it once at boot. Function declarations are hoisted, so
@@ -1374,6 +1375,11 @@ app.post("/api/summarise", async (req, res) => {
     }
 
     const evidence = [...appEvidence, ...userEvidence, ...teamEvidence, ...webEvidence];
+    // Ground the answer in Chinese KB/web passages when the UI is Chinese.
+    // The regulatory-focus instruction lives in the (language-independent)
+    // base system prompt, so coupling here never dilutes the EU/UK AI-gaming
+    // scope — it only localises the evidence text. (PR #91)
+    const groundedEvidence = lang === "zh-CN" ? await kbTranslate.translateEvidence(evidence, lang) : evidence;
     let answer;
     let mode;
     let modelError = "";
@@ -1396,7 +1402,7 @@ app.post("/api/summarise", async (req, res) => {
         ]);
       };
       try {
-        answer = await raceModel(generateOpenSourceAnswer(question, evidence, lang));
+        answer = await raceModel(generateOpenSourceAnswer(question, groundedEvidence, lang));
         // B2: deep-fetch full text ONLY for web sources the model actually
         // cited, then re-run once with the enriched evidence. If nothing was
         // cited, no extraction happens at all (the core token-saving fix). On
@@ -1413,8 +1419,9 @@ app.post("/api/summarise", async (req, res) => {
             });
             const byId = new Map(enriched.map(e => [e.id, e]));
             const enrichedEvidence = evidence.map(e => byId.get(e.id) || e);
+            const groundedEnriched = lang === "zh-CN" ? await kbTranslate.translateEvidence(enrichedEvidence, lang) : enrichedEvidence;
             try {
-              answer = await raceModel(generateOpenSourceAnswer(question, enrichedEvidence, lang));
+              answer = await raceModel(generateOpenSourceAnswer(question, groundedEnriched, lang));
             } catch (_) { /* keep the first answer on enrichment failure */ }
           }
         }
@@ -2106,6 +2113,8 @@ app.get("/api/news", async (req, res) => {
   res.set("Cache-Control", "no-store, max-age=0");
 
   try {
+    const newsLang = req.query.lang === "zh-CN" ? "zh-CN" : "en";
+    const savedIds = String(req.query.savedIds || "").split(",").map((s) => s.trim()).filter(Boolean);
     const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
     const key = newsSelectionKey(monitoredCompetitors);
     // An explicit user Refresh always bypasses the serve-cache and pulls live.
@@ -2119,10 +2128,11 @@ app.get("/api/news", async (req, res) => {
     const serveable = cached?.articles?.length && (cached.seed || cachedAgeMs < NEWS_SERVE_TTL_MS);
     if (!forceRefresh && serveable) {
       const isLive = !cached.seed && cachedAgeMs < NEWS_REFRESH_MS;
+      const translatedArticles = await kbTranslate.translateNewsSummaries(cached.articles, newsLang, savedIds);
       res.json({
         success: true,
-        count: cached.articles.length,
-        articles: cached.articles,
+        count: translatedArticles.length,
+        articles: translatedArticles,
         topics: NEWS_TOPICS.map(topic => topic.label),
         monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
         searchedAt: cached.generatedAt,
@@ -2174,10 +2184,11 @@ app.get("/api/news", async (req, res) => {
     // them, and the client fills cards in live as they scroll via the
     // IntersectionObserver -> /api/news/subhead path. This keeps the News tab
     // from ever waiting on article fetches.
+    const translatedArticles = await kbTranslate.translateNewsSummaries(articles, newsLang, savedIds);
     const payload = {
       success: true,
-      count: articles.length,
-      articles,
+      count: translatedArticles.length,
+      articles: translatedArticles,
       topics: NEWS_TOPICS.map(topic => topic.label),
       monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
       searchedAt,
@@ -2198,10 +2209,11 @@ app.get("/api/news", async (req, res) => {
       const monitoredCompetitors = resolveNewsCompetitors(req.query.competitors);
       const fallback = getNewsFallback(monitoredCompetitors);
       if (fallback?.articles?.length) {
+        const translatedArticles = await kbTranslate.translateNewsSummaries(fallback.articles, newsLang, savedIds);
         const payload = {
           success: true,
-          count: fallback.articles.length,
-          articles: fallback.articles,
+          count: translatedArticles.length,
+          articles: translatedArticles,
           topics: NEWS_TOPICS.map(topic => topic.label),
           monitoredCompetitors: monitoredCompetitors.map(company => ({ id: company.id, name: company.name, custom: Boolean(company.custom) })),
           searchedAt: fallback.generatedAt,
@@ -4097,6 +4109,24 @@ function requireEditor(req, res, next) {
   next();
 }
 
+// KB translation-cache maintenance (PR #91). Admin-only.
+app.post("/api/admin/purge-news-translations", requireAdmin, async (req, res) => {
+  try {
+    const purged = await kbTranslate.purgeStaleNewsTranslations();
+    res.json({ success: true, purged });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post("/api/admin/retranslate-kb", requireAdmin, async (req, res) => {
+  try {
+    const cleared = await kbTranslate.clearKbTranslations();
+    res.json({ success: true, cleared });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Direct, full-document edit of a shared dataset (Option B). The request body is
 // the entire dataset JSON; it is upserted into Supabase with editor attribution.
 // Disk JSON stays a fallback seed only, so we do NOT write it here.
@@ -4278,11 +4308,11 @@ app.get("/api/status", (req, res) => {
 });
 
 // GET /api/knowledge — serve the structured knowledge base
-app.get("/api/knowledge", (req, res) => {
+app.get("/api/knowledge", async (req, res) => {
   try {
     const { category, search } = req.query;
 
-    const knowledgeCache = getDataset("knowledge");
+    const knowledgeCache = await kbTranslate.getDatasetTranslated("knowledge", req.query.lang);
     if (!knowledgeCache) return res.status(500).json({ error: "Failed to load knowledge dataset" });
 
     // Curated base only — live/auto-sourced items are NOT injected here; they
@@ -4328,9 +4358,9 @@ app.get("/api/knowledge", (req, res) => {
 });
 
 // GET /api/network — serve competitor network data
-app.get("/api/network", (req, res) => {
+app.get("/api/network", async (req, res) => {
   try {
-    const networkCache = getDataset("network");
+    const networkCache = await kbTranslate.getDatasetTranslated("network", req.query.lang);
     if (!networkCache) return res.status(500).json({ error: "Failed to load network dataset" });
     res.json({ success: true, data: networkCache });
   } catch (err) {
@@ -4339,9 +4369,9 @@ app.get("/api/network", (req, res) => {
 });
 
 // GET /api/tencent-products — Tencent's AI/gaming product portfolio
-app.get("/api/tencent-products", (req, res) => {
+app.get("/api/tencent-products", async (req, res) => {
   try {
-    const tencentProductsCache = getDataset("tencent-products");
+    const tencentProductsCache = await kbTranslate.getDatasetTranslated("tencent-products", req.query.lang);
     if (!tencentProductsCache) return res.status(500).json({ error: "Failed to load tencent-products dataset" });
     res.json({ success: true, data: tencentProductsCache });
   } catch (err) {
@@ -4350,9 +4380,9 @@ app.get("/api/tencent-products", (req, res) => {
 });
 
 // GET /api/current-use-cases — consolidated game-by-game AI implementations
-app.get("/api/current-use-cases", (req, res) => {
+app.get("/api/current-use-cases", async (req, res) => {
   try {
-    const currentUseCasesCache = getDataset("current-use-cases");
+    const currentUseCasesCache = await kbTranslate.getDatasetTranslated("current-use-cases", req.query.lang);
     if (!currentUseCasesCache) return res.status(500).json({ error: "Failed to load current-use-cases dataset" });
     // Curated base only — live/auto-sourced items surface via the review queue.
     const data = {
@@ -4366,9 +4396,9 @@ app.get("/api/current-use-cases", (req, res) => {
 });
 
 // GET /api/gaming-trends — AI gaming trends (9 LLM use cases expanded)
-app.get("/api/gaming-trends", (req, res) => {
+app.get("/api/gaming-trends", async (req, res) => {
   try {
-    const gamingTrendsCache = getDataset("gaming-trends");
+    const gamingTrendsCache = await kbTranslate.getDatasetTranslated("gaming-trends", req.query.lang);
     if (!gamingTrendsCache) return res.status(500).json({ error: "Failed to load gaming-trends dataset" });
     res.json({ success: true, data: gamingTrendsCache });
   } catch (err) {
@@ -4390,9 +4420,9 @@ app.post("/api/gaming-trends/search", async (req, res) => {
 });
 
 // GET /api/regulatory-timeline — EU & UK AI regulatory deadlines
-app.get("/api/regulatory-timeline", (req, res) => {
+app.get("/api/regulatory-timeline", async (req, res) => {
   try {
-    const regulatoryTimelineCache = getDataset("regulatory-timeline");
+    const regulatoryTimelineCache = await kbTranslate.getDatasetTranslated("regulatory-timeline", req.query.lang);
     if (!regulatoryTimelineCache) return res.status(500).json({ error: "Failed to load regulatory-timeline dataset" });
     // Curated base only — live/auto-sourced items surface via the review queue.
     const data = {
@@ -4406,9 +4436,9 @@ app.get("/api/regulatory-timeline", (req, res) => {
 });
 
 // GET /api/risks — cross-referenced risk analysis
-app.get("/api/risks", (req, res) => {
+app.get("/api/risks", async (req, res) => {
   try {
-    const risksCache = getDataset("risks");
+    const risksCache = await kbTranslate.getDatasetTranslated("risks", req.query.lang);
     if (!risksCache) return res.status(500).json({ error: "Failed to load risks dataset" });
     res.json({ success: true, data: risksCache });
   } catch (err) {
@@ -4417,9 +4447,9 @@ app.get("/api/risks", (req, res) => {
 });
 
 // GET /api/company-locations — UK & EU company and regulator locations
-app.get("/api/company-locations", (req, res) => {
+app.get("/api/company-locations", async (req, res) => {
   try {
-    const companyLocationsCache = getDataset("company-locations");
+    const companyLocationsCache = await kbTranslate.getDatasetTranslated("company-locations", req.query.lang);
     if (!companyLocationsCache) return res.status(500).json({ error: "Failed to load company-locations dataset" });
     res.json({ success: true, data: companyLocationsCache });
   } catch (err) {
@@ -4454,6 +4484,11 @@ if (require.main === module) {
     primeProposedFromDb()
       .then(() => {})
       .catch((e) => console.warn("[proposed] DB preload failed; using disk fallback:", e.message));
+    // KB translation cache (PR #91): create tables if absent. Degrades to
+    // English fallback on any error.
+    kbTranslate.ensureKbTranslationsTable()
+      .then(() => {})
+      .catch((e) => console.warn("[kbTranslate] table ensure failed; using English fallback:", e.message));
   }
 }
 

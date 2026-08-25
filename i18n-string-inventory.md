@@ -496,3 +496,15 @@ Lifts the 2026-08-24 deferral of **locale-aware AI output for Q&A answers only**
 - **Trust boundary:** MT service = a NEW data processor (chrome strings carry no PII, low risk); in-language LLM reuses the already-approved Groq boundary.
 - **Out of scope (still deferred):** news `styledSummary` display-time translate; locale-aware model output for cards/Suggested-updates badge/icon-filter buttons (those need their render functions to call `t()`).
 - Full suite: added `test/i18n-prefill.test.cjs` (mtService fidelity + prefill idempotency) and `test/i18n-lang-injection.test.cjs` (zh-CN directive injection).
+
+## PR #91 — KB content auto-translation cache (the "translate once, re-use" ask)
+Takes the deferred news item from #90 and extends it to the **entire shared KB**, addressing "translate the KB once, back it up in Supabase, re-translate only on change":
+
+1. **Hash-gated cache in the existing Postgres/Supabase (no new infra, no RLS — shared data):**
+   - `kb_translations(dataset_id, lang, content_hash, translated_json)` — keyed `(dataset_id, lang)`.
+   - `news_translations(article_id, lang, content_hash, translated_summary, saved, updated_at)`.
+   - `lib/kbTranslate.js` deep-walks KB JSON translating **values only** (keys/ids preserved, code-like leaves skipped), reusing the `lib/mtService.js` `[A#]/[W#]/[S#]/[T#]` + `{var}` fidelity mask. `getDatasetTranslated(name, lang)` returns the cached Chinese JSON when `content_hash` matches; otherwise translates, upserts, returns.
+2. **Endpoints:** the 8 KB GET routes (`/api/knowledge|network|tencent-products|current-use-cases|gaming-trends|regulatory-timeline|risks|company-locations`) accept `?lang=zh-CN`; `/api/news` accepts `?lang=zh-CN&savedIds=…` and translates `styledSummary` (batched, one call per list). Q&A evidence is grounded in Chinese when `lang==='zh-CN'` (the EU/UK AI-gaming-regulation focus stays in the language-independent base system prompt — only evidence text localises).
+3. **Retention:** news summaries are persisted **only** for articles the client flags saved; `POST /api/admin/purge-news-translations` deletes unsaved OR >180-day rows. `POST /api/admin/retranslate-kb` clears the KB cache so the next read re-translates. Self-healing: `ensureKbTranslationsTable()` runs at boot + on first use (mirrors `ensureProposedTable`). `scripts/migrate-kb-translations.js` is the standalone idempotent migration.
+4. **Cost/safety:** whole KB ≈120–150K translatable chars → one-time DeepL Free (500K/mo) cost per change. Missing `DEEPL_API_KEY` or absent DB → Chinese serves English, nothing cached (graceful no-op).
+- `DEEPL_API_KEY` is set in Render (runtime only, never committed). Full suite: added `test/kb-translate.test.cjs` (shouldTranslate rules, JSON deep-walk structure + chip preservation, hash hit/miss/no-key/no-DB, news saved-only persist, evidence grounding).
