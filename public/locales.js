@@ -32,7 +32,6 @@
       'nav.timeline': 'AI Regulatory Timeline',
       'nav.risks': 'AI Use Risks',
       'nav.companyMap': 'Company Map',
-      'nav.patents': 'Patents',
 
       // View titles
       'view.kb.title': 'Knowledge Base',
@@ -55,27 +54,6 @@
       'view.risks.subtitle': 'Cross-referenced risk analysis for products and companies — drawn from the Knowledge Base, Competitor Web, EU AI Act, UK regulation, and proprietary research documents',
       'view.companyMap.title': 'Company & Studio Map',
       'view.companyMap.subtitle': 'Selected development, research, engine, and regulatory locations directly connected to competitor products and current game-AI use cases across the UK, EU, and North America',
-      'view.patents.title': 'Patents',
-      'view.patents.subtitle': 'Search live gaming & AI patents on Google Patents. Build a query by company, patent type, or keyword — every search opens in a new tab, fully human-driven (no automated fetching).',
-
-      // Patents — Google Patents Launch Hub
-      'patents.searchByCompany': 'Search by company',
-      'patents.keywordLabel': 'Keyword',
-      'patents.cpcLabel': 'Patent type (CPC subclass)',
-      'patents.searchBtn': 'Search Google Patents ↗',
-      'patents.hint': 'All searches open in a new tab on patents.google.com. No automated fetching — you choose every query.',
-      'patents.presetsTitle': 'Curated searches',
-      'patents.anyCompany': 'Any company',
-      'patents.cpc.A63F': 'A63F · Video games',
-      'patents.cpc.G06N': 'G06N · AI / ML',
-      'patents.cpc.G06T': 'G06T · Image generation',
-      'patents.cpc.G10L': 'G10L · Speech / audio',
-      'patents.cpc.H04N': 'H04N · Video',
-      'patents.preset.allSector': 'All gaming + AI patents',
-      'patents.preset.videoGames': 'Video game systems (A63F)',
-      'patents.preset.aiMl': 'AI / ML models (G06N)',
-      'patents.preset.genImage': 'Generative image & video (G06T, H04N)',
-      'patents.preset.speech': 'Speech & audio (G10L)',
 
       // Sections / panels
       'news.recentTitle': 'Recent News & Updates',
@@ -180,8 +158,6 @@
       'loading.webSearch': 'Searching the web for “{query}”…',
       'loading.proposedChanges': 'Loading proposed changes…',
       'loading.retrievingEvidence': 'Retrieving application evidence...',
-      'loading.patents': 'Loading patents…',
-      'patents.empty': 'No patents match your filters.',
 
       // Placeholders
       'ph.newsSearch': 'Search articles, e.g., NetEase AI game engine partnership 2026',
@@ -208,7 +184,6 @@
       'nav.timeline': 'AI 监管时间表',
       'nav.risks': 'AI 使用风险',
       'nav.companyMap': '公司与工作室地图',
-      'nav.patents': '专利',
 
       // View titles
       'view.kb.title': '知识库',
@@ -231,27 +206,6 @@
       'view.risks.subtitle': '针对产品与公司的交叉引用风险分析——来源包括知识库、竞争对手关系网、欧盟《人工智能法案》、英国监管及自有研究文档',
       'view.companyMap.title': '公司与工作室地图',
       'view.companyMap.subtitle': '与竞争对手产品及当前游戏 AI 应用案例直接相关的精选开发、研究、引擎与监管地点，覆盖英国、欧盟与北美',
-      'view.patents.title': '专利',
-      'view.patents.subtitle': '在 Google Patents 上检索游戏与 AI 专利。按公司、专利类型或关键词构建查询——每次检索都在新标签页中打开，完全由人工触发（无自动抓取）。',
-
-      // Patents — Google Patents Launch Hub
-      'patents.searchByCompany': '按公司搜索',
-      'patents.keywordLabel': '关键词',
-      'patents.cpcLabel': '专利类型（CPC 子类）',
-      'patents.searchBtn': '在 Google Patents 中搜索 ↗',
-      'patents.hint': '所有检索均在 patents.google.com 的新标签页中打开。无自动抓取——每次查询都由你手动触发。',
-      'patents.presetsTitle': '精选检索',
-      'patents.anyCompany': '任意公司',
-      'patents.cpc.A63F': 'A63F · 电子游戏',
-      'patents.cpc.G06N': 'G06N · 人工智能 / 机器学习',
-      'patents.cpc.G06T': 'G06T · 图像生成',
-      'patents.cpc.G10L': 'G10L · 语音 / 音频',
-      'patents.cpc.H04N': 'H04N · 视频',
-      'patents.preset.allSector': '全部游戏 + AI 专利',
-      'patents.preset.videoGames': '电子游戏系统（A63F）',
-      'patents.preset.aiMl': '人工智能 / 机器学习模型（G06N）',
-      'patents.preset.genImage': '生成式图像与视频（G06T、H04N）',
-      'patents.preset.speech': '语音与音频（G10L）',
 
       // Sections / panels
       'news.recentTitle': '最新新闻与更新',
@@ -356,8 +310,6 @@
       'loading.webSearch': '正在联网搜索“{query}”…',
       'loading.proposedChanges': '正在加载建议更新……',
       'loading.retrievingEvidence': '正在检索应用证据……',
-      'loading.patents': '正在加载专利……',
-      'patents.empty': '没有符合筛选条件的专利。',
 
       // Placeholders
       'ph.newsSearch': '搜索文章，例如：网易 AI 游戏引擎合作 2026',
@@ -391,7 +343,6 @@
     { sel: '.nav-btn[data-view="regulatory-timeline"]', key: 'nav.timeline' },
     { sel: '.nav-btn[data-view="risks"]', key: 'nav.risks' },
     { sel: '.nav-btn[data-view="company-map"]', key: 'nav.companyMap' },
-    { sel: '.nav-btn[data-view="patents"]', key: 'nav.patents' },
 
     // View titles
     { sel: '#knowledge-base .page-header h1', key: 'view.kb.title' },
@@ -416,19 +367,6 @@
     { sel: '#current-use-cases .subtitle', key: 'view.useCases.subtitle' },
     { sel: '#risks .subtitle', key: 'view.risks.subtitle' },
     { sel: '#company-map .subtitle', key: 'view.companyMap.subtitle' },
-    { sel: '#patents .page-header h1', key: 'view.patents.title' },
-    { sel: '#patents .subtitle', key: 'view.patents.subtitle' },
-    { sel: '#patentCompanyLabel', key: 'patents.searchByCompany' },
-    { sel: '#patentKeywordLabel', key: 'patents.keywordLabel' },
-    { sel: '#patentCpcLabel', key: 'patents.cpcLabel' },
-    { sel: '#patentSearchBtn', key: 'patents.searchBtn' },
-    { sel: '#patentHint', key: 'patents.hint' },
-    { sel: '#patentPresetsTitle', key: 'patents.presetsTitle' },
-    { sel: '.cpc-chip[data-cpc="A63F"]', key: 'patents.cpc.A63F' },
-    { sel: '.cpc-chip[data-cpc="G06N"]', key: 'patents.cpc.G06N' },
-    { sel: '.cpc-chip[data-cpc="G06T"]', key: 'patents.cpc.G06T' },
-    { sel: '.cpc-chip[data-cpc="G10L"]', key: 'patents.cpc.G10L' },
-    { sel: '.cpc-chip[data-cpc="H04N"]', key: 'patents.cpc.H04N' },
 
     // Sections / panels
     { sel: '#newsSectionTitle', key: 'news.recentTitle' },
