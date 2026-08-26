@@ -172,6 +172,38 @@ test("sendMagicLink fails closed when the allowed_emails lookup throws", async (
   }
 });
 
+test("sendMagicLink returns a 429 with an actionable message on email rate limit", async () => {
+  auth.__setMockClientForTest({
+    auth: {
+      signInWithOtp: async () => ({
+        error: { message: "Email rate limit exceeded", status: 429 },
+      }),
+    },
+  });
+  const req = { body: { email: "bob@x.com" }, headers: { host: "localhost:3000" } };
+  const res = makeRes();
+  await auth.sendMagicLink(req, res);
+  assert.equal(res.statusCode, 429);
+  assert.equal(res.body.code, "email_rate_limit");
+  assert.match(res.body.error, /2\/hour|custom SMTP|password login/i);
+});
+
+test("sendMagicLink is not subject to the email rate limit on the password path", async () => {
+  let pwErr = null;
+  auth.__setMockClientForTest({
+    auth: {
+      signInWithPassword: async () => ({
+        error: { message: "Email rate limit exceeded", status: 429 },
+      }),
+    },
+  });
+  const req = { body: { email: "bob@x.com", password: "hunter2" }, headers: { host: "localhost:3000" } };
+  const res = makeRes();
+  await auth.sendMagicLink(req, res);
+  // Password login sends no email, so the email-rate-limit message must not apply.
+  assert.notEqual(res.body && res.body.code, "email_rate_limit");
+});
+
 test("authGate: 401 JSON for unauthed API when enabled", async () => {
   auth.__setMockClientForTest({ auth: { getUser: async () => ({ data: { user: null }, error: null }) } });
   const res = makeRes();
