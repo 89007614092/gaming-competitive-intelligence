@@ -83,6 +83,64 @@ test("sendMagicLink never reveals non-allowlisted emails (no enumeration)", asyn
   assert.equal(calls, 0);
 });
 
+test("sendMagicLink uses signInWithPassword when a password is supplied", async () => {
+  let otp = 0, pw = null;
+  auth.__setMockClientForTest({
+    auth: {
+      signInWithPassword: async ({ email, password }) => { pw = { email, password }; return { error: null }; },
+      signInWithOtp: async () => { otp += 1; return { error: null }; },
+    },
+  });
+  const req = { body: { email: "bob@x.com", password: "hunter2" }, headers: { host: "localhost:3000" } };
+  const res = makeRes();
+  await auth.sendMagicLink(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.sent, false);
+  assert.equal(res.body.redirect, "/");
+  assert.equal(pw.email, "bob@x.com");
+  assert.equal(pw.password, "hunter2");
+  assert.equal(otp, 0);
+});
+
+test("sendMagicLink consults the allowed_emails table for emails not in env", async () => {
+  let otpEmail = null;
+  auth.__setMockClientForTest({
+    auth: { signInWithOtp: async ({ email }) => { otpEmail = email; return { error: null }; } },
+  });
+  auth.__setPool({ query: async () => ({ rows: [{ "1": 1 }] }) });
+  try {
+    const req = { body: { email: "dbuser@corp.com" }, headers: { host: "localhost:3000" } };
+    const res = makeRes();
+    await auth.sendMagicLink(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.sent, true);
+    assert.equal(otpEmail, "dbuser@corp.com");
+  } finally {
+    auth.__setPool(null);
+  }
+});
+
+test("sendMagicLink fails closed when the allowed_emails lookup throws", async () => {
+  let calls = 0;
+  auth.__setMockClientForTest({
+    auth: { signInWithOtp: async () => { calls += 1; return { error: null }; } },
+  });
+  auth.__setPool({ query: async () => { throw new Error("db down"); } });
+  try {
+    const req = { body: { email: "dbuser@corp.com" }, headers: { host: "localhost:3000" } };
+    const res = makeRes();
+    await auth.sendMagicLink(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.sent, false);
+    assert.equal(calls, 0); // never reached Supabase
+  } finally {
+    auth.__setPool(null);
+  }
+});
+
 test("authGate: 401 JSON for unauthed API when enabled", async () => {
   auth.__setMockClientForTest({ auth: { getUser: async () => ({ data: { user: null }, error: null }) } });
   const res = makeRes();

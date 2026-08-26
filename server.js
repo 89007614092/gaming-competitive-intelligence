@@ -35,15 +35,15 @@ app.use(auth.authGate);
 
 app.use(express.static(path.join(__dirname, "public")));
 
-// ===== Accounts v1: Supabase Auth magic-link (env-gated; see lib/auth.js) =====
+// ===== Accounts v1: Supabase Auth login (env-gated; see lib/auth.js) =========
 app.get("/login", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
-app.post("/api/auth/magic-link", async (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   try {
     await auth.sendMagicLink(req, res);
   } catch (e) {
-    console.warn("[auth] magic-link handler error:", e.message);
+    console.warn("[auth] login handler error:", e.message);
     res.status(500).json({ error: "internal error" });
   }
 });
@@ -2556,6 +2556,34 @@ async function ensureProposedTable(pool) {
   _proposedTableEnsured = true;
 }
 
+// Accounts v1 allow-list: an optional `allowed_emails` table lets the workspace
+// owner add/remove approved addresses in Supabase (SQL editor or a small UI)
+// without redeploying Render. The env ALLOWED_EMAILS list remains a break-glass
+// bootstrap. Seeded from ALLOWED_EMAILS ONLY when the table is empty, so a row
+// deleted in Supabase stays deleted across reboots (we never re-seed over an
+// existing list).
+let _allowedEmailsEnsured = false;
+async function ensureAllowedEmailsTable(pool) {
+  if (_allowedEmailsEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS allowed_emails (
+      email      TEXT PRIMARY KEY,
+      added_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  const seed = String(process.env.ALLOWED_EMAILS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (seed.length) {
+    await pool.query(
+      `INSERT INTO allowed_emails (email)
+       SELECT * FROM UNNEST($1::text[])
+       WHERE NOT EXISTS (SELECT 1 FROM allowed_emails)`,
+      [seed]
+    );
+  }
+  _allowedEmailsEnsured = true;
+}
+
 async function persistProposedStore(pool) {
   const data = JSON.stringify(proposedChanges);
   await ensureProposedTable(pool);
@@ -4547,6 +4575,12 @@ if (require.main === module) {
   const pool = getDbPool();
   if (pool) {
     attachDb(pool);
+    // Accounts v1: hand the app's pg pool to the auth module so it can read the
+    // optional allowed_emails table, and make sure that table exists.
+    auth.__setPool(pool);
+    ensureAllowedEmailsTable(pool)
+      .then(() => console.log("  allowed_emails table ready (Supabase-managed allow-list)."))
+      .catch((e) => console.warn("[auth] allowed_emails table ensure failed:", e.message));
     primeDatasetCacheFromDb()
       .then(() => console.log("  Datasets cache preloaded from database."))
       .catch((e) => console.warn("[datasets] DB preload failed; using disk fallback:", e.message));
