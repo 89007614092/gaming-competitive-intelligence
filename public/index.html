@@ -660,15 +660,45 @@
       <section class="view" id="patents">
         <header class="page-header">
           <h1 id="patentsTitle">Patents</h1>
-          <p class="subtitle" id="patentsSubtitle">Gaming &amp; AI patent reports published by Future of Gaming — pulled from futureofgaming.com. Each report covers a patent applied for by a gaming/AI company.</p>
+          <p class="subtitle" id="patentsSubtitle">Search live gaming &amp; AI patents on Google Patents. Build a query by company, patent type, or keyword — every search opens in a new tab, fully human-driven (no automated fetching).</p>
         </header>
-        <div class="patents-toolbar">
-          <input type="text" id="patentCompanyFilter" class="patent-filter-input" placeholder="Filter by company…" />
-          <label class="patents-kb-toggle"><input type="checkbox" id="patentKbOnly" /> <span class="i18n-label">In my KB only</span></label>
-          <button class="btn btn-sm" id="patentsRefresh" type="button">Refresh feed</button>
-        </div>
-        <div class="patents-list" id="patentsList">
-          <div class="loading-state"><div class="spinner"></div><p>Loading patents…</p></div>
+
+        <div class="patents-launch">
+          <div class="patents-builder">
+            <div class="builder-row">
+              <div class="builder-field">
+                <label class="builder-label" id="patentCompanyLabel" for="patentCompanySelect">Search by company</label>
+                <select id="patentCompanySelect" class="patent-select">
+                  <option value="">Any company</option>
+                </select>
+              </div>
+              <div class="builder-field">
+                <label class="builder-label" id="patentKeywordLabel" for="patentKeyword">Keyword</label>
+                <input type="text" id="patentKeyword" class="patent-keyword" placeholder="e.g. neural rendering, NPC behaviour…" />
+              </div>
+            </div>
+
+            <div class="builder-field">
+              <span class="builder-label" id="patentCpcLabel">Patent type (CPC subclass)</span>
+              <div class="cpc-chips" id="patentCpcChips">
+                <button type="button" class="cpc-chip" data-cpc="A63F">A63F · Video games</button>
+                <button type="button" class="cpc-chip" data-cpc="G06N">G06N · AI / ML</button>
+                <button type="button" class="cpc-chip" data-cpc="G06T">G06T · Image generation</button>
+                <button type="button" class="cpc-chip" data-cpc="G10L">G10L · Speech / audio</button>
+                <button type="button" class="cpc-chip" data-cpc="H04N">H04N · Video</button>
+              </div>
+            </div>
+
+            <div class="builder-actions">
+              <button type="button" class="btn btn-primary" id="patentSearchBtn">Search Google Patents &#8599;</button>
+              <span class="patents-hint" id="patentHint">All searches open in a new tab on patents.google.com. No automated fetching — you choose every query.</span>
+            </div>
+          </div>
+
+          <div class="patents-presets">
+            <h3 class="patents-presets-title" id="patentPresetsTitle">Curated searches</h3>
+            <div class="preset-grid" id="patentPresetGrid"></div>
+          </div>
         </div>
       </section>
     </main>

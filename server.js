@@ -228,7 +228,6 @@ const retention = require("./lib/retention");
 const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool: datasetsGetDbPool, DATASET_FILE } = require("./lib/datasets");
 const kbTranslate = require("./lib/kbTranslate");
 const mtService = require("./lib/mtService");
-const patentsSource = require("./lib/patentsSource");
 const sources = require("./lib/sources");
 // Thread D reuses the governed reader pipeline (Jina + Thread F attribution) for
 // ingestion, so inject it once at boot. Function declarations are hoisted, so
@@ -4148,17 +4147,6 @@ app.post("/api/admin/retranslate-kb", requireAdmin, async (req, res) => {
   }
 });
 
-// Patents feed maintenance (PR #94). Admin-only. Triggers a pull from
-// futureofgaming.com (homepage recent grid + sitemap catalog) and persists.
-app.post("/api/admin/patents/refresh", requireAdmin, async (req, res) => {
-  try {
-    const count = await patentsSource.refreshPatents();
-    res.json({ success: true, ingested: count });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // Direct, full-document edit of a shared dataset (Option B). The request body is
 // the entire dataset JSON; it is upserted into Supabase with editor attribution.
 // Disk JSON stays a fallback seed only, so we do NOT write it here.
@@ -4489,24 +4477,6 @@ app.get("/api/company-locations", async (req, res) => {
   }
 });
 
-// GET /api/patents — Patents tab feed (futureofgaming.com patent reports).
-// Filters: company (substring), kbOnly (only patents cross-referenced to the
-// KB), since (ISO date, inclusive), limit. Patent reports stay English in v1.
-app.get("/api/patents", async (req, res) => {
-  try {
-    const { company, kbOnly, since, limit } = req.query;
-    const result = await patentsSource.getPatents({
-      company: company || undefined,
-      kbOnly: kbOnly === "1" || kbOnly === "true" || undefined,
-      since: since || undefined,
-      limit: limit ? Number(limit) : undefined,
-    });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 const PORT = config.PORT;
 // Only bind a port when executed directly. Guarded so a test harness can
 // `require("./server")` (registering routes on `app`) without opening a socket.
@@ -4539,11 +4509,6 @@ if (require.main === module) {
     kbTranslate.ensureKbTranslationsTable()
       .then(() => {})
       .catch((e) => console.warn("[kbTranslate] table ensure failed; using English fallback:", e.message));
-    // Patents feed (PR #94): create table + prime from DB. Degrades to empty
-    // until an admin refresh pulls from futureofgaming.com.
-    patentsSource.primePatentsFromDb()
-      .then(() => {})
-      .catch((e) => console.warn("[patents] prime failed; refresh via admin endpoint:", e.message));
     // DeepL liveness probe (PR #95): warm the cached status shortly after boot
     // so /healthz reports deeplWorking without waiting for the first ping.
     mtService.ensureDeeplStatus()

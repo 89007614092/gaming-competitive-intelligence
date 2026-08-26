@@ -92,19 +92,6 @@ function setupNavigation() {
     });
   });
 
-  // Patents tab (PR #94): company filter (debounced), KB-only toggle, refresh.
-  const patentFilter = document.getElementById("patentCompanyFilter");
-  if (patentFilter) {
-    patentFilter.addEventListener("input", () => {
-      clearTimeout(patentsDebounce);
-      patentsDebounce = setTimeout(fetchAndRenderPatents, 300);
-    });
-  }
-  const patentKbOnly = document.getElementById("patentKbOnly");
-  if (patentKbOnly) patentKbOnly.addEventListener("change", fetchAndRenderPatents);
-  const patentRefresh = document.getElementById("patentsRefresh");
-  if (patentRefresh) patentRefresh.addEventListener("click", fetchAndRenderPatents);
-
   // Refresh news — single explicit control; clears the live "new since you looked" badge.
   document.getElementById("refreshNewsBtn").addEventListener("click", () => {
     newsUnseenCount = 0;
@@ -2699,62 +2686,107 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-// ===== Patents (PR #94) =====
-let patentsDebounce = null;
+// ===== Patents — Google Patents Launch Hub (human-driven, no backend) =====
+// This tab is a search builder that deep-links to patents.google.com. It never
+// fetches or parses Google server-side: the user builds a query (company /
+// CPC subclass / keyword) and clicks Search, which opens Google Patents in a
+// new tab. This keeps us clear of Google Patents' automated-access ToS while
+// still "bringing Google Patents into the app" on human demand only.
+const PATENT_SECTOR_CPC = ['A63F', 'G06N', 'G06T', 'G10L', 'H04N'];
+
+const PATENT_PRESETS = [
+  { key: 'patents.preset.allSector',  cpc: ['A63F', 'G06N', 'G06T', 'G10L', 'H04N'] },
+  { key: 'patents.preset.videoGames', cpc: ['A63F'] },
+  { key: 'patents.preset.aiMl',       cpc: ['G06N'] },
+  { key: 'patents.preset.genImage',   cpc: ['G06T', 'H04N'] },
+  { key: 'patents.preset.speech',     cpc: ['G10L'] },
+];
+
+let _patentCompaniesLoaded = false;
 
 async function loadPatents() {
-  const list = document.getElementById("patentsList");
-  if (!list) return;
-  list.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.patents')}</p></div>`;
-  await fetchAndRenderPatents();
+  await populatePatentCompanies();
+  renderPatentPresets();
+  wirePatentBuilder();
 }
 
-async function fetchAndRenderPatents() {
-  const list = document.getElementById("patentsList");
-  if (!list) return;
-  const company = document.getElementById("patentCompanyFilter")?.value.trim() || "";
-  const kbOnly = document.getElementById("patentKbOnly")?.checked || false;
-  const params = new URLSearchParams();
-  if (company) params.set("company", company);
-  if (kbOnly) params.set("kbOnly", "1");
+// Populate the company <select> from the KB company-locations dataset. The
+// dropdown is data, not chrome, so we only fetch once per page load.
+async function populatePatentCompanies() {
+  const sel = document.getElementById('patentCompanySelect');
+  if (!sel || _patentCompaniesLoaded) return;
   try {
-    const res = await fetch(withLang(`/api/patents?${params.toString()}`));
+    const res = await fetch(withLang('/api/company-locations'));
     const json = await res.json();
-    if (!json.success) throw new Error(json.error || "Failed to load patents");
-    renderPatents(json.patents || []);
+    const companies = (json.success && json.data && Array.isArray(json.data.companies))
+      ? json.data.companies.filter((c) => c && c.name).sort((a, b) => a.name.localeCompare(b.name))
+      : [];
+    sel.appendChild(new Option(window.t('patents.anyCompany'), ''));
+    for (const c of companies) sel.appendChild(new Option(c.name, c.name));
+    _patentCompaniesLoaded = true;
   } catch (err) {
-    list.innerHTML = `<div class="error-state"><p>Failed to load patents: ${escapeHtml(err.message)}</p></div>`;
+    // Non-fatal: keep the "Any company" option; user can still search by CPC/keyword.
+    console.warn('[patents] company list unavailable:', err.message);
   }
 }
 
-function renderPatents(patents) {
-  const list = document.getElementById("patentsList");
-  if (!list) return;
-  if (!patents.length) {
-    list.innerHTML = `<div class="empty-state"><p>${window.t('patents.empty')}</p></div>`;
-    return;
+function getSelectedCpc() {
+  return Array.from(document.querySelectorAll('#patentCpcChips .cpc-chip.active'))
+    .map((b) => b.getAttribute('data-cpc'));
+}
+
+// Build a Google Patents `q` expression from the chosen facets.
+function buildGooglePatentsQuery({ company, cpc, keyword } = {}) {
+  const parts = [];
+  if (company && company.trim()) parts.push(`assignee:"${company.trim()}"`);
+  if (cpc && cpc.length) {
+    parts.push(cpc.length === 1 ? `cpc:${cpc[0]}` : `cpc:(${cpc.join(' OR ')})`);
   }
-  list.innerHTML = patents.map((p) => {
-    const company = escapeHtml(p.company || "Unknown");
-    const kbBadge = p.kbCompany ? `<span class="patent-kb-badge" title="Cross-referenced to your Knowledge Base">In my KB</span>` : "";
-    const title = escapeHtml(p.title || "Untitled patent report");
-    const snippet = escapeHtml(p.snippet || "");
-    const date = escapeHtml(p.publishedDate || "");
-    const link = escapeHtml(p.link || "#");
-    return `
-      <article class="patent-card">
-        <div class="patent-card-head">
-          <span class="patent-company">${company}</span>
-          ${kbBadge}
-        </div>
-        <a class="patent-title" href="${link}" target="_blank" rel="noopener">${title}</a>
-        ${snippet ? `<p class="patent-snippet">${snippet}</p>` : ""}
-        <div class="patent-meta">
-          ${date ? `<span class="patent-date">${date}</span>` : ""}
-          <a class="patent-link" href="${link}" target="_blank" rel="noopener">View report →</a>
-        </div>
-      </article>`;
-  }).join("");
+  if (keyword && keyword.trim()) parts.push(keyword.trim());
+  return parts.join(' ').trim();
+}
+
+function openGooglePatents(query) {
+  const url = `https://patents.google.com/?q=${encodeURIComponent(query)}`;
+  window.open(url, '_blank', 'noopener');
+}
+
+function wirePatentBuilder() {
+  document.querySelectorAll('#patentCpcChips .cpc-chip').forEach((chip) => {
+    chip.addEventListener('click', () => chip.classList.toggle('active'));
+  });
+
+  const btn = document.getElementById('patentSearchBtn');
+  const runSearch = () => {
+    const company = document.getElementById('patentCompanySelect')?.value || '';
+    const keyword = document.getElementById('patentKeyword')?.value || '';
+    const cpc = getSelectedCpc();
+    const q = buildGooglePatentsQuery({ company, cpc, keyword });
+    // Nothing selected → fall back to the whole gaming+AI sector set.
+    openGooglePatents(q || buildGooglePatentsQuery({ cpc: PATENT_SECTOR_CPC }));
+  };
+  if (btn) btn.addEventListener('click', runSearch);
+
+  const kw = document.getElementById('patentKeyword');
+  if (kw) kw.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+}
+
+// Curated default searches — rendered as links so they translate with the
+// current language and always open Google Patents in a new tab.
+function renderPatentPresets() {
+  const grid = document.getElementById('patentPresetGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  for (const p of PATENT_PRESETS) {
+    const q = buildGooglePatentsQuery({ cpc: p.cpc });
+    const a = document.createElement('a');
+    a.className = 'preset-card';
+    a.href = `https://patents.google.com/?q=${encodeURIComponent(q)}`;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = window.t(p.key);
+    grid.appendChild(a);
+  }
 }
 
 // ===== Company Map =====
