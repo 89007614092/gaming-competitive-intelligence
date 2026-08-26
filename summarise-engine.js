@@ -476,10 +476,11 @@ function applyLanguageInstruction(systemPrompt, lang = "en") {
   if (lang !== "zh-CN") return systemPrompt;
   return (
     systemPrompt +
-    "\n\nLANGUAGE REQUIREMENT: The user's interface is set to Simplified Chinese (简体中文). " +
-    "Write your ENTIRE answer in Simplified Chinese. You MUST preserve every citation chip " +
-    "([A#], [W#], [S#], [T#]) and every {placeholder} token EXACTLY as written, in its original " +
-    "position — do not translate, transliterate, reorder, or drop them."
+    "\n\n语言要求（LANGUAGE REQUIREMENT · Simplified Chinese）：用户的界面语言为简体中文，请严格遵循以下要求：\n" +
+    "1. 使用简体中文撰写【完整、结构化】的分析，至少包含“详细回答 / 关键点 / 结论”三部分；结论须基于所引证据充分展开，不得仅用一句话草草收尾。\n" +
+    "2. 论述须连贯、专业，不要在中文学术中夹杂英文句式或英文连接词（如 however、therefore、in summary 等）；公司名、产品名、模型名、法规缩写（如 EU AI Act、GDPR）等专有名词可保留英文原文，但整句应为中文。\n" +
+    "3. 必须【逐字保留】每一个引用标记（[A#]、[W#]、[S#]、[T#]）与每一个 {placeholder} 占位符，位置不变，不得翻译、转写、重排或删除。\n" +
+    "4. 紧扣证据作答，引用标记须落在真正支撑该论断的出处上。"
   );
 }
 
@@ -692,6 +693,15 @@ const DOMAIN_CORE_TERMS = new Set([
   "ai", "eu", "uk", "vr", "npc", "npcs", "gpt", "llm", "api",
 ]);
 
+// Extract continuous runs of CJK (Han) characters from a string. Used to make
+// the web-relevance filter language-agnostic: the Latin-only `words()` tokenizer
+// yields nothing for a Chinese query, which previously caused every web result
+// to be scored -1 and dropped (so zh-CN questions never cited [W#] sources).
+// Han runs of length >= 2 are treated as substantive match candidates.
+function cjkRuns(text) {
+  return String(text || "").match(/[㐀-鿿豈-﫿]+/g) || [];
+}
+
 // Relevance-filter raw web-search hits against the question so noisy or
 // off-topic results never reach the answer. Matching is token-based (so
 // "compared" doesn't falsely match "compare"), and a result is only kept if it
@@ -700,12 +710,16 @@ const DOMAIN_CORE_TERMS = new Set([
 // "compare" in the question matched Dictionary.com) unless the question is
 // literally asking for a definition. Returns only on-topic results; callers get
 // a clean, empty web set rather than junk when nothing clears the bar.
+// PR (language fix): the filter now ALSO matches CJK query runs against result
+// text, so a Simplified-Chinese question retains relevant (Chinese-language)
+// web hits instead of being silently emptied by the Latin-only tokenizer.
 function webResultRelevance(question, results, limit = 5) {
   const queryWords = [...new Set(words(question))];
   const querySet = new Set(queryWords);
   const substantive = queryWords.filter(
     w => (w.length >= 4 && !GENERIC_WEAK_TERMS.has(w)) || DOMAIN_CORE_TERMS.has(w)
   );
+  const queryCjkRuns = cjkRuns(question).filter(r => r.length >= 2);
   const questionLower = String(question || "").toLowerCase();
   const wantsDefinition = /\b(define|definition|meaning of|what (is|does|are) .* mean)\b/.test(questionLower);
 
@@ -713,9 +727,12 @@ function webResultRelevance(question, results, limit = 5) {
     .map(item => {
       const titleWords = new Set(words(item.title || ""));
       const textWords = new Set(words(item.description || item.content || item.text || ""));
-      // Must contain at least one substantive query term, otherwise it is
-      // almost certainly off-topic (e.g. a dictionary entry for "compare").
-      const hasSubstantive = substantive.some(w => titleWords.has(w) || textWords.has(w));
+      const blob = `${item.title || ""} ${item.description || item.content || item.text || ""}`;
+      // Must contain at least one substantive query term (Latin) OR a CJK run
+      // shared with the question, otherwise it is almost certainly off-topic.
+      const overlapCjk = queryCjkRuns.filter(run => blob.includes(run));
+      const hasSubstantive =
+        substantive.some(w => titleWords.has(w) || textWords.has(w)) || overlapCjk.length > 0;
       if (!hasSubstantive) return { ...item, _score: -1 };
 
       let score = 0;
@@ -725,7 +742,9 @@ function webResultRelevance(question, results, limit = 5) {
         for (const t of textWords) if (t === w) count += 1;
         score += Math.min(count, 4);
       }
-      const blob = `${item.title || ""} ${item.description || item.content || item.text || ""}`;
+      // CJK overlap contributes a positive score so relevant Chinese-language
+      // results clear the `_score > 0` filter even with no Latin token match.
+      score += overlapCjk.length * 5;
       if (!wantsDefinition && /definition|meaning|synonym|dictionary|merriam|cambridge|oxford|collins|transitive verb|intransitive verb/i.test(blob)) {
         score -= 10;
       }

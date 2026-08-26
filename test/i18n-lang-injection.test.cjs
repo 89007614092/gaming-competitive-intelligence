@@ -44,3 +44,13 @@ test('applyLanguageInstruction does not mutate the input string', () => {
   engine.applyLanguageInstruction(before, 'zh-CN');
   assert.strictEqual(before, BASE);
 });
+
+test('zh-CN directive mandates structure and forbids English code-switching', () => {
+  const out = engine.applyLanguageInstruction(BASE, 'zh-CN');
+  // Structured answer required (detailed answer / key points / conclusion).
+  assert.ok(out.includes('详细回答') && out.includes('结论'));
+  // Explicitly warns against mixing in English connectives (e.g. "however").
+  assert.ok(out.includes('however'));
+  // Language marker retained for the existing token-presence assertion.
+  assert.ok(out.includes('简体中文') || out.includes('Simplified Chinese'));
+});
