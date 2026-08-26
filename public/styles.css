@@ -213,6 +213,14 @@ body {
   cursor: pointer;
   font-size: 0.85rem;
   transition: background 0.15s;
+  /* Bug fix: the logout button injects the full user email into its label
+     (app.js:"Sign out (<email>)"). Without these it overflows the fixed-width
+     sidebar. Truncate with an ellipsis instead of spilling. */
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .settings-btn:hover { background: rgba(255,255,255,0.18); }
