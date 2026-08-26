@@ -42,33 +42,39 @@
     <form id="form">
       <label for="email">Work email</label>
       <input id="email" type="email" autocomplete="email" placeholder="you@company.com" required />
-      <button id="submit" type="submit">Send magic link</button>
+      <label for="password" style="margin-top:12px;">Password <span style="opacity:.7">(optional — leave blank for a magic link)</span></label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+      <button id="submit" type="submit">Sign in</button>
     </form>
     <div id="msg" class="msg"></div>
     <div class="note">
-      We'll email you a one-time sign-in link. Access is restricted to approved
-      addresses — if you don't receive a link, contact the workspace owner.
+      We'll email you a one-time sign-in link, or you can enter your password if
+      one is set. Access is restricted to approved addresses — if you don't
+      receive a link, contact the workspace owner.
     </div>
   </div>
   <script>
     const form = document.getElementById("form");
     const emailEl = document.getElementById("email");
+    const pwEl = document.getElementById("password");
     const submit = document.getElementById("submit");
     const msg = document.getElementById("msg");
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       msg.textContent = ""; msg.className = "msg";
       const email = emailEl.value.trim();
+      const password = pwEl.value;
       if (!email) return;
-      submit.disabled = true; submit.textContent = "Sending…";
+      submit.disabled = true; submit.textContent = "Signing in…";
       try {
-        const r = await fetch("/api/auth/magic-link", {
+        const r = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, password }),
         });
         const data = await r.json().catch(() => ({}));
         if (r.ok && data.ok) {
+          if (data.redirect) { window.location.href = data.redirect; return; }
           msg.className = "msg ok";
           msg.textContent = data.sent
             ? "Check your email for a sign-in link."
@@ -76,13 +82,13 @@
           submit.textContent = "Resend link";
         } else {
           msg.className = "msg err";
-          msg.textContent = data.error || "Could not send the link. Try again.";
-          submit.textContent = "Send magic link";
+          msg.textContent = data.error || "Sign-in failed. Try again.";
+          submit.textContent = "Sign in";
         }
       } catch (err) {
         msg.className = "msg err";
         msg.textContent = "Network error. Try again.";
-        submit.textContent = "Send magic link";
+        submit.textContent = "Sign in";
       } finally {
         submit.disabled = false;
       }
