@@ -71,7 +71,30 @@ document.addEventListener("DOMContentLoaded", () => {
   setupStatExpand();
   setupTeamSources();
   setupNewsTeamSources();
+  setupAuthUI();
 });
+
+// ===== Accounts v1: session-aware sign-out (inert unless AUTH_ENABLED) =====
+function setupAuthUI() {
+  const logoutBtn = document.getElementById("logoutBtn");
+  if (!logoutBtn) return;
+  fetch("/api/auth/session", { headers: { "Accept": "application/json" } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      if (data && data.user && data.user.email) {
+        logoutBtn.style.display = "";
+        logoutBtn.textContent = "Sign out (" + data.user.email + ")";
+      }
+    })
+    .catch(() => { /* auth disabled or no session — leave hidden */ });
+
+  logoutBtn.addEventListener("click", async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (_) { /* ignore */ }
+    window.location.href = "/login";
+  });
+}
 
 // ===== Navigation =====
 function setupNavigation() {
