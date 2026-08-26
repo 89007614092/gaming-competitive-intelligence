@@ -3984,31 +3984,15 @@ function setupReviewPanel() {
     if (readBtn) {
       const card = readBtn.closest(".proposal-card");
       const url = card && card.getAttribute("data-url");
-      if (url) { await openReaderSplit(card, url); return; }
+      // The reader split-view is now the single summary editor: it shows the
+      // article pane when a source URL exists, otherwise a write-only mode.
+      await openReaderSplit(card, url || null);
+      return;
     }
     const integrateBtn = e.target.closest("[data-integrate]");
     const dismissBtn = e.target.closest("[data-dismiss]");
-    const editToggle = e.target.closest("[data-edit-toggle]");
-    if (editToggle) {
-      const card = editToggle.closest(".proposal-card");
-      if (!card) return;
-      const textEl = card.querySelector(".proposal-summary-text");
-      const box = card.querySelector(".proposal-edit-box");
-      if (!box) return;
-      const editing = box.style.display !== "none";
-      if (editing) {
-        if (textEl) textEl.textContent = box.value;
-        box.style.display = "none";
-        if (textEl) textEl.style.display = "";
-        editToggle.textContent = "Edit summary";
-      } else {
-        if (textEl) textEl.style.display = "none";
-        box.style.display = "block";
-        box.focus();
-        editToggle.textContent = "Save";
-      }
-      return;
-    }
+    // The inline "Edit summary" toggle was removed — the reader split-view
+    // (opened by the single [data-read] button above) is now the only editor.
     if (dismissBtn) {
       const id = dismissBtn.dataset.dismiss;
       await authedFetch(`${API_BASE}/proposed-changes/${id}/dismiss`, { method: "POST" }).catch(() => {});
@@ -4111,39 +4095,49 @@ async function openReaderSplit(card, url) {
     if (ti) ti.value = "";
   }
   if (statusEl) { statusEl.style.display = "none"; statusEl.textContent = ""; statusEl.classList.remove("reader-status-error"); }
-  if (origLink) origLink.href = url;
+  if (origLink) origLink.href = url || "#";
   split.dataset.cardId = card.getAttribute("data-id") || "";
   listEl.style.display = "none";
   split.style.display = "flex";
   if (statusEl) { statusEl.textContent = "Resolving source & loading article…"; statusEl.style.display = "block"; }
 
-  // Pass the article title + publisher so the server can resolve news.google.com
-  // redirect URLs to the real publisher (the landing page has no article body).
-  const titleEl = card.querySelector(".proposal-title");
-  const sourceEl = card.querySelector(".proposal-source");
-  const title = titleEl ? titleEl.textContent.trim() : "";
-  const rawDomain = sourceEl ? sourceEl.textContent.trim() : "";
-  // Only pass a real domain (one containing a dot). Publisher names like
-  // "Reuters" are not domains and would make source resolution fail; the
-  // server resolves by article title in that case.
-  const domain = rawDomain.includes(".") ? rawDomain : "";
-  // The human-readable publisher name (e.g. "Reuters") is surfaced as the
-  // reader credit so it never shows the Google News aggregator host.
-  const publisher = rawDomain;
-  const cardId = card.getAttribute("data-id") || "";
-  const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}&publisher=${encodeURIComponent(publisher)}&id=${encodeURIComponent(cardId)}`;
+  if (url) {
+    // Pass the article title + publisher so the server can resolve news.google.com
+    // redirect URLs to the real publisher (the landing page has no article body).
+    const titleEl = card.querySelector(".proposal-title");
+    const sourceEl = card.querySelector(".proposal-source");
+    const title = titleEl ? titleEl.textContent.trim() : "";
+    const rawDomain = sourceEl ? sourceEl.textContent.trim() : "";
+    // Only pass a real domain (one containing a dot). Publisher names like
+    // "Reuters" are not domains and would make source resolution fail; the
+    // server resolves by article title in that case.
+    const domain = rawDomain.includes(".") ? rawDomain : "";
+    // The human-readable publisher name (e.g. "Reuters") is surfaced as the
+    // reader credit so it never shows the Google News aggregator host.
+    const publisher = rawDomain;
+    const cardId = card.getAttribute("data-id") || "";
+    const qs = `url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}&domain=${encodeURIComponent(domain)}&publisher=${encodeURIComponent(publisher)}&id=${encodeURIComponent(cardId)}`;
 
-  split.dataset.readerUrl = url;
-  split.dataset.cardId = cardId;
-  split.dataset.readerPublisher = publisher;
-  const badge = document.getElementById("readerStoreBadge");
-  if (badge) badge.style.display = "none";
-  const licBadge = document.getElementById("readerLicenseBadge");
-  if (licBadge) licBadge.style.display = "none";
-  const attr = document.getElementById("readerAttribution");
-  if (attr) { attr.style.display = "none"; attr.innerHTML = ""; }
+    split.dataset.readerUrl = url;
+    split.dataset.cardId = cardId;
+    split.dataset.readerPublisher = publisher;
+    const badge = document.getElementById("readerStoreBadge");
+    if (badge) badge.style.display = "none";
+    const licBadge = document.getElementById("readerLicenseBadge");
+    if (licBadge) licBadge.style.display = "none";
+    const attr = document.getElementById("readerAttribution");
+    if (attr) { attr.style.display = "none"; attr.innerHTML = ""; }
 
-  await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, manualEl);
+    await loadReaderUrl(`${API_BASE}/reader?${qs}`, articleEl, statusEl, manualEl);
+  } else {
+    // Write-only mode: the entry has no source URL, so there is no article to
+    // fetch. The user can still read any AI summary and write/edit one manually,
+    // or paste the article text below.
+    split.dataset.readerUrl = "";
+    split.dataset.readerPublisher = "";
+    if (articleEl) articleEl.textContent = "No source article is available for this entry. You can write a summary manually, or paste the article text below.";
+    if (statusEl) { statusEl.textContent = "No source URL — write a summary manually."; statusEl.style.display = "block"; }
+  }
   bindReaderManualEntry();
   bindReaderRefresh();
 }
@@ -4505,15 +4499,12 @@ async function renderReviewPanel() {
         // Rebuild: the Proposed Entry IS the single combined text — the model
         // folds the "why it matters" rationale into styledSummary, so there is
         // no separate field to render. Jurisdiction is already shown as a header
-        // pill, so no in-body duplicate.
+        // pill, so no in-body duplicate. The single summary editor is the reader
+        // split-view (opened by the [data-read] button), so no inline box here.
         return `
         <div class="proposal-summary-block">
           <div class="proposal-preview-label">Proposed entry (AI-generated, in app style):</div>
           <div class="proposal-preview proposal-summary-text">${escapeHtml(p.styledSummary)}</div>
-          <div class="proposal-edit-row">
-            <button class="btn btn-sm proposal-edit-toggle" data-edit-toggle type="button">Edit summary</button>
-          </div>
-          <textarea class="proposal-edit-box text-input" rows="4" style="display:none">${escapeHtml(p.styledSummary)}</textarea>
         </div>`;
       }
       // No AI-generated summary and not a transient rate-limit. Two distinct
@@ -4555,7 +4546,7 @@ async function renderReviewPanel() {
         ${matchHtml(p)}
         ${p.updateReason ? `<div class="proposal-reason"><span class="proposal-reason-pill proposal-reason-${reasonKey}">${reasonLabels[reasonKey]}</span> ${escapeHtml(p.updateReason)}</div>` : ""}
         ${previewHtml(p)}
-        ${p.url ? `<button class="btn btn-sm btn-reader" data-read="${p.id}" type="button">Manually Read &amp; Write Summary</button>` : ""}
+        ${(p.url || p.styledSummary) ? `<button class="btn btn-sm btn-reader" data-read="${p.id}" type="button">${window.t("reader.openButton")}</button>` : ""}
         <div class="proposal-controls">
           <label class="proposal-field">Add to:
             <select class="proposal-target text-input">

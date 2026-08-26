@@ -1,0 +1,21 @@
+# Gitleaks configuration for the CI secret scan.
+# Extends the built-in default rules and allowlists known non-secrets so the
+# scan doesn't false-positive on test fixtures, the publishable Supabase anon
+# key, and WorkBuddy local-dev placeholders.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets / test fixtures / placeholders"
+paths = [
+  '''(?i)\.gitleaks\.toml''',
+  '''(?i)^test/''',
+  '''(?i)\.env\.example$''',
+  '''(?i)test.*\.cjs$''',
+]
+regexes = [
+  # Supabase publishable/anon key — safe to expose by design (not a secret).
+  '''(?i)sb_publishable_[A-Za-z0-9_\-]+''',
+  # WorkBuddy local-dev placeholders (e.g. __WB_HTTP_PORT__, __WB_TMAP_SECRET__).
+  '''__WB_[A-Z_]+__''',
+]

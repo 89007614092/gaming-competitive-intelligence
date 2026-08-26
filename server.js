@@ -21,6 +21,28 @@ const config = require("./config");
 const auth = require("./lib/auth");
 
 const app = express();
+// Security headers (helmet). Applied before any routes. CSP starts permissive
+// (allows the single inline TMap config script at the top of index.html plus
+// inline styles) and can be tightened later. Set DISABLE_HELMET=1 to skip
+// (used by local/test boots that don't want the headers).
+if (process.env.DISABLE_HELMET !== "1") {
+  const helmet = require("helmet");
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https://*.supabase.co"],
+        frameSrc: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    frameguard: { action: "deny" },
+  }));
+}
 // CORS is wide-open by default (the app is a public API). Once accounts v1 is
 // enabled, sessions ride HttpOnly cookies, so we disable CORS entirely to stop
 // any cross-origin site from riding the user's session cookie.
@@ -1247,7 +1269,7 @@ const NEWS_EXCLUDED_DOMAINS = [
 // repeat queries and drops latency to ~instant. (Step 2c Fix #2)
 const searchResultsCache = new Map(); // key -> { ts, payload }
 const SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
-app.post("/api/search", async (req, res) => {
+app.post("/api/search", whenAuth(requireAuth), async (req, res) => {
   try {
     const { query, limit = 10 } = req.body;
     if (!query) return res.status(400).json({ error: "Query is required" });
@@ -1296,7 +1318,7 @@ app.get("/api/summarise/status", (req, res) => {
 // model is unavailable). Optional web evidence is included only when the caller
 // sends useInternet=true (the single "Includes Internet Sources" tickbox); raw
 // web hits are dropped server-side if the model can't synthesise them.
-app.post("/api/summarise", async (req, res) => {
+app.post("/api/summarise", whenAuth(requireAuth), async (req, res) => {
   try {
     const question = String(req.body?.question || "").replace(/\s+/g, " ").trim();
     // PR #90 — Hybrid translation: the client sends the active UI language so
@@ -2311,7 +2333,7 @@ app.get("/api/news/custom-competitors", (req, res) => {
   res.json({ customCompetitors: customCompetitors.slice() });
 });
 
-app.post("/api/news/custom-competitors", (req, res) => {
+app.post("/api/news/custom-competitors", whenAuth(requireEditor), (req, res) => {
   const raw = (req.body && req.body.name) || "";
   const name = String(raw).trim().replace(/\s+/g, " ").replace(/,/g, " ").trim();
   if (!name) return res.status(400).json({ error: "name is required" });
@@ -2339,7 +2361,7 @@ app.post("/api/news/custom-competitors", (req, res) => {
   res.json({ custom: true, competitor: entry, customCompetitors: customCompetitors.slice() });
 });
 
-app.delete("/api/news/custom-competitors/:id", (req, res) => {
+app.delete("/api/news/custom-competitors/:id", whenAuth(requireEditor), (req, res) => {
   const id = req.params.id;
   const before = customCompetitors.length;
   customCompetitors = customCompetitors.filter(c => c.id !== id);
@@ -4129,7 +4151,7 @@ app.get("/api/_diag/fetch", requireAdmin, async (req, res) => {
 // Trigger a crawl of the allowlist. The scan can now take a while (it fetches
 // each proposed article to build a real preview), so we run it in the background
 // and return immediately. The client polls /api/proposed-changes separately.
-app.post("/api/source-scan", (req, res) => {
+app.post("/api/source-scan", whenAuth(requireAdminRole), (req, res) => {
   const force = !!(req.body && req.body.force);
   const result = runSourceScan({ force });
   result
@@ -4218,6 +4240,34 @@ function requireEditor(req, res, next) {
     (req.body && (req.body.editorKey || req.body.adminKey));
   if (provided !== key) return res.status(401).json({ error: "Unauthorized" });
   next();
+}
+
+// Run a role-checking middleware ONLY when auth is enabled. When auth is
+// disabled the app stays fully open (legacy behavior) — this wrapper is what
+// keeps endpoint gating from accidentally locking the live app if AUTH_ENABLED
+// is off. The global authGate already rejects unauthenticated callers when auth
+// is on, so these only add a role requirement on top.
+function whenAuth(mw) {
+  return (req, res, next) => {
+    if (!auth.isAuthEnabled()) return next();
+    return mw(req, res, next);
+  };
+}
+
+// Any authenticated user. Used for cost endpoints (LLM/search) so anonymous
+// callers can't burn quota, while every logged-in viewer can still use Q&A.
+function requireAuth(req, res, next) {
+  return req.user ? next() : res.status(401).json({ error: "unauthorized" });
+}
+
+// Strict admin-role gate for destructive/expensive endpoints (e.g. source
+// scan) so editors cannot trigger them. Accepts an admin session OR the
+// ADMIN_API_KEY header; otherwise 403 (fails closed).
+function requireAdminRole(req, res, next) {
+  if (req.user && req.user.role === "admin") return next();
+  const key = process.env.ADMIN_API_KEY;
+  if (key && req.get("x-admin-key") === key) return next();
+  return res.status(403).json({ error: "admin required" });
 }
 
 // KB translation-cache maintenance (PR #91). Admin-only.
@@ -4522,7 +4572,7 @@ app.get("/api/gaming-trends", async (req, res) => {
 });
 
 // POST /api/gaming-trends/search — live web search for a trend, via the chain
-app.post("/api/gaming-trends/search", async (req, res) => {
+app.post("/api/gaming-trends/search", whenAuth(requireAuth), async (req, res) => {
   try {
     const { keywords, limit = 5 } = req.body;
     if (!keywords) return res.status(400).json({ error: "Search keywords required" });
