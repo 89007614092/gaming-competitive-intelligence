@@ -2571,6 +2571,11 @@ async function ensureAllowedEmailsTable(pool) {
       added_at   TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  // v1.2: admin flag. ADD COLUMN IF NOT EXISTS is idempotent, so it never
+  // clobbers an is_admin value Molly set manually in Supabase.
+  await pool.query(
+    `ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`
+  );
   const seed = String(process.env.ALLOWED_EMAILS || "")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (seed.length) {
@@ -2579,6 +2584,17 @@ async function ensureAllowedEmailsTable(pool) {
        SELECT * FROM UNNEST($1::text[])
        WHERE NOT EXISTS (SELECT 1 FROM allowed_emails)`,
       [seed]
+    );
+  }
+  // Promote env-listed admins to is_admin = TRUE. The `AND is_admin = FALSE`
+  // guard means it only ever promotes, never demotes a manually-set TRUE. Once
+  // ADMIN_EMAILS is retired from env this becomes a no-op.
+  const admins = String(process.env.ADMIN_EMAILS || process.env.ALLOWED_EMAILS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (admins.length) {
+    await pool.query(
+      `UPDATE allowed_emails SET is_admin = TRUE WHERE email = ANY($1) AND is_admin = FALSE`,
+      [admins]
     );
   }
   _allowedEmailsEnsured = true;

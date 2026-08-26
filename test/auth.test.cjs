@@ -48,6 +48,37 @@ test("roleForEmail: admin vs user derivation", () => {
   assert.equal(auth.roleForEmail(""), "user");
 });
 
+test("roleForEmailAsync: env-listed admin wins without a pool", async () => {
+  assert.equal(await auth.roleForEmailAsync("alice@x.com"), "admin");
+});
+
+test("roleForEmailAsync: table is_admin = TRUE grants admin", async () => {
+  auth.__setPool({ query: async () => ({ rows: [{ is_admin: true }] }) });
+  try {
+    assert.equal(await auth.roleForEmailAsync("carol@corp.com"), "admin");
+  } finally {
+    auth.__setPool(null);
+  }
+});
+
+test("roleForEmailAsync: table is_admin = FALSE is a plain user", async () => {
+  auth.__setPool({ query: async () => ({ rows: [{ is_admin: false }] }) });
+  try {
+    assert.equal(await auth.roleForEmailAsync("carol@corp.com"), "user");
+  } finally {
+    auth.__setPool(null);
+  }
+});
+
+test("roleForEmailAsync: DB error fails closed (no admin promotion)", async () => {
+  auth.__setPool({ query: async () => { throw new Error("db down"); } });
+  try {
+    assert.equal(await auth.roleForEmailAsync("carol@corp.com"), "user");
+  } finally {
+    auth.__setPool(null);
+  }
+});
+
 test("isAuthEnabled true when env configured", () => {
   assert.equal(auth.isAuthEnabled(), true);
 });
