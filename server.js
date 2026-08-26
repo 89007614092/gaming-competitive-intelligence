@@ -18,11 +18,58 @@ const {
   isScanRateLimited,
 } = summariseEngine;
 const config = require("./config");
+const auth = require("./lib/auth");
 
 const app = express();
-app.use(cors());
+// CORS is wide-open by default (the app is a public API). Once accounts v1 is
+// enabled, sessions ride HttpOnly cookies, so we disable CORS entirely to stop
+// any cross-origin site from riding the user's session cookie.
+app.use(cors(auth.isAuthEnabled() ? { origin: false } : undefined));
 app.use(express.json({ limit: "1mb" }));
+
+// Accounts v1 gate — when AUTH_ENABLED=1 every request (except the auth
+// endpoints, /login, /healthz, and static assets) needs a valid session cookie.
+// Inert when auth is disabled, so the app stays fully public until the
+// Supabase + ALLOWED_EMAILS env vars are configured.
+app.use(auth.authGate);
+
 app.use(express.static(path.join(__dirname, "public")));
+
+// ===== Accounts v1: Supabase Auth magic-link (env-gated; see lib/auth.js) =====
+app.get("/login", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login.html"));
+});
+app.post("/api/auth/magic-link", async (req, res) => {
+  try {
+    await auth.sendMagicLink(req, res);
+  } catch (e) {
+    console.warn("[auth] magic-link handler error:", e.message);
+    res.status(500).json({ error: "internal error" });
+  }
+});
+app.get("/api/auth/callback", async (req, res) => {
+  try {
+    await auth.handleCallback(req, res);
+  } catch (e) {
+    console.warn("[auth] callback handler error:", e.message);
+    res.status(400).send("authentication failed");
+  }
+});
+app.get("/api/auth/session", async (req, res) => {
+  try {
+    await auth.getSession(req, res);
+  } catch (e) {
+    res.status(401).json({ error: "unauthorized" });
+  }
+});
+app.post("/api/auth/logout", async (req, res) => {
+  try {
+    await auth.logout(req, res);
+  } catch (e) {
+    console.warn("[auth] logout handler error:", e.message);
+    res.status(500).json({ error: "internal error" });
+  }
+});
 
 const { execSync } = require("child_process");
 const dns = require("dns/promises");
@@ -4105,6 +4152,8 @@ app.get("/api/proposed-changes", (req, res) => {
 // is set, mutating endpoints require the `X-Admin-Key` header to match, which
 // stops any visitor from rewriting curated datasets or burning the model budget.
 function requireAdmin(req, res, next) {
+  // Accounts v1: a valid admin session satisfies the gate too.
+  if (auth.isAuthEnabled() && req.user && req.user.role === "admin") return next();
   const key = process.env.ADMIN_API_KEY;
   if (!key) return next();
   const provided = req.get("x-admin-key") || (req.body && req.body.adminKey);
@@ -4116,6 +4165,8 @@ function requireAdmin(req, res, next) {
 // EDITOR_API_KEY is absent, so a trusted team needs only one shared secret.
 // FAILS CLOSED: with no key configured it refuses, never silently open.
 function requireEditor(req, res, next) {
+  // Accounts v1: a valid admin/user session satisfies the editor gate too.
+  if (auth.isAuthEnabled() && req.user && (req.user.role === "admin" || req.user.role === "editor")) return next();
   const key = process.env.EDITOR_API_KEY || process.env.ADMIN_API_KEY;
   if (!key) return res.status(500).json({ error: "Editor auth not configured" });
   const provided =
