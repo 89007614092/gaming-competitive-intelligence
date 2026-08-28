@@ -156,6 +156,7 @@ const {
   createEpoClient,
   buildCql,
   buildCacheKey,
+  companyTokens,          // shared with the CQL builder so query + cross-ref agree
   CPC_PRESETS,
   CPC_PRESET_CODES,
   MAX_ITEMS: EPO_MAX_ITEMS,
@@ -4721,27 +4722,6 @@ async function writePatentCache(key, query, payload) {
   }
 }
 
-// Company names carry legal boilerplate that OPS applicant strings never match
-// exactly ("Google DeepMind" vs "DEEPMIND LIMITED"), so exact equality finds
-// almost nothing. These tokens are too generic to be evidence of a match.
-const COMPANY_TOKEN_STOPWORDS = new Set([
-  "limited", "ltd", "inc", "incorporated", "corporation", "corp", "company",
-  "technologies", "technology", "studios", "studio", "group", "holdings",
-  "laboratory", "laboratories", "labs", "entertainment", "interactive",
-  "software", "systems", "international", "europe", "european", "global",
-  "games", "game", "private", "plc", "gmbh", "abb", "kabushiki", "kaisha",
-  "digital", "media", "networks", "network",
-]);
-
-// Distinctive tokens of a company name, used for substring matching.
-function companyTokens(name) {
-  return String(name || "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N} ]/gu, " ")
-    .split(/\s+/)
-    .filter(t => t.length >= 4 && !COMPANY_TOKEN_STOPWORDS.has(t));
-}
-
 // Cross-reference one patent against the KB company list. A company matches when
 // ANY of its distinctive tokens appears in an applicant or inventor name, so
 // "Google DeepMind" still matches an OPS applicant of "DeepMind Limited".
@@ -4819,7 +4799,22 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
     const cached = await readPatentCache(cacheKey);
     if (cached) return res.json({ ...cached, cached: true });
 
-    const { patents, totalAvailable, cql } = await epoClient.search(query, { limit: query.range });
+    const { patents, totalAvailable, diagnostics, cql } = await epoClient.search(query, { limit: query.range });
+
+    // A parse failure must NEVER look like "no patents found". If OPS reported
+    // hits but we could not turn them into cards, that is our bug — surface it
+    // as a 502 with the raw counts instead of an empty 200 the user would read
+    // as "this company has no patents".
+    if (diagnostics && diagnostics.totalResultCount > 0 && patents.length === 0) {
+      return res.status(502).json({
+        success: false,
+        code: "epo_parse_failed",
+        error: `EPO OPS reported ${diagnostics.totalResultCount} matching publications but none could be parsed.`,
+        cql,
+        diagnostics,
+      });
+    }
+
     // Abstracts are a separate OPS call per hit, so they are opt-out and capped
     // inside the client (MAX_ABSTRACT_LOOKUPS).
     if (query.abstracts) await epoClient.enrichWithAbstracts(patents);
@@ -4845,6 +4840,9 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
       cached: false,
       fetchedAt: new Date().toISOString(),
       attribution: "Data: EPO OPS",
+      // Exposed so an empty result is explainable on screen: is it a genuinely
+      // empty search (totalResultCount 0) or did we fail to read OPS's answer?
+      diagnostics,
     };
     await writePatentCache(cacheKey, query, payload);
     res.json(payload);

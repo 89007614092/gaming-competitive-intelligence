@@ -212,11 +212,19 @@ test("/api/patents normalises OPS results into the card shape the UI renders", a
     assert.ok(body.fetchedAt, "the client can show data freshness");
 
     // The CQL actually sent to OPS is echoed back for debugging/transparency.
-    assert.match(body.cql, /pa all "DeepMind"/);
-    assert.match(body.cql, /cpc all "A63F" or cpc all "G06N"/);
+    // Applicant search must be token + truncation, never the all-words form.
+    assert.match(body.cql, /pa = "DeepMind\*"/);
+    assert.match(body.cql, /\(cpc = "A63F" OR cpc = "G06N"\)/);
+    assert.ok(!/pa all/.test(body.cql), "must never emit an all-words applicant clause");
     // The query is echoed so the UI can restore its filter state.
     assert.strictEqual(body.query.company, "DeepMind");
     assert.deepStrictEqual(body.query.cpc, ["A63F", "G06N"]);
+
+    // Diagnostics let the UI tell "no matches" apart from "we couldn't read it".
+    assert.strictEqual(body.diagnostics.recognised, true);
+    assert.strictEqual(body.diagnostics.docsSeen, 2);
+    assert.strictEqual(body.diagnostics.docsKept, 2);
+    assert.strictEqual(body.diagnostics.totalResultCount, 348);
 
     // sort=date -> newest first (OPS has no dependable sort parameter).
     assert.deepStrictEqual(body.patents.map(p => p.publicationDate), ["2025-03-12", "2024-01-15"]);
@@ -325,6 +333,42 @@ test("an unexpected OPS failure surfaces as 502, not a 200 with no results", asy
     assert.strictEqual(status, 502, "an upstream fault must never look like 'no patents found'");
     assert.strictEqual(body.success, false);
     assert.strictEqual(body.code, "epo_error");
+  } finally {
+    restore();
+  }
+});
+
+test("OPS reporting hits we cannot parse is a 502, not an empty 200", async () => {
+  // The failure mode this guards: OPS says "12 matches" but the documents carry
+  // no resolvable publication number. Returning 200 + [] here would make the UI
+  // tell the user "this company has no patents", which is simply false.
+  const restore = stubFetch(async (url) => {
+    const u = String(url);
+    if (u.includes(TOKEN)) return jsonResp({ access_token: "tok", expires_in: 1199 });
+    if (u.includes(SEARCH)) {
+      return jsonResp({
+        "ops:world-patent-data": {
+          "ops:search-result": {
+            "@total-result-count": "12",
+            "exchange-documents": {
+              "exchange-document": [{ "bibliographic-data": { "invention-title": "no ids here" } }],
+            },
+          },
+        },
+      });
+    }
+    throw new Error(`unrouted: ${u}`);
+  });
+  try {
+    const { status, body } = await request(server, "/api/patents?company=DeepMind");
+    assert.strictEqual(status, 502);
+    assert.strictEqual(body.success, false);
+    assert.strictEqual(body.code, "epo_parse_failed");
+    assert.match(body.error, /12 matching publications/);
+    assert.strictEqual(body.diagnostics.totalResultCount, 12);
+    assert.strictEqual(body.diagnostics.docsSeen, 1);
+    assert.strictEqual(body.diagnostics.docsKept, 0);
+    assert.ok(body.cql, "the CQL is included so the failing query is visible");
   } finally {
     restore();
   }
