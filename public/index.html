@@ -56,6 +56,9 @@
         <button class="nav-btn" data-view="company-map" draggable="true">
           Company Map
         </button>
+        <button class="nav-btn" data-view="patents" draggable="true">
+          Patents
+        </button>
       </nav>
       <div class="sidebar-footer">
         <button class="suggested-updates-btn" id="suggestedUpdatesBtn" type="button" style="display:none;">
@@ -653,6 +656,48 @@
 
         <div class="map-legend" id="mapLegend"></div>
         <p class="map-hint">Hover to preview each office's function. Click a pin to keep the complete role, relevant products, and source links open.</p>
+      </section>
+
+      <!-- ===== PATENTS (live EPO OPS) =====
+           Data comes from the European Patent Office's official OPS API, which
+           is the only compliant source available to us (USPTO/PatentsView
+           requires a US-citizen identity; Google Patents forbids automated
+           access). The attribution line below and the Espacenet deep-links are
+           a condition of using this data — do not replace them with Google
+           Patents links. -->
+      <section class="view" id="patents">
+        <header class="page-header">
+          <h1>Patents</h1>
+          <p class="subtitle">Live patent filings from the European Patent Office, cross-referenced to the companies tracked in this app — searchable by applicant, keyword and AI/gaming classification</p>
+        </header>
+
+        <!-- Search builder -->
+        <div class="patent-controls" id="patentControls">
+          <select id="patentCompany" class="select-input patent-company-select" aria-label="Filter by company">
+            <option value="">All companies</option>
+          </select>
+          <input type="search" id="patentKeyword" class="text-input patent-keyword" placeholder="Keyword in title or abstract (e.g. neural, procedural)..." />
+          <select id="patentSort" class="select-input patent-sort-select" aria-label="Sort results">
+            <option value="date">Newest first</option>
+            <option value="relevance">Relevance</option>
+          </select>
+          <button class="btn btn-primary" id="patentSearchBtn" type="button">Search Patents</button>
+        </div>
+
+        <!-- CPC classification chips (the AI x gaming set) -->
+        <div class="patent-cpc-row" id="patentCpcRow" role="group" aria-label="Classification filters"></div>
+
+        <!-- Configuration / freshness note -->
+        <p class="patent-config-note" id="patentConfigNote"></p>
+
+        <!-- Results -->
+        <div class="patent-results" id="patentResults">
+          <div class="empty-state">
+            <p>Choose a company or keyword, then search.</p>
+          </div>
+        </div>
+
+        <p class="patents-source-note" id="patentAttribution">Data: EPO OPS</p>
       </section>
 
     </main>

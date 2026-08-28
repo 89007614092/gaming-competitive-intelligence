@@ -36,6 +36,21 @@ module.exports = {
   // unset, Brave is simply skipped and the chain falls through to Jina.
   BRAVE_API_KEY: process.env.BRAVE_API_KEY || "",
 
+  // --- EPO OPS (live patents, lib/epoOps.js) ---
+  // The European Patent Office's official REST API. This is the only compliant
+  // path we have for live patent data: USPTO/PatentsView needs a US-citizen
+  // identity, and Google Patents forbids automated access. Register an app at
+  // https://developers.epo.org to get the Consumer Key + Secret.
+  // BOTH must be set, or the client stays inert and GET /api/patents returns a
+  // clean "not configured" error rather than failing or returning empty results.
+  EPO_OPS_KEY: process.env.EPO_OPS_KEY || "",
+  EPO_OPS_SECRET: process.env.EPO_OPS_SECRET || "",
+  // How long a patents query result stays cached in Postgres. OPS enforces a
+  // Fair Use quota (per-hour AND per-week), so this cache is the primary quota
+  // guard, not merely a latency optimisation. Patent publications are weekly,
+  // so 12h is a safe default.
+  PATENT_CACHE_TTL_MS: num(process.env.PATENT_CACHE_TTL_MS, 12 * 60 * 60 * 1000),
+
   // --- Scan-lane pacing / quota (free-tier OpenRouter, ~50 req/day ceiling) ---
   // Min spacing between two scan model calls. This is a PROCESS-GLOBAL slot
   // (see paceScanModelCall), NOT per-scan: 4s => 15 calls/min, safely under the

@@ -5001,3 +5001,149 @@ body {
 .team-source-delete { background: none; border: 1px solid var(--border, #e3e6ec); border-radius: 6px; cursor: pointer; font-size: 12px; line-height: 1; padding: 4px 7px; color: var(--text-muted); margin-left: 4px; }
 .team-source-delete:hover { color: #c92a2a; border-color: #c92a2a; }
 .team-sources-empty { color: var(--text-muted); font-size: 13px; }
+
+/* ==========================================================================
+   Patents view (live EPO OPS)
+   --------------------------------------------------------------------------
+   Class names are namespaced `patent-result-*` / `patent-cpc-*` because the
+   gaming-trends "Game Technology Patents" landscape already owns `.patent-card`
+   and `.patent-grid`. Reusing those two would collide.
+   ========================================================================== */
+
+/* Search builder */
+.patent-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.patent-controls .patent-company-select { flex: 0 1 240px; min-width: 180px; }
+.patent-controls .patent-keyword { flex: 1 1 280px; min-width: 200px; }
+.patent-controls .patent-sort-select { flex: 0 0 150px; }
+
+/* CPC classification chips */
+.patent-cpc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.patent-cpc-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border, #e2e5ee);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text-muted, #6b7280);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.patent-cpc-chip:hover { border-color: var(--primary, #2563eb); color: var(--primary, #2563eb); }
+.patent-cpc-chip.active {
+  background: var(--primary-light, #dbeafe);
+  border-color: var(--primary, #2563eb);
+  color: var(--primary-hover, #1d4ed8);
+}
+.patent-cpc-code { font-weight: 700; letter-spacing: 0.02em; }
+.patent-cpc-label { font-size: 11px; opacity: 0.85; }
+
+/* Configuration / freshness note */
+.patent-config-note {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  margin: 0 0 16px;
+}
+.patent-config-note.warn {
+  color: var(--warning, #d97706);
+  background: var(--warning-light, #fef3c7);
+  border: 1px solid var(--warning, #d97706);
+  border-radius: var(--radius-sm, 6px);
+  padding: 8px 10px;
+}
+
+/* Results header */
+.patent-results { margin-top: 4px; }
+.patent-results-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.patent-results-count { font-size: 13px; font-weight: 600; }
+.patent-cache-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-light, #d1fae5);
+  color: var(--accent, #059669);
+}
+
+/* Result cards */
+.patent-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+.patent-result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e2e5ee);
+  border-radius: var(--radius, 8px);
+  box-shadow: var(--shadow, 0 1px 3px rgba(0, 0, 0, 0.06));
+}
+.patent-result-card:hover { border-color: var(--primary, #2563eb); }
+.patent-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.patent-result-card h4 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+.patent-applicant {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary, #2563eb);
+}
+.patent-abstract {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted, #6b7280);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.patent-date { font-size: 12px; color: var(--text-muted, #6b7280); white-space: nowrap; }
+.patent-espacenet-link {
+  margin-top: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #059669);
+  text-decoration: none;
+}
+.patent-espacenet-link:hover { text-decoration: underline; }
+
+@media (max-width: 640px) {
+  .patent-controls { flex-direction: column; align-items: stretch; }
+  .patent-controls .patent-company-select,
+  .patent-controls .patent-keyword,
+  .patent-controls .patent-sort-select { flex: 1 1 auto; }
+}

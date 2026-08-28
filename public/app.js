@@ -145,6 +145,7 @@ function reloadView(viewId) {
   if (viewId === "regulatory-timeline") loadRegulatoryTimeline();
   if (viewId === "risks")            loadRisks();   // cache guard → re-renders via renderRisks()
   if (viewId === "company-map")      loadCompanyMap();
+  if (viewId === "patents")          loadPatents();
 }
 
 // When the language toggle fires, re-render the currently active data view in
@@ -594,7 +595,7 @@ const TAB_ORDER_KEY = "tabOrder";
 const DEFAULT_TAB_ORDER = [
   "knowledge-base", "news-view", "summarise-view",
   "spider-web", "tencent-products", "gaming-trends",
-  "current-use-cases", "regulatory-timeline", "risks", "company-map"
+  "current-use-cases", "regulatory-timeline", "risks", "company-map", "patents"
 ];
 
 function getTabOrder() {
@@ -2759,6 +2760,184 @@ async function loadCompanyMap() {
   } catch (err) {
     container.innerHTML = `<div class="error-state"><p>Failed to load map: ${err.message}</p></div>`;
   }
+}
+
+// ===========================================================================
+// Patents — live EPO OPS search
+// ---------------------------------------------------------------------------
+// Patent data comes from the European Patent Office's official OPS REST API,
+// the only compliant source available (USPTO needs a US-citizen identity;
+// Google Patents forbids automated access). Consequences that shape this code:
+//   * Every card deep-links to ESPACENET, never Google Patents, and the
+//     "Data: EPO OPS" attribution stays visible. Both are conditions of use.
+//   * OPS enforces an hourly + weekly Fair Use quota, so the server caches
+//     every query for 12h. The UI surfaces the `cached` flag so a stale-looking
+//     result is understandable rather than suspicious.
+// ===========================================================================
+let patentOptions = null;             // { companies, cpc, configured }
+let patentResults = null;             // last successful search payload
+let patentUiReady = false;            // guards listener registration
+const patentSelectedCpc = new Set();  // active CPC classification chips
+
+async function loadPatents() {
+  const results = document.getElementById("patentResults");
+  if (!results) return;
+
+  // Fetch the filter vocabulary once; afterwards this just re-renders (which is
+  // what the language toggle needs).
+  if (!patentOptions) {
+    results.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.patents')}</p></div>`;
+    try {
+      const res = await fetch(withLang(`${API_BASE}/patents/company-options`));
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed to load patent filters");
+      patentOptions = json;
+    } catch (err) {
+      results.innerHTML = `<div class="error-state"><p>${escapeHtml(err.message)}</p></div>`;
+      return;
+    }
+    results.innerHTML = `<div class="empty-state"><p>${window.t('patents.prompt')}</p></div>`;
+  }
+
+  populatePatentCompanies(patentOptions.companies || []);
+  renderPatentCpcChips();
+  renderPatentConfigNote();
+  setupPatents();
+  // Re-render the existing result set, e.g. after a language change.
+  if (patentResults) renderPatents(patentResults);
+}
+
+function populatePatentCompanies(companies) {
+  const sel = document.getElementById("patentCompany");
+  if (!sel) return;
+  const current = sel.value; // preserve the user's choice across re-renders
+  sel.innerHTML = `<option value="">${window.t('patents.allCompanies')}</option>`
+    + companies.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+  if (current) sel.value = current;
+}
+
+function renderPatentCpcChips() {
+  const row = document.getElementById("patentCpcRow");
+  if (!row || !patentOptions) return;
+  row.innerHTML = (patentOptions.cpc || []).map(c => `
+    <button type="button"
+            class="patent-cpc-chip${patentSelectedCpc.has(c.code) ? " active" : ""}"
+            data-cpc="${escapeHtml(c.code)}"
+            aria-pressed="${patentSelectedCpc.has(c.code)}"
+            title="${escapeHtml(c.label)}">
+      <span class="patent-cpc-code">${escapeHtml(c.code)}</span>
+      <span class="patent-cpc-label">${escapeHtml(c.label)}</span>
+    </button>`).join("");
+}
+
+function renderPatentConfigNote() {
+  const note = document.getElementById("patentConfigNote");
+  if (!note || !patentOptions) return;
+  note.textContent = patentOptions.configured
+    ? window.t('patents.liveNote')
+    : window.t('patents.notConfiguredNote');
+  note.classList.toggle("warn", !patentOptions.configured);
+}
+
+function setupPatents() {
+  if (patentUiReady) return;
+  const btn = document.getElementById("patentSearchBtn");
+  if (!btn) return;
+  btn.addEventListener("click", runPatentSearch);
+  const keyword = document.getElementById("patentKeyword");
+  if (keyword) keyword.addEventListener("keydown", (e) => { if (e.key === "Enter") runPatentSearch(); });
+
+  // CPC chips are toggles — click anywhere in the row's chip flips it.
+  document.getElementById("patentCpcRow")?.addEventListener("click", (e) => {
+    const chip = e.target.closest(".patent-cpc-chip");
+    if (!chip) return;
+    const code = chip.dataset.cpc;
+    if (patentSelectedCpc.has(code)) patentSelectedCpc.delete(code);
+    else patentSelectedCpc.add(code);
+    const on = patentSelectedCpc.has(code);
+    chip.classList.toggle("active", on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+  patentUiReady = true;
+}
+
+async function runPatentSearch() {
+  const results = document.getElementById("patentResults");
+  if (!results) return;
+
+  const company = (document.getElementById("patentCompany") || {}).value || "";
+  const keyword = String((document.getElementById("patentKeyword") || {}).value || "").trim();
+  const sort = (document.getElementById("patentSort") || {}).value || "date";
+  const cpc = [...patentSelectedCpc];
+
+  // Mirrors the server's 400: an empty query would otherwise burn an OPS call.
+  if (!company && !keyword && !cpc.length) {
+    results.innerHTML = `<div class="empty-state"><p>${window.t('patents.needFilter')}</p></div>`;
+    return;
+  }
+
+  results.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>${window.t('loading.patentsSearch')}</p></div>`;
+  const btn = document.getElementById("patentSearchBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const params = new URLSearchParams();
+    if (company) params.set("company", company);
+    if (keyword) params.set("keyword", keyword);
+    if (cpc.length) params.set("cpc", cpc.join(","));
+    params.set("sort", sort);
+    params.set("range", "25");
+
+    const res = await fetch(`${API_BASE}/patents?${params.toString()}`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Patent search failed");
+    patentResults = json;
+    renderPatents(json);
+  } catch (err) {
+    results.innerHTML = `<div class="error-state"><p>${escapeHtml(err.message)}</p></div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderPatents(data) {
+  const results = document.getElementById("patentResults");
+  if (!results) return;
+  const patents = data.patents || [];
+  if (!patents.length) {
+    results.innerHTML = `<div class="empty-state"><p>${window.t('patents.noResults')}</p></div>`;
+    return;
+  }
+  const total = data.totalAvailable ?? patents.length;
+  results.innerHTML = `
+    <div class="patent-results-header">
+      <span class="patents-eyebrow">${window.t('patents.resultsLabel')}</span>
+      <span class="patent-results-count">${window.t('patents.showing', { count: patents.length, total })}</span>
+      ${data.cached ? `<span class="patent-cache-badge">${window.t('patents.cached')}</span>` : ""}
+    </div>
+    <div class="patent-card-grid">
+      ${patents.map(patentCardHtml).join("")}
+    </div>`;
+}
+
+function patentCardHtml(p) {
+  const applicants = (p.applicants || []).join(", ");
+  const cpc = (p.classifications || []).slice(0, 4)
+    .map(c => `<span>${escapeHtml(c)}</span>`).join("");
+  const abstract = p.abstract
+    ? `<p class="patent-abstract">${escapeHtml(p.abstract)}</p>`
+    : "";
+  return `
+    <article class="patent-result-card">
+      <div class="patent-result-head">
+        <a class="patent-number" href="${safeHref(p.espacenetUrl)}" target="_blank" rel="noopener">${escapeHtml(p.id)}</a>
+        <span class="patent-date">${escapeHtml(p.publicationDate || "")}</span>
+      </div>
+      <h4>${escapeHtml(p.title)}</h4>
+      ${applicants ? `<p class="patent-applicant">${escapeHtml(applicants)}</p>` : ""}
+      ${abstract}
+      ${cpc ? `<div class="patent-trend-tags">${cpc}</div>` : ""}
+      <a class="patent-espacenet-link" href="${safeHref(p.espacenetUrl)}" target="_blank" rel="noopener">${window.t('patents.viewOnEspacenet')} &rarr;</a>
+    </article>`;
 }
 
 function renderCompanyMap(companies, regions) {

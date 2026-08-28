@@ -139,6 +139,32 @@ async function searchWeb(query, limit = 10) {
 }
 const searchWebDetailed = (query, limit = 10) => searchProvider.searchWeb(query, { limit });
 
+// ===== Patents — EPO OPS (live, compliant patent data) =====
+// See docs/patents-epo-ops-scope.md for the full rationale. In short: this is
+// the only patent source we can use compliantly — USPTO/PatentsView needs a
+// US-citizen identity, and Google Patents forbids automated access and blocks
+// iframing. EPO OPS is the European Patent Office's own REST API.
+//
+// The client is ENV-GATED: without EPO_OPS_KEY + EPO_OPS_SECRET it stays inert
+// and /api/patents returns a clean "not configured" error, so local dev, CI and
+// any environment lacking the credentials are unaffected.
+//
+// Unlike the search chain there is NO fallback provider here, because there is
+// no compliant second patent API — a failure surfaces honestly instead of
+// silently degrading.
+const {
+  createEpoClient,
+  buildCql,
+  buildCacheKey,
+  CPC_PRESETS,
+  CPC_PRESET_CODES,
+  MAX_ITEMS: EPO_MAX_ITEMS,
+} = require("./lib/epoOps");
+const epoClient = createEpoClient({
+  config,
+  log: (msg) => console.warn(msg),
+});
+
 // Fetch the full article body for a source URL. Reuses scrapeUrl (which
 // resolves news.google.com redirect URLs to the real publisher and returns
 // { text }). We clean + cap to 4000 chars so enriched evidence stays bounded.
@@ -4074,6 +4100,11 @@ app.get("/healthz", (req, res) => {
     // any is circuit-broken. Makes a degraded search visible to a live probe
     // instead of only showing up as empty result sets.
     search: searchProvider.searchProviderStatus(),
+    // EPO OPS (patents): whether the credentials are visible to the running
+    // process, and whether the client is currently throttled or circuit-broken.
+    // Makes a quota lockout diagnosable from a live probe instead of only
+    // showing up as an empty Patents view. Never exposes the key itself.
+    patents: epoClient.status(),
   });
 });
 
@@ -4622,6 +4653,212 @@ app.get("/api/company-locations", async (req, res) => {
   }
 });
 
+// =============================================================================
+// Patents — EPO OPS (live, compliant patent data)
+// -----------------------------------------------------------------------------
+// Two rules govern this whole block (docs/patents-epo-ops-scope.md):
+//   1. QUOTA. OPS enforces a Fair Use allowance per hour AND per week. Every
+//      query is cached durably in Postgres first, so a repeated search costs
+//      zero quota and survives Render's cold starts.
+//   2. ATTRIBUTION. Results must credit the EPO and deep-link to Espacenet
+//      (EPO's own viewer) — never Google Patents, which blocks iframing.
+// =============================================================================
+
+// Self-healing, same convention as proposed_changes / allowed_emails: the table
+// is created on first DB contact so no manual migration step is needed.
+let _patentsCacheEnsured = false;
+async function ensurePatentsCacheTable(pool) {
+  if (_patentsCacheEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS patents_cache (
+      cache_key   TEXT PRIMARY KEY,
+      query       JSONB NOT NULL DEFAULT '{}'::jsonb,
+      payload     JSONB NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  _patentsCacheEnsured = true;
+}
+
+// Returns the cached payload, or null on a miss / expiry / ANY DB error. The
+// feature must degrade to a live OPS call — never fail because the cache did.
+async function readPatentCache(key) {
+  const pool = getDbPool();
+  if (!pool) return null;
+  try {
+    await ensurePatentsCacheTable(pool);
+    const { rows } = await pool.query(
+      `SELECT payload, updated_at FROM patents_cache WHERE cache_key = $1`,
+      [key]
+    );
+    const row = rows && rows[0];
+    if (!row || !row.payload) return null;
+    const age = Date.now() - new Date(row.updated_at).getTime();
+    if (Number.isFinite(age) && age > config.PATENT_CACHE_TTL_MS) return null;
+    return typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+  } catch (e) {
+    console.warn("[patents] cache read failed; going live:", e.message);
+    return null;
+  }
+}
+
+async function writePatentCache(key, query, payload) {
+  const pool = getDbPool();
+  if (!pool) return;
+  try {
+    await ensurePatentsCacheTable(pool);
+    await pool.query(
+      `INSERT INTO patents_cache (cache_key, query, payload, updated_at)
+       VALUES ($1, $2::jsonb, $3::jsonb, now())
+       ON CONFLICT (cache_key) DO UPDATE
+       SET query = EXCLUDED.query, payload = EXCLUDED.payload, updated_at = now()`,
+      [key, JSON.stringify(query), JSON.stringify(payload)]
+    );
+  } catch (e) {
+    // Non-fatal: a cache write failure must never fail the user's request.
+    console.warn("[patents] cache write failed (non-fatal):", e.message);
+  }
+}
+
+// Company names carry legal boilerplate that OPS applicant strings never match
+// exactly ("Google DeepMind" vs "DEEPMIND LIMITED"), so exact equality finds
+// almost nothing. These tokens are too generic to be evidence of a match.
+const COMPANY_TOKEN_STOPWORDS = new Set([
+  "limited", "ltd", "inc", "incorporated", "corporation", "corp", "company",
+  "technologies", "technology", "studios", "studio", "group", "holdings",
+  "laboratory", "laboratories", "labs", "entertainment", "interactive",
+  "software", "systems", "international", "europe", "european", "global",
+  "games", "game", "private", "plc", "gmbh", "abb", "kabushiki", "kaisha",
+  "digital", "media", "networks", "network",
+]);
+
+// Distinctive tokens of a company name, used for substring matching.
+function companyTokens(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} ]/gu, " ")
+    .split(/\s+/)
+    .filter(t => t.length >= 4 && !COMPANY_TOKEN_STOPWORDS.has(t));
+}
+
+// Cross-reference one patent against the KB company list. A company matches when
+// ANY of its distinctive tokens appears in an applicant or inventor name, so
+// "Google DeepMind" still matches an OPS applicant of "DeepMind Limited".
+// Substring (not equality) is deliberate — OPS name strings are noisy.
+function matchPatentCompanies(patent, companies) {
+  const haystacks = [...(patent.applicants || []), ...(patent.inventors || [])]
+    .map(s => String(s || "").toLowerCase())
+    .filter(Boolean);
+  if (!haystacks.length) return [];
+  const ids = [];
+  for (const c of companies) {
+    const tokens = companyTokens(c && c.name);
+    if (!tokens.length) continue;
+    if (tokens.some(t => haystacks.some(h => h.includes(t)))) ids.push(c.id);
+  }
+  return [...new Set(ids)];
+}
+
+// GET /api/patents/company-options — the filter vocabulary for the Patents view.
+// Deliberately UNGATED (unlike /api/patents): it only exposes the same public
+// KB company list already served by /api/company-locations, and gating it would
+// just break the dropdown for anonymous viewers.
+app.get("/api/patents/company-options", async (req, res) => {
+  try {
+    const data = await kbTranslate.getDatasetTranslated("company-locations", req.query.lang);
+    const companies = (data && Array.isArray(data.companies) ? data.companies : [])
+      .map(c => ({ id: c.id, name: c.name, sector: c.sector || "" }))
+      .filter(c => c.id && c.name)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    res.json({
+      success: true,
+      companies,
+      cpc: CPC_PRESET_CODES.map(code => ({ code, label: CPC_PRESETS[code] })),
+      configured: epoClient.isConfigured(),
+      attribution: "Data: EPO OPS",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/patents — live EPO OPS patent search (cache-first).
+// Query: company, keyword, cpc (comma-separated), from/to (YYYYMMDD),
+//        range (1-25), sort (date|relevance), abstracts (0 to skip).
+app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
+  try {
+    if (!epoClient.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        code: "epo_not_configured",
+        error: "EPO OPS not configured — set EPO_OPS_KEY and EPO_OPS_SECRET to enable live patent search.",
+      });
+    }
+
+    const query = {
+      company: String(req.query.company || "").trim(),
+      keyword: String(req.query.keyword || "").trim(),
+      cpc: String(req.query.cpc || "").split(",").map(s => s.trim()).filter(Boolean),
+      from: String(req.query.from || "").trim(),
+      to: String(req.query.to || "").trim(),
+      range: req.query.range,
+      sort: String(req.query.sort || "date").trim(),
+      abstracts: req.query.abstracts !== "0",
+    };
+    if (!query.company && !query.keyword && !query.cpc.length) {
+      return res.status(400).json({
+        success: false,
+        code: "empty_query",
+        error: "Provide a company, keyword or CPC filter.",
+      });
+    }
+
+    // Cache FIRST — this is the quota guard, not just a latency win.
+    const cacheKey = buildCacheKey(query);
+    const cached = await readPatentCache(cacheKey);
+    if (cached) return res.json({ ...cached, cached: true });
+
+    const { patents, totalAvailable, cql } = await epoClient.search(query, { limit: query.range });
+    // Abstracts are a separate OPS call per hit, so they are opt-out and capped
+    // inside the client (MAX_ABSTRACT_LOOKUPS).
+    if (query.abstracts) await epoClient.enrichWithAbstracts(patents);
+    // OPS exposes no dependable sort parameter, so "newest first" is applied
+    // here rather than being pushed down into the query.
+    if (query.sort === "date") {
+      patents.sort((a, b) => String(b.publicationDate || "").localeCompare(String(a.publicationDate || "")));
+    }
+
+    // Cross-ref against the ENGLISH KB names (not the translated ones) so
+    // matching stays stable whichever language the UI is in.
+    const locations = getDataset("company-locations");
+    const companies = (locations && Array.isArray(locations.companies)) ? locations.companies : [];
+    const withMatches = patents.map(p => ({ ...p, matchedCompanies: matchPatentCompanies(p, companies) }));
+
+    const payload = {
+      success: true,
+      query,
+      cql,
+      count: withMatches.length,
+      totalAvailable,
+      patents: withMatches,
+      cached: false,
+      fetchedAt: new Date().toISOString(),
+      attribution: "Data: EPO OPS",
+    };
+    await writePatentCache(cacheKey, query, payload);
+    res.json(payload);
+  } catch (err) {
+    const code = (err && err.code) || "epo_error";
+    const status =
+      code === "epo_not_configured" ? 503 :
+      code === "epo_throttled" ? 429 :
+      code === "epo_circuit_open" ? 503 :
+      /required|Provide a/i.test(String((err && err.message) || "")) ? 400 : 502;
+    res.status(status).json({ success: false, code, error: (err && err.message) || "EPO OPS request failed" });
+  }
+});
+
 const PORT = config.PORT;
 // Only bind a port when executed directly. Guarded so a test harness can
 // `require("./server")` (registering routes on `app`) without opening a socket.
@@ -4660,6 +4897,11 @@ if (require.main === module) {
     kbTranslate.ensureKbTranslationsTable()
       .then(() => {})
       .catch((e) => console.warn("[kbTranslate] table ensure failed; using English fallback:", e.message));
+    // Patents (EPO OPS): create the durable query cache if absent. Harmless when
+    // the OPS credentials aren't set — the table just stays empty.
+    ensurePatentsCacheTable(pool)
+      .then(() => {})
+      .catch((e) => console.warn("[patents] cache table ensure failed (queries will not be cached):", e.message));
     // DeepL liveness probe (PR #95): warm the cached status shortly after boot
     // so /healthz reports deeplWorking without waiting for the first ping.
     mtService.ensureDeeplStatus()
@@ -4745,6 +4987,19 @@ module.exports = {
   unwrapBingNewsLink,
   parseBingNewsRss,
   searchBingNewsRss,
+
+  // Patents — EPO OPS (live patent search)
+  epoClient,
+  buildCql,
+  buildCacheKey,
+  matchPatentCompanies,
+  companyTokens,
+  readPatentCache,
+  writePatentCache,
+  ensurePatentsCacheTable,
+  CPC_PRESETS,
+  CPC_PRESET_CODES,
+  EPO_MAX_ITEMS,
 
   // Reader proxy (Suggested Updates split-screen reader) — hardened, text-only.
   validateSourceUrl,
