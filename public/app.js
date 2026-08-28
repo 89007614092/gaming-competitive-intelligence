@@ -2904,7 +2904,18 @@ function renderPatents(data) {
   if (!results) return;
   const patents = data.patents || [];
   if (!patents.length) {
-    results.innerHTML = `<div class="empty-state"><p>${window.t('patents.noResults')}</p></div>`;
+    // Show WHAT was actually sent to OPS. "No patents matched" is ambiguous —
+    // it can mean the company genuinely has no filings, that the query was too
+    // narrow, or that we failed to read the response. Echoing the CQL makes
+    // that distinction visible without opening devtools.
+    const d = data.diagnostics || {};
+    const cqlLine = data.cql
+      ? `<p class="patent-empty-detail">${window.t('patents.searchedWith')} <code>${escapeHtml(data.cql)}</code></p>`
+      : "";
+    const faultLine = d.recognised
+      ? ""
+      : `<p class="patent-empty-detail warn">${window.t('patents.unreadableResponse')}</p>`;
+    results.innerHTML = `<div class="empty-state"><p>${window.t('patents.noResults')}</p>${cqlLine}${faultLine}</div>`;
     return;
   }
   const total = data.totalAvailable ?? patents.length;

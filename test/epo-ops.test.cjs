@@ -21,6 +21,8 @@ const {
   buildCql,
   buildCacheKey,
   normaliseSearchResult,
+  collectDocuments,
+  companyTokens,
   espacenetUrl,
   isoDate,
   CPC_PRESETS,
@@ -131,23 +133,69 @@ test("buildCql ANDs company, keyword, CPC and date range", () => {
     from: "20240101",
     to: "20261231",
   });
-  assert.match(cql, /pa all "Google DeepMind"/);
+  // Applicant: distinctive tokens OR'd with right-truncation (see below).
+  assert.match(cql, /\(\s*pa = "Google\*"\s+OR\s+pa = "DeepMind\*"\s*\)/);
   assert.match(cql, /ta all "neural"/);
-  assert.match(cql, /cpc all "A63F"/);
-  assert.match(cql, /cpc all "G06N"/);
+  assert.match(cql, /cpc = "A63F"/);
+  assert.match(cql, /cpc = "G06N"/);
   assert.match(cql, /pd within "20240101 20261231"/);
   // Multiple CPCs must be OR'd INSIDE a group, not AND'd flat.
-  assert.match(cql, /^\(*.*\(cpc all "A63F" or cpc all "G06N"\)/);
+  assert.match(cql, /\(cpc = "A63F" OR cpc = "G06N"\)/);
+  // Clauses combine with AND.
+  assert.ok(cql.includes(") AND "), `expected AND-joined clauses, got: ${cql}`);
+});
+
+// The bug this replaces: `pa all "Google DeepMind"` requires EVERY word to
+// appear in the applicant string, so every compound KB name ("Ubisoft
+// Montreal / La Forge", "Rockstar San Diego / RAGE Technology Group") matched
+// nothing. Every company search returned zero hits.
+test("the applicant clause ORs distinctive tokens with truncation, never ANDs the full name", () => {
+  // Truncation is what makes "DEEPMIND LIMITED" match a search for DeepMind.
+  assert.strictEqual(buildCql({ company: "Google DeepMind" }), '(pa = "Google*" OR pa = "DeepMind*")');
+  // A single distinctive token needs no group.
+  assert.strictEqual(buildCql({ company: "Valve" }), 'pa = "Valve*"');
+  assert.strictEqual(buildCql({ company: "NVIDIA" }), 'pa = "NVIDIA*"');
+  // Legal boilerplate is dropped, so only the searchable word survives.
+  assert.strictEqual(buildCql({ company: "Stability AI" }), 'pa = "Stability*"');
+  assert.strictEqual(buildCql({ company: "Creative Assembly" }), '(pa = "Creative*" OR pa = "Assembly*")');
+  // A name that is nothing but stopwords still produces a usable clause.
+  assert.strictEqual(buildCql({ company: "Games" }), 'pa = "Games*"');
+  // It must never emit an all-words-required applicant clause.
+  assert.ok(!/pa all/.test(buildCql({ company: "Google DeepMind" })));
+});
+
+// Real KB names that a plain min-length rule gets wrong in BOTH directions.
+test("short acronyms are searched but short generic words are not", () => {
+  // Acronyms are short yet distinctive — dropping them loses the company.
+  assert.strictEqual(buildCql({ company: "GSC Game World" }), '(pa = "GSC*" OR pa = "World*")');
+  assert.strictEqual(buildCql({ company: "UK ICO" }), 'pa = "ICO*"');
+  assert.strictEqual(buildCql({ company: "Tripo AI / VAST" }), '(pa = "Tripo*" OR pa = "VAST*")');
+  // Short generic words would swamp the results with unrelated applicants.
+  const rockstar = buildCql({ company: "Rockstar San Diego / RAGE Technology Group" });
+  assert.match(rockstar, /Rockstar\*/);
+  assert.ok(!/"San\*"/.test(rockstar), '"San" is not distinctive enough to search');
+  const naughty = buildCql({ company: "Naughty Dog / Sony Interactive Entertainment" });
+  assert.match(naughty, /Sony\*/);
+  assert.ok(!/"Dog\*"/.test(naughty), '"Dog" would match every applicant containing it');
+});
+
+test("companyTokens admits acronyms only when asked", () => {
+  // Search: acronyms on.
+  assert.deepStrictEqual(companyTokens("GSC Game World", { lower: false, acronyms: true }), ["GSC", "World"]);
+  // Matching: acronyms off, so "ico" can never substring-match "MEXICO".
+  assert.deepStrictEqual(companyTokens("UK ICO"), []);
+  assert.deepStrictEqual(companyTokens("UK ICO", { acronyms: true }), ["ico"]);
 });
 
 test("buildCql strips quotes and rejects malformed CPC codes", () => {
   // A stray quote would otherwise break the whole CQL expression.
   const cql = buildCql({ company: 'Acme "Labs"\\' });
-  assert.strictEqual(cql, 'pa all "Acme Labs"');
+  // "Labs" is boilerplate, so only "Acme" is searched.
+  assert.strictEqual(cql, 'pa = "Acme*"');
   assert.ok(!cql.includes('\\'));
 
   // Garbage CPC is dropped rather than sent to OPS and 400-ing.
-  assert.strictEqual(buildCql({ cpc: ["ZZZZ", "not-a-code", "A63F"], keyword: "x" }), 'ta all "x" and cpc all "A63F"');
+  assert.strictEqual(buildCql({ cpc: ["ZZZZ", "not-a-code", "A63F"], keyword: "x" }), 'ta all "x" AND cpc = "A63F"');
 });
 
 test("buildCql returns empty for an empty query and supports open-ended dates", () => {
@@ -222,6 +270,76 @@ test("normaliseSearchResult degrades to empty (never throws) on an unknown shape
     assert.deepStrictEqual(out.patents, []);
     assert.strictEqual(out.totalAvailable, 0);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Diagnostics — the guard against a silent empty result
+// ---------------------------------------------------------------------------
+// An unreadable OPS payload and a genuinely empty search look IDENTICAL to the
+// user ("no patents matched"). These tests pin the distinction so a parse
+// failure surfaces as a fault instead of masquerading as "no results".
+test("diagnostics distinguish 'OPS found nothing' from 'we failed to parse it'", () => {
+  // Genuinely empty: OPS reports zero hits, nothing to parse.
+  const empty = normaliseSearchResult(searchPayload([], "0"), 25);
+  assert.strictEqual(empty.patents.length, 0);
+  assert.strictEqual(empty.diagnostics.totalResultCount, 0);
+  assert.strictEqual(empty.diagnostics.recognised, false, "no hits and no docs — we cannot claim to have read it");
+
+  // Parse failure: OPS reports 12 hits but the documents carry no number.
+  const broken = normaliseSearchResult({
+    "ops:world-patent-data": {
+      "ops:search-result": {
+        "@total-result-count": "12",
+        "exchange-documents": {
+          "exchange-document": [{ "bibliographic-data": { "invention-title": "missing ids" } }],
+        },
+      },
+    },
+  }, 25);
+  assert.strictEqual(broken.patents.length, 0);
+  assert.strictEqual(broken.diagnostics.totalResultCount, 12, "OPS DID find hits");
+  assert.strictEqual(broken.diagnostics.docsSeen, 1);
+  assert.strictEqual(broken.diagnostics.docsKept, 0, "…but we parsed none of them");
+  assert.strictEqual(broken.diagnostics.recognised, true, "the envelope was understood");
+  // The route turns exactly this combination into a 502 rather than an empty 200.
+});
+
+test("a healthy search reports docsSeen == docsKept", () => {
+  const out = normaliseSearchResult(searchPayload([exchangeDoc(), exchangeDoc({ number: "4222222" })]), 25);
+  assert.strictEqual(out.diagnostics.docsSeen, 2);
+  assert.strictEqual(out.diagnostics.docsKept, 2);
+  assert.strictEqual(out.diagnostics.totalResultCount, 348);
+  assert.strictEqual(out.diagnostics.strategy, "envelope");
+});
+
+test("an unrecognised envelope falls back to scanning for documents", () => {
+  // Same document, but nested where the normal envelope path does not reach —
+  // e.g. an OPS JSON serialisation that drops the ops: prefixes. This must not
+  // silently become "no results".
+  const out = normaliseSearchResult({
+    "world-patent-data": { "exchange-documents": { "exchange-document": exchangeDoc({ number: "4555555" }) } },
+  }, 25);
+  assert.strictEqual(out.patents.length, 1, "the scan fallback rescues it");
+  assert.strictEqual(out.patents[0].number, "4555555");
+  assert.strictEqual(out.diagnostics.strategy, "scan");
+});
+
+test("collectDocuments finds document nodes at any depth and ignores junk", () => {
+  const doc = exchangeDoc({ number: "4666666" });
+  const found = collectDocuments({
+    a: { b: [{ c: doc }] },
+    junk: [{ nope: 1 }, "string", 42, null],
+  });
+  assert.strictEqual(found.length, 1, "one document-shaped node, found regardless of nesting");
+  assert.strictEqual(found[0]["bibliographic-data"], doc["bibliographic-data"]);
+  assert.deepStrictEqual(collectDocuments({ nothing: "here" }), []);
+  assert.deepStrictEqual(collectDocuments(null), [], "never throws on junk input");
+});
+
+test("companyTokens keeps capitalisation for the query and lowercases for matching", () => {
+  assert.deepStrictEqual(companyTokens("Google DeepMind", { lower: false }), ["Google", "DeepMind"]);
+  assert.deepStrictEqual(companyTokens("Google DeepMind"), ["google", "deepmind"]);
+  assert.deepStrictEqual(companyTokens("Ubisoft Montreal / La Forge", { lower: false }), ["Ubisoft", "Montreal", "Forge"]);
 });
 
 test("isoDate converts OPS YYYYMMDD and passes through ISO values", () => {
@@ -464,12 +582,58 @@ test("search normalises hits and reports the CQL actually sent", async () => {
   const res = await client.search({ company: "Google DeepMind", cpc: ["A63F"] }, { limit: 25 });
 
   assert.strictEqual(res.patents.length, 2);
-  assert.match(res.cql, /pa all "Google DeepMind"/);
+  assert.match(res.cql, /pa = "Google\*"/, "the CQL is echoed back for transparency");
   assert.strictEqual(res.totalAvailable, 348);
   const url = calls.find(u => u.includes(SEARCH_NEEDLE));
-  assert.match(url, /published-data\/search\?q=/, "the search endpoint is used");
+  // The constituents are load-bearing: without `biblio` OPS returns only
+  // publication references, so no card would have a title or applicant.
+  assert.match(url, /published-data\/search\/abstract,biblio\?q=/, "biblio + abstract constituents requested");
   assert.match(url, /Range=1-25/, "the range is bounded");
-  assert.match(url, /q=pa%20all/, "the CQL is URL-encoded");
+  assert.match(url, /pa%20%3D%20%22Google\*%22/, "the CQL is URL-encoded");
+});
+
+// Regression: the first version read only `bibliographic-data`, so a bare search
+// response (number carried as @country/@doc-number/@kind attributes) produced
+// ZERO cards for every query — which looked exactly like "no patents found".
+test("a bare search hit (attributes only, no biblio) still becomes a card", () => {
+  const bare = {
+    "@country": "US",
+    "@doc-number": "20240123456",
+    "@kind": "A1",
+    "@family-id": "77",
+  };
+  const out = normaliseSearchResult({
+    "ops:world-patent-data": {
+      "ops:search-result": {
+        "@total-result-count": "1",
+        "exchange-documents": { "exchange-document": [bare] },
+      },
+    },
+  }, 25);
+  assert.strictEqual(out.patents.length, 1, "the hit must not be dropped");
+  assert.strictEqual(out.patents[0].id, "US20240123456A1");
+  assert.strictEqual(out.patents[0].country, "US");
+  assert.match(out.patents[0].espacenetUrl, /espacenet\.com/);
+  assert.strictEqual(out.diagnostics.docsSeen, 1);
+  assert.strictEqual(out.diagnostics.docsKept, 1);
+});
+
+// Asking for `abstract` in the search call should remove the need for any
+// per-hit abstract round-trip — that is up to 10 fewer OPS calls per search.
+test("abstracts delivered in the search response cost no extra OPS calls", async () => {
+  let abstractCalls = 0;
+  const withAbstract = exchangeDoc({ number: "4777777" });
+  withAbstract.abstract = { "@lang": "en", p: { "#text": "Inline abstract." } };
+  const { fetchImpl } = router({
+    [TOKEN_NEEDLE]: tokenResp(1199),
+    [SEARCH_NEEDLE]: () => jsonResp(searchPayload([withAbstract])),
+    [ABSTRACT_NEEDLE]: () => { abstractCalls += 1; return jsonResp({}); },
+  });
+  const client = createEpoClient({ config: KEYS, fetchImpl });
+  const res = await client.search({ company: "DeepMind" });
+  assert.strictEqual(res.patents[0].abstract, "Inline abstract.", "the inline abstract is parsed");
+  await client.enrichWithAbstracts(res.patents);
+  assert.strictEqual(abstractCalls, 0, "nothing left to fetch — no wasted quota");
 });
 
 test("the item count is clamped to OPS's maximum range", async () => {
