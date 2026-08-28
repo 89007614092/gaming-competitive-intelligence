@@ -673,9 +673,12 @@
 
         <!-- Search builder -->
         <div class="patent-controls" id="patentControls">
-          <select id="patentCompany" class="select-input patent-company-select" aria-label="Filter by company">
-            <option value="">All companies</option>
-          </select>
+          <!-- Free-text rather than a <select>: the tracked-company list is a
+               convenience suggestion list, not a fixed vocabulary. Any applicant
+               name can be typed, including companies not in the KB. -->
+          <input type="text" id="patentCompany" class="text-input patent-company-input"
+                 list="patentCompanyList" autocomplete="off" aria-label="Filter by applicant" />
+          <datalist id="patentCompanyList"></datalist>
           <input type="search" id="patentKeyword" class="text-input patent-keyword" placeholder="Keyword in title or abstract (e.g. neural, procedural)..." />
           <select id="patentSort" class="select-input patent-sort-select" aria-label="Sort results">
             <option value="date">Newest first</option>

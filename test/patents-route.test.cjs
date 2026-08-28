@@ -246,13 +246,49 @@ test("/api/patents cross-references applicants back to KB companies", async () =
     const { status, body } = await request(server, "/api/patents?cpc=A63F&abstracts=0");
     assert.strictEqual(status, 200);
     const byId = Object.fromEntries(body.patents.map(p => [p.id, p]));
-    // "DeepMind Limited" must resolve to the KB entry "Google DeepMind" — OPS
-    // applicant strings never match the KB name exactly.
-    assert.deepStrictEqual(byId["EP4123456A1"].matchedCompanies, ["deepmind"]);
-    assert.deepStrictEqual(byId["EP3777777A1"].matchedCompanies, ["valve-bellevue"]);
+    // "DeepMind Limited" must resolve to the tracked company "Google DeepMind"
+    // — OPS applicant strings never match the KB name exactly.
+    assert.deepStrictEqual(byId["EP4123456A1"].matchedCompanies, ["google"]);
+    assert.deepStrictEqual(byId["EP3777777A1"].matchedCompanies, ["valve"]);
   } finally {
     restore();
   }
+});
+
+// The applicant list must come from network.json (real companies we track), not
+// company-locations.json (a map of office + regulator sites).
+test("company-options lists tracked companies, not map offices or regulators", async () => {
+  const { status, body } = await request(server, "/api/patents/company-options");
+  assert.strictEqual(status, 200);
+  const names = (body.companies || []).map(c => c.name);
+  // Real companies that file patents.
+  for (const n of ["Valve", "Ubisoft", "Electronic Arts", "Google DeepMind", "Tencent"]) {
+    assert.ok(names.includes(n), `expected ${n} in the applicant list`);
+  }
+  // Bodies that will never file a patent — these came from the map dataset.
+  for (const n of ["European Commission", "UK AI Safety Institute", "UK ICO", "EDPB"]) {
+    assert.ok(!names.includes(n), `${n} must not appear as a patent applicant`);
+  }
+  // Neither may an office location appear as an applicant.
+  for (const n of ["Rockstar North", "Ubisoft Montreal / La Forge"]) {
+    assert.ok(!names.includes(n), `${n} is a studio location, not a filing entity`);
+  }
+  // Every entry must carry a canonical English query name for the CQL.
+  for (const c of body.companies) {
+    assert.ok(c.queryName, `${c.name} needs a queryName`);
+  }
+});
+
+// The KB translation cache rewrites company names into Chinese. If the display
+// name were sent to OPS the CQL would be built out of Chinese text.
+test("company-options exposes queryName separate from the display name", async () => {
+  const { body } = await request(server, "/api/patents/company-options?lang=zh-CN");
+  const c = (body.companies || []).find(x => x.id === "valve");
+  assert.ok(c, "valve should be listed");
+  assert.ok(c.queryName, "queryName is required");
+  // Whatever the display name is (translated or not), queryName stays canonical.
+  assert.strictEqual(c.queryName, "Valve");
+  assert.strictEqual(typeof c.name, "string");
 });
 
 test("/api/patents fetches abstracts by default but honours abstracts=0", async () => {

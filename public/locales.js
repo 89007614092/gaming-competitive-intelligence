@@ -60,8 +60,8 @@
 
       // Patents view (live EPO OPS). "Data: EPO OPS" is deliberately NOT in this
       // dictionary: it is an attribution string and must stay untranslated.
-      'patents.allCompanies': 'All companies',
-      'patents.prompt': 'Choose a company or keyword, then search.',
+      'patents.applicantPlaceholder': 'Applicant — pick a tracked company, or type any name',
+      'patents.prompt': 'Choose an applicant or keyword, then search.',
       'patents.needFilter': 'Choose a company, keyword or classification first.',
       'patents.noResults': 'No patents matched these filters.',
       'patents.searchedWith': 'Search sent to EPO OPS:',
@@ -232,8 +232,8 @@
       'view.patents.subtitle': '来自欧洲专利局的实时专利申请，并与本应用追踪的公司相互参照——可按申请人、关键词及 AI/游戏分类检索',
 
       // 专利视图（EPO OPS 实时数据）。"Data: EPO OPS" 为署名字符串，刻意不做翻译。
-      'patents.allCompanies': '所有公司',
-      'patents.prompt': '选择公司或关键词，然后开始检索。',
+      'patents.applicantPlaceholder': '申请人——选择已追踪的公司，或输入任意名称',
+      'patents.prompt': '选择申请人或关键词，然后开始检索。',
       'patents.needFilter': '请先选择公司、关键词或专利分类。',
       'patents.noResults': '没有符合这些筛选条件的专利。',
       'patents.searchedWith': '已发送至 EPO OPS 的检索式：',

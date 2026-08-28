@@ -23,6 +23,7 @@ const {
   normaliseSearchResult,
   collectDocuments,
   companyTokens,
+  applicantAliases,
   espacenetUrl,
   isoDate,
   CPC_PRESETS,
@@ -133,8 +134,8 @@ test("buildCql ANDs company, keyword, CPC and date range", () => {
     from: "20240101",
     to: "20261231",
   });
-  // Applicant: distinctive tokens OR'd with right-truncation (see below).
-  assert.match(cql, /\(\s*pa = "Google\*"\s+OR\s+pa = "DeepMind\*"\s*\)/);
+  // Applicant: one phrase, right-truncated (see the tests below for why).
+  assert.match(cql, /pa = "Google DeepMind\*"/);
   assert.match(cql, /ta all "neural"/);
   assert.match(cql, /cpc = "A63F"/);
   assert.match(cql, /cpc = "G06N"/);
@@ -145,53 +146,79 @@ test("buildCql ANDs company, keyword, CPC and date range", () => {
   assert.ok(cql.includes(") AND "), `expected AND-joined clauses, got: ${cql}`);
 });
 
-// The bug this replaces: `pa all "Google DeepMind"` requires EVERY word to
-// appear in the applicant string, so every compound KB name ("Ubisoft
-// Montreal / La Forge", "Rockstar San Diego / RAGE Technology Group") matched
-// nothing. Every company search returned zero hits.
-test("the applicant clause ORs distinctive tokens with truncation, never ANDs the full name", () => {
-  // Truncation is what makes "DEEPMIND LIMITED" match a search for DeepMind.
-  assert.strictEqual(buildCql({ company: "Google DeepMind" }), '(pa = "Google*" OR pa = "DeepMind*")');
-  // A single distinctive token needs no group.
+// Two bugs shaped this, one on each side of "how loose is the applicant match":
+//   * `pa all "Google DeepMind"` required EVERY word, so every compound name
+//     matched nothing at all (PR #109, zero results for every company).
+//   * Splitting the name into words and OR'ing them (`pa = "Google*" OR
+//     "DeepMind*"`) was far too loose — "Rockstar North" retrieved NORTH
+//     AMERICA and NORTHWESTERN, and "Warhorse" retrieved WARHORSE LOGISTICS
+//     SUZHOU and WARHORSE BEIJING BEVERAGES.
+// The name is matched as a PHRASE with right-truncation, which keeps the legal
+// suffixes OPS stores ("WARHORSE STUDIOS A.S.") without matching by word.
+test("the applicant clause is phrase-with-truncation, never word-level OR", () => {
+  assert.strictEqual(buildCql({ company: "Google DeepMind" }), 'pa = "Google DeepMind*"');
   assert.strictEqual(buildCql({ company: "Valve" }), 'pa = "Valve*"');
   assert.strictEqual(buildCql({ company: "NVIDIA" }), 'pa = "NVIDIA*"');
-  // Legal boilerplate is dropped, so only the searchable word survives.
-  assert.strictEqual(buildCql({ company: "Stability AI" }), 'pa = "Stability*"');
-  assert.strictEqual(buildCql({ company: "Creative Assembly" }), '(pa = "Creative*" OR pa = "Assembly*")');
-  // A name that is nothing but stopwords still produces a usable clause.
+  assert.strictEqual(buildCql({ company: "Stability AI" }), 'pa = "Stability AI*"');
+  assert.strictEqual(buildCql({ company: "Creative Assembly" }), 'pa = "Creative Assembly*"');
   assert.strictEqual(buildCql({ company: "Games" }), 'pa = "Games*"');
-  // It must never emit an all-words-required applicant clause.
+  // Never the all-words-required form, and never a bare single-word clause
+  // derived from a multi-word name.
   assert.ok(!/pa all/.test(buildCql({ company: "Google DeepMind" })));
+  assert.ok(!/pa = "Warhorse\*"/.test(buildCql({ company: "Warhorse Studios" })));
+  assert.ok(!/pa = "North\*"/.test(buildCql({ company: "Rockstar North" })));
 });
 
-// Real KB names that a plain min-length rule gets wrong in BOTH directions.
-test("short acronyms are searched but short generic words are not", () => {
-  // Acronyms are short yet distinctive — dropping them loses the company.
-  assert.strictEqual(buildCql({ company: "GSC Game World" }), '(pa = "GSC*" OR pa = "World*")');
-  assert.strictEqual(buildCql({ company: "UK ICO" }), 'pa = "ICO*"');
-  assert.strictEqual(buildCql({ company: "Tripo AI / VAST" }), '(pa = "Tripo*" OR pa = "VAST*")');
-  // Short generic words would swamp the results with unrelated applicants.
-  const rockstar = buildCql({ company: "Rockstar San Diego / RAGE Technology Group" });
-  assert.match(rockstar, /Rockstar\*/);
-  assert.ok(!/"San\*"/.test(rockstar), '"San" is not distinctive enough to search');
-  const naughty = buildCql({ company: "Naughty Dog / Sony Interactive Entertainment" });
-  assert.match(naughty, /Sony\*/);
-  assert.ok(!/"Dog\*"/.test(naughty), '"Dog" would match every applicant containing it');
+// The two false-positive classes the user actually reported.
+test("applicant search does not leak single words into unrelated applicants", () => {
+  // Was pa = "North*" -> NORTH AMERICA, NORTHWESTERN.
+  assert.strictEqual(buildCql({ company: "Rockstar North" }), 'pa = "Rockstar North*"');
+  // Was pa = "Warhorse*" -> WARHORSE LOGISTICS SUZHOU, WARHORSE BEIJING BEVERAGES.
+  assert.strictEqual(buildCql({ company: "Warhorse Studios" }), 'pa = "Warhorse Studios*"');
 });
 
-test("companyTokens admits acronyms only when asked", () => {
-  // Search: acronyms on.
-  assert.deepStrictEqual(companyTokens("GSC Game World", { lower: false, acronyms: true }), ["GSC", "World"]);
-  // Matching: acronyms off, so "ico" can never substring-match "MEXICO".
+// A name listing several entities is a set of ALIASES, not a bag of words:
+// each part is kept intact as a phrase, then OR'd.
+test("multi-entity names split into aliases, each kept as a phrase", () => {
+  assert.strictEqual(
+    buildCql({ company: "Take-Two / Rockstar Games" }),
+    '(pa = "Take Two*" OR pa = "Rockstar Games*")'
+  );
+  assert.strictEqual(
+    buildCql({ company: "Creative Assembly / Sega" }),
+    '(pa = "Creative Assembly*" OR pa = "Sega*")'
+  );
+  assert.strictEqual(buildCql({ company: "Decart x Etched" }), '(pa = "Decart*" OR pa = "Etched*")');
+  // Parentheticals are noise, not part of the name.
+  assert.strictEqual(buildCql({ company: "OpenArt (Worlds)" }), 'pa = "OpenArt*"');
+  // A name with no separator stays one phrase — GSC must not be split out.
+  assert.strictEqual(buildCql({ company: "GSC Game World" }), 'pa = "GSC Game World*"');
+  assert.strictEqual(buildCql({ company: "UK ICO" }), 'pa = "UK ICO*"');
+});
+
+test("applicantAliases splits on separators and drops parentheticals", () => {
+  assert.deepStrictEqual(applicantAliases("Take-Two / Rockstar Games"), ["Take Two", "Rockstar Games"]);
+  assert.deepStrictEqual(applicantAliases("Decart x Etched"), ["Decart", "Etched"]);
+  assert.deepStrictEqual(applicantAliases("OpenArt (Worlds)"), ["OpenArt"]);
+  assert.deepStrictEqual(applicantAliases("GSC Game World"), ["GSC Game World"]);
+  assert.deepStrictEqual(applicantAliases(""), []);
+  // Fragments too short to search on are dropped.
+  assert.deepStrictEqual(applicantAliases("AB / Sony"), ["Sony"]);
+});
+
+test("companyTokens still guards cross-reference matching", () => {
+  // Matching is a substring test against OPS applicant strings, so it must stay
+  // strict: "ico" would falsely match "MEXICO" or "ICON".
   assert.deepStrictEqual(companyTokens("UK ICO"), []);
-  assert.deepStrictEqual(companyTokens("UK ICO", { acronyms: true }), ["ico"]);
+  assert.deepStrictEqual(companyTokens("Google DeepMind"), ["google", "deepmind"]);
+  assert.deepStrictEqual(companyTokens("Creative Assembly"), ["creative", "assembly"]);
 });
 
 test("buildCql strips quotes and rejects malformed CPC codes", () => {
   // A stray quote would otherwise break the whole CQL expression.
   const cql = buildCql({ company: 'Acme "Labs"\\' });
-  // "Labs" is boilerplate, so only "Acme" is searched.
-  assert.strictEqual(cql, 'pa = "Acme*"');
+  // The name stays a single phrase; the quote cannot survive into the CQL.
+  assert.strictEqual(cql, 'pa = "Acme Labs*"');
   assert.ok(!cql.includes('\\'));
 
   // Garbage CPC is dropped rather than sent to OPS and 400-ing.
@@ -279,11 +306,13 @@ test("normaliseSearchResult degrades to empty (never throws) on an unknown shape
 // user ("no patents matched"). These tests pin the distinction so a parse
 // failure surfaces as a fault instead of masquerading as "no results".
 test("diagnostics distinguish 'OPS found nothing' from 'we failed to parse it'", () => {
-  // Genuinely empty: OPS reports zero hits, nothing to parse.
+  // Genuinely empty: OPS returns a well-formed envelope reporting zero hits.
+  // That is a successful read, NOT a fault — the UI must show a plain empty
+  // state rather than "the response could not be read".
   const empty = normaliseSearchResult(searchPayload([], "0"), 25);
   assert.strictEqual(empty.patents.length, 0);
   assert.strictEqual(empty.diagnostics.totalResultCount, 0);
-  assert.strictEqual(empty.diagnostics.recognised, false, "no hits and no docs — we cannot claim to have read it");
+  assert.strictEqual(empty.diagnostics.recognised, true, "the envelope was read fine — it just had no hits");
 
   // Parse failure: OPS reports 12 hits but the documents carry no number.
   const broken = normaliseSearchResult({
@@ -302,6 +331,11 @@ test("diagnostics distinguish 'OPS found nothing' from 'we failed to parse it'",
   assert.strictEqual(broken.diagnostics.docsKept, 0, "…but we parsed none of them");
   assert.strictEqual(broken.diagnostics.recognised, true, "the envelope was understood");
   // The route turns exactly this combination into a 502 rather than an empty 200.
+
+  // Genuinely unreadable: no search envelope anywhere and no documents found.
+  const junk = normaliseSearchResult({ unexpected: { shape: "entirely" } }, 25);
+  assert.strictEqual(junk.patents.length, 0);
+  assert.strictEqual(junk.diagnostics.recognised, false, "nothing recognisable was read");
 });
 
 test("a healthy search reports docsSeen == docsKept", () => {
@@ -582,14 +616,14 @@ test("search normalises hits and reports the CQL actually sent", async () => {
   const res = await client.search({ company: "Google DeepMind", cpc: ["A63F"] }, { limit: 25 });
 
   assert.strictEqual(res.patents.length, 2);
-  assert.match(res.cql, /pa = "Google\*"/, "the CQL is echoed back for transparency");
+  assert.match(res.cql, /pa = "Google DeepMind\*"/, "the CQL is echoed back for transparency");
   assert.strictEqual(res.totalAvailable, 348);
   const url = calls.find(u => u.includes(SEARCH_NEEDLE));
   // The constituents are load-bearing: without `biblio` OPS returns only
   // publication references, so no card would have a title or applicant.
   assert.match(url, /published-data\/search\/abstract,biblio\?q=/, "biblio + abstract constituents requested");
   assert.match(url, /Range=1-25/, "the range is bounded");
-  assert.match(url, /pa%20%3D%20%22Google\*%22/, "the CQL is URL-encoded");
+  assert.match(url, /pa%20%3D%20%22Google%20DeepMind\*%22/, "the CQL is URL-encoded");
 });
 
 // Regression: the first version read only `bibliographic-data`, so a bare search

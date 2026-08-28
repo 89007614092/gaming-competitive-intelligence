@@ -2807,13 +2807,36 @@ async function loadPatents() {
   if (patentResults) renderPatents(patentResults);
 }
 
+// Display name (possibly translated) -> canonical English query name.
+// The suggestion list shows translated company names, but OPS can only be
+// queried in the canonical English form: the KB translation cache rewrites
+// company names into Chinese, and a Chinese applicant string matches nothing.
+let patentCompanyMap = {};
+
 function populatePatentCompanies(companies) {
-  const sel = document.getElementById("patentCompany");
-  if (!sel) return;
-  const current = sel.value; // preserve the user's choice across re-renders
-  sel.innerHTML = `<option value="">${window.t('patents.allCompanies')}</option>`
-    + companies.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
-  if (current) sel.value = current;
+  const list = document.getElementById("patentCompanyList");
+  const input = document.getElementById("patentCompany");
+  if (input) input.placeholder = window.t('patents.applicantPlaceholder');
+
+  patentCompanyMap = {};
+  for (const c of companies) {
+    if (!c || !c.name) continue;
+    patentCompanyMap[c.name] = c.queryName || c.name;
+  }
+  if (list) {
+    list.innerHTML = companies
+      .map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml((c.sectors || []).join(", "))}</option>`)
+      .join("");
+  }
+}
+
+// Resolve what the user typed into the name OPS should be queried with. A value
+// picked from the suggestion list maps back to the canonical English name;
+// anything typed free-hand is used exactly as entered.
+function resolvePatentCompany(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return patentCompanyMap[raw] || raw;
 }
 
 function renderPatentCpcChips() {
@@ -2865,7 +2888,9 @@ async function runPatentSearch() {
   const results = document.getElementById("patentResults");
   if (!results) return;
 
-  const company = (document.getElementById("patentCompany") || {}).value || "";
+  // Resolve the suggestion (which may be translated) to the canonical English
+  // applicant name before it reaches the query.
+  const company = resolvePatentCompany((document.getElementById("patentCompany") || {}).value || "");
   const keyword = String((document.getElementById("patentKeyword") || {}).value || "").trim();
   const sort = (document.getElementById("patentSort") || {}).value || "date";
   const cpc = [...patentSelectedCpc];

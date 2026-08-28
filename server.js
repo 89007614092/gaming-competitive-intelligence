@@ -157,6 +157,7 @@ const {
   buildCql,
   buildCacheKey,
   companyTokens,          // shared with the CQL builder so query + cross-ref agree
+  applicantAliases,
   CPC_PRESETS,
   CPC_PRESET_CODES,
   MAX_ITEMS: EPO_MAX_ITEMS,
@@ -4704,6 +4705,23 @@ async function readPatentCache(key) {
   }
 }
 
+// Cache hygiene. Bumping the key prefix in buildCacheKey already makes stale
+// entries unreachable, but they would sit in the table until the TTL expired —
+// and after a query-construction fix those rows are actively misleading to
+// anyone reading the table. Safe to delete: this is a cache, so a miss just
+// costs one OPS call.
+async function purgeStalePatentCache(pool, { maxAgeDays = 7 } = {}) {
+  await ensurePatentsCacheTable(pool);
+  // Drop anything written by an older key format (pre-`v2~`).
+  const stale = await pool.query(`DELETE FROM patents_cache WHERE cache_key NOT LIKE 'v2~%'`);
+  // Then the general TTL sweep, so the table cannot grow without bound.
+  const aged = await pool.query(
+    `DELETE FROM patents_cache WHERE updated_at < now() - ($1 || ' days')::interval`,
+    [String(maxAgeDays)]
+  );
+  return (stale.rowCount || 0) + (aged.rowCount || 0);
+}
+
 async function writePatentCache(key, query, payload) {
   const pool = getDbPool();
   if (!pool) return;
@@ -4722,9 +4740,28 @@ async function writePatentCache(key, query, payload) {
   }
 }
 
-// Cross-reference one patent against the KB company list. A company matches when
-// ANY of its distinctive tokens appears in an applicant or inventor name, so
-// "Google DeepMind" still matches an OPS applicant of "DeepMind Limited".
+// The companies we track as potential patent applicants.
+//
+// Source is `network.json` (the Competitor Web), NOT `company-locations.json`,
+// and that choice is deliberate. company-locations is a MAP of office and
+// regulator sites, so it lists studio locations ("Ubisoft Montreal / La Forge",
+// "Rockstar North") and bodies that will never file a patent (European
+// Commission, UK AI Safety Institute, UK ICO, EDPB). network.json is the set of
+// actual companies we track — the right population for a patent search.
+// It is still data, not code: edit data/network.json to change the list.
+function trackedCompanies() {
+  const net = getDataset("network");
+  if (!net) return [];
+  const rows = [];
+  const push = (c) => { if (c && c.id && c.name) rows.push(c); };
+  push(net.center);
+  for (const c of Array.isArray(net.competitors) ? net.competitors : []) push(c);
+  return rows;
+}
+
+// Cross-reference one patent against the tracked companies. A company matches
+// when ANY of its distinctive tokens appears in an applicant or inventor name,
+// so an OPS applicant of "DeepMind Limited" still resolves to Google DeepMind.
 // Substring (not equality) is deliberate — OPS name strings are noisy.
 function matchPatentCompanies(patent, companies) {
   const haystacks = [...(patent.applicants || []), ...(patent.inventors || [])]
@@ -4733,24 +4770,49 @@ function matchPatentCompanies(patent, companies) {
   if (!haystacks.length) return [];
   const ids = [];
   for (const c of companies) {
-    const tokens = companyTokens(c && c.name);
-    if (!tokens.length) continue;
-    if (tokens.some(t => haystacks.some(h => h.includes(t)))) ids.push(c.id);
+    // Match on every alias the name contains, so "Take-Two / Rockstar Games"
+    // resolves against an applicant of "ROCKSTAR GAMES, INC."
+    const aliases = applicantAliases(c && c.name);
+    if (!aliases.length) continue;
+    const hit = aliases.some(a => {
+      const toks = companyTokens(a);
+      return toks.length ? toks.some(t => haystacks.some(h => h.includes(t)))
+                         : haystacks.some(h => h.includes(a.toLowerCase()));
+    });
+    if (hit) ids.push(c.id);
   }
   return [...new Set(ids)];
 }
 
 // GET /api/patents/company-options — the filter vocabulary for the Patents view.
-// Deliberately UNGATED (unlike /api/patents): it only exposes the same public
-// KB company list already served by /api/company-locations, and gating it would
-// just break the dropdown for anonymous viewers.
+// Deliberately UNGATED (unlike /api/patents): it only exposes the same public KB
+// data already served elsewhere, and gating it would break the dropdown.
+//
+// Each company carries BOTH names, and the distinction is load-bearing:
+//   `name`      — for DISPLAY, translated into the active language.
+//   `queryName` — the canonical ENGLISH name, which is what must be sent to OPS.
+// The KB translation cache rewrites company names into Chinese, so sending the
+// display name would build a CQL query out of Chinese text and match nothing.
 app.get("/api/patents/company-options", async (req, res) => {
   try {
-    const data = await kbTranslate.getDatasetTranslated("company-locations", req.query.lang);
-    const companies = (data && Array.isArray(data.companies) ? data.companies : [])
-      .map(c => ({ id: c.id, name: c.name, sector: c.sector || "" }))
+    const canonical = trackedCompanies();
+    let displayNames = new Map();
+    const translated = await kbTranslate.getDatasetTranslated("network", req.query.lang);
+    const source = translated || getDataset("network") || {};
+    const collect = (c) => { if (c && c.id && c.name) displayNames.set(c.id, c.name); };
+    collect(source.center);
+    for (const c of Array.isArray(source.competitors) ? source.competitors : []) collect(c);
+
+    const companies = canonical
+      .map(c => ({
+        id: c.id,
+        name: displayNames.get(c.id) || c.name,   // display (translated if available)
+        queryName: c.name,                        // canonical English -> builds the CQL
+        sectors: c.sectors || [],
+      }))
       .filter(c => c.id && c.name)
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
     res.json({
       success: true,
       companies,
@@ -4826,9 +4888,7 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
 
     // Cross-ref against the ENGLISH KB names (not the translated ones) so
     // matching stays stable whichever language the UI is in.
-    const locations = getDataset("company-locations");
-    const companies = (locations && Array.isArray(locations.companies)) ? locations.companies : [];
-    const withMatches = patents.map(p => ({ ...p, matchedCompanies: matchPatentCompanies(p, companies) }));
+    const withMatches = patents.map(p => ({ ...p, matchedCompanies: matchPatentCompanies(p, trackedCompanies()) }));
 
     const payload = {
       success: true,
@@ -4898,7 +4958,8 @@ if (require.main === module) {
     // Patents (EPO OPS): create the durable query cache if absent. Harmless when
     // the OPS credentials aren't set — the table just stays empty.
     ensurePatentsCacheTable(pool)
-      .then(() => {})
+      .then(() => purgeStalePatentCache(pool))
+      .then((n) => { if (n) console.log(`  patents_cache purged ${n} stale row(s).`); })
       .catch((e) => console.warn("[patents] cache table ensure failed (queries will not be cached):", e.message));
     // DeepL liveness probe (PR #95): warm the cached status shortly after boot
     // so /healthz reports deeplWorking without waiting for the first ping.
@@ -4995,6 +5056,8 @@ module.exports = {
   readPatentCache,
   writePatentCache,
   ensurePatentsCacheTable,
+  purgeStalePatentCache,
+  trackedCompanies,
   CPC_PRESETS,
   CPC_PRESET_CODES,
   EPO_MAX_ITEMS,

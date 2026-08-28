@@ -5018,7 +5018,7 @@ body {
   align-items: center;
   margin-bottom: 14px;
 }
-.patent-controls .patent-company-select { flex: 0 1 240px; min-width: 180px; }
+.patent-controls .patent-company-input { flex: 0 1 260px; min-width: 200px; }
 .patent-controls .patent-keyword { flex: 1 1 280px; min-width: 200px; }
 .patent-controls .patent-sort-select { flex: 0 0 150px; }
 
@@ -5143,7 +5143,7 @@ body {
 
 @media (max-width: 640px) {
   .patent-controls { flex-direction: column; align-items: stretch; }
-  .patent-controls .patent-company-select,
+  .patent-controls .patent-company-input,
   .patent-controls .patent-keyword,
   .patent-controls .patent-sort-select { flex: 1 1 auto; }
 }
