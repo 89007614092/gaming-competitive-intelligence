@@ -32,6 +32,7 @@
       'nav.timeline': 'AI Regulatory Timeline',
       'nav.risks': 'AI Use Risks',
       'nav.companyMap': 'Company Map',
+      'nav.patents': 'Patents',
 
       // View titles
       'view.kb.title': 'Knowledge Base',
@@ -54,6 +55,21 @@
       'view.risks.subtitle': 'Cross-referenced risk analysis for products and companies — drawn from the Knowledge Base, Competitor Web, EU AI Act, UK regulation, and proprietary research documents',
       'view.companyMap.title': 'Company & Studio Map',
       'view.companyMap.subtitle': 'Selected development, research, engine, and regulatory locations directly connected to competitor products and current game-AI use cases across the UK, EU, and North America',
+      'view.patents.title': 'Patents',
+      'view.patents.subtitle': 'Live patent filings from the European Patent Office, cross-referenced to the companies tracked in this app — searchable by applicant, keyword and AI/gaming classification',
+
+      // Patents view (live EPO OPS). "Data: EPO OPS" is deliberately NOT in this
+      // dictionary: it is an attribution string and must stay untranslated.
+      'patents.allCompanies': 'All companies',
+      'patents.prompt': 'Choose a company or keyword, then search.',
+      'patents.needFilter': 'Choose a company, keyword or classification first.',
+      'patents.noResults': 'No patents matched these filters.',
+      'patents.resultsLabel': 'Patent results',
+      'patents.showing': 'Showing {count} of {total} matches',
+      'patents.cached': 'cached result',
+      'patents.viewOnEspacenet': 'View on Espacenet',
+      'patents.liveNote': 'Live results from the European Patent Office (EPO OPS). Queries are cached for 12 hours to stay within the EPO fair-use quota.',
+      'patents.notConfiguredNote': 'Live patent search is not configured on this server — the EPO OPS credentials are missing.',
 
       // Sections / panels
       'news.recentTitle': 'Recent News & Updates',
@@ -159,6 +175,8 @@
       'loading.webSearch': 'Searching the web for “{query}”…',
       'loading.proposedChanges': 'Loading proposed changes…',
       'loading.retrievingEvidence': 'Retrieving application evidence...',
+      'loading.patents': 'Loading patent search...',
+      'loading.patentsSearch': 'Searching the European Patent Office...',
 
       // Placeholders
       'ph.newsSearch': 'Search articles, e.g., NetEase AI game engine partnership 2026',
@@ -185,6 +203,7 @@
       'nav.timeline': 'AI 监管时间表',
       'nav.risks': 'AI 使用风险',
       'nav.companyMap': '公司与工作室地图',
+      'nav.patents': '专利',
 
       // View titles
       'view.kb.title': '知识库',
@@ -207,6 +226,20 @@
       'view.risks.subtitle': '针对产品与公司的交叉引用风险分析——来源包括知识库、竞争对手关系网、欧盟《人工智能法案》、英国监管及自有研究文档',
       'view.companyMap.title': '公司与工作室地图',
       'view.companyMap.subtitle': '与竞争对手产品及当前游戏 AI 应用案例直接相关的精选开发、研究、引擎与监管地点，覆盖英国、欧盟与北美',
+      'view.patents.title': '专利',
+      'view.patents.subtitle': '来自欧洲专利局的实时专利申请，并与本应用追踪的公司相互参照——可按申请人、关键词及 AI/游戏分类检索',
+
+      // 专利视图（EPO OPS 实时数据）。"Data: EPO OPS" 为署名字符串，刻意不做翻译。
+      'patents.allCompanies': '所有公司',
+      'patents.prompt': '选择公司或关键词，然后开始检索。',
+      'patents.needFilter': '请先选择公司、关键词或专利分类。',
+      'patents.noResults': '没有符合这些筛选条件的专利。',
+      'patents.resultsLabel': '专利检索结果',
+      'patents.showing': '显示 {count} 条，共 {total} 条匹配结果',
+      'patents.cached': '缓存结果',
+      'patents.viewOnEspacenet': '在 Espacenet 上查看',
+      'patents.liveNote': '实时数据来自欧洲专利局（EPO OPS）。为遵守 EPO 的合理使用配额，检索结果会缓存 12 小时。',
+      'patents.notConfiguredNote': '此服务器尚未配置实时专利检索——缺少 EPO OPS 凭据。',
 
       // Sections / panels
       'news.recentTitle': '最新新闻与更新',
@@ -312,6 +345,8 @@
       'loading.webSearch': '正在联网搜索“{query}”…',
       'loading.proposedChanges': '正在加载建议更新……',
       'loading.retrievingEvidence': '正在检索应用证据……',
+      'loading.patents': '正在加载专利检索……',
+      'loading.patentsSearch': '正在检索欧洲专利局……',
 
       // Placeholders
       'ph.newsSearch': '搜索文章，例如：网易 AI 游戏引擎合作 2026',
@@ -345,6 +380,7 @@
     { sel: '.nav-btn[data-view="regulatory-timeline"]', key: 'nav.timeline' },
     { sel: '.nav-btn[data-view="risks"]', key: 'nav.risks' },
     { sel: '.nav-btn[data-view="company-map"]', key: 'nav.companyMap' },
+    { sel: '.nav-btn[data-view="patents"]', key: 'nav.patents' },
 
     // View titles
     { sel: '#knowledge-base .page-header h1', key: 'view.kb.title' },
@@ -357,6 +393,7 @@
     { sel: '#current-use-cases .page-header h1', key: 'view.useCases.title' },
     { sel: '#risks .page-header h1', key: 'view.risks.title' },
     { sel: '#company-map .page-header h1', key: 'view.companyMap.title' },
+    { sel: '#patents .page-header h1', key: 'view.patents.title' },
 
     // View subtitles
     { sel: '#knowledge-base .subtitle', key: 'view.kb.subtitle' },
@@ -369,6 +406,7 @@
     { sel: '#current-use-cases .subtitle', key: 'view.useCases.subtitle' },
     { sel: '#risks .subtitle', key: 'view.risks.subtitle' },
     { sel: '#company-map .subtitle', key: 'view.companyMap.subtitle' },
+    { sel: '#patents .subtitle', key: 'view.patents.subtitle' },
 
     // Sections / panels
     { sel: '#newsSectionTitle', key: 'news.recentTitle' },
