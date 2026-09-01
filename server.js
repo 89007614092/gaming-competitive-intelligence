@@ -163,6 +163,7 @@ const {
   CPC_CHIPS,
   CPC_ALL_CODES,
   CPC_DEFAULT_CODES,
+  isCpcCode,              // normalises to the spaced form OPS expects
   MAX_ITEMS: EPO_MAX_ITEMS,
 } = require("./lib/epoOps");
 const epoClient = createEpoClient({
@@ -4721,12 +4722,19 @@ async function purgeStalePatentCache(pool, { maxAgeDays = 7 } = {}) {
   const stale = await pool.query(
     `DELETE FROM patents_cache WHERE cache_key NOT LIKE 'v2~%' AND cache_key NOT LIKE 'cpccount:%'`
   );
+  // Drop counts written under an older query format (e.g. the zeros produced by
+  // the malformed CPC codes in #111). Safe: they are cache rows, and a miss just
+  // costs one OPS call.
+  const staleCounts = await pool.query(
+    `DELETE FROM patents_cache WHERE cache_key LIKE 'cpccount:%' AND cache_key NOT LIKE $1`,
+    [`cpccount:${CPC_COUNT_VERSION}:%`]
+  );
   // Then the general TTL sweep, so the table cannot grow without bound.
   const aged = await pool.query(
     `DELETE FROM patents_cache WHERE updated_at < now() - ($1 || ' days')::interval`,
     [String(maxAgeDays)]
   );
-  return (stale.rowCount || 0) + (aged.rowCount || 0);
+  return (stale.rowCount || 0) + (staleCounts.rowCount || 0) + (aged.rowCount || 0);
 }
 
 async function writePatentCache(key, query, payload) {
@@ -4946,9 +4954,15 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
 // rather than an error, so the UI degrades instead of breaking.
 // =============================================================================
 
+// Bump this whenever the way a count QUERY is built changes. Counts are cached
+// for hours, so a fix to code formatting would otherwise keep serving stale
+// numbers — which is exactly what happened: every chip cached a `0` produced by
+// the malformed un-spaced CPC form, and kept replaying it.
+const CPC_COUNT_VERSION = "c2";
+
 // Namespaced so a count can never collide with (or be served as) a real search.
 function countCacheKey(kind, id, codes) {
-  return `cpccount:${kind}:${id}:${buildCacheKey({ cpc: codes, range: 1, sort: "relevance", abstracts: false })}`;
+  return `cpccount:${CPC_COUNT_VERSION}:${kind}:${id}:${buildCacheKey({ cpc: codes, range: 1, sort: "relevance", abstracts: false })}`;
 }
 
 async function cpcCountsFor(items, kind) {
@@ -5004,12 +5018,26 @@ app.get("/api/patents/validate-cpc", whenAuth(requireAdminRole), async (req, res
     if (!epoClient.isConfigured()) {
       return res.status(503).json({ success: false, code: "epo_not_configured", error: "EPO OPS not configured." });
     }
-    const items = CPC_ALL_CODES.map(code => ({ code }));
+    // `?codes=A63F13/00,G06N3/092` tests a chosen subset. Important under a
+    // small search allowance: validating all codes costs one call each, far
+    // more than OPS allows in a window, so checking two or three at a time is
+    // the only practical way to confirm the format works.
+    const wanted = String(req.query.codes || "")
+      .split(",")
+      .map(isCpcCode)
+      .filter(Boolean);
+    if (req.query.codes && !wanted.length) {
+      return res.status(400).json({ success: false, code: "bad_codes", error: "No valid CPC codes supplied." });
+    }
+    const items = (wanted.length ? wanted : CPC_ALL_CODES.map(isCpcCode)).map(code => ({ code }));
     const { counts, throttled } = await cpcCountsFor(items, "code");
     const dead = Object.entries(counts).filter(([, n]) => n === 0).map(([c]) => c);
     res.json({
       success: true,
       counts,
+      // Show what each code became after formatting — the spaced `/low` form is
+      // what OPS actually receives, and seeing it makes format bugs obvious.
+      asSent: Object.fromEntries(items.map(i => [i.code, buildCql({ cpc: [i.code] })])),
       throttled,
       total: Object.keys(counts).length,
       emptyCodes: dead,   // investigate these before trusting the chips
