@@ -426,23 +426,30 @@ test("broad A63F is what let pinball and roulette through — the default must n
 // own release notes write it as "C08F 220".
 test("CPC codes are sent in OPS's spaced form, not the concatenated form", () => {
   assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00");
-  assert.strictEqual(isCpcCode("G06N3/092"), "G06N 3/092/low");
-  assert.strictEqual(isCpcCode("G06F40/35"), "G06F 40/35/low");
-  assert.strictEqual(isCpcCode("G06F9/50"), "G06F 9/50/low");
-  // A bare subclass has no group, so no space and no /low.
+  assert.strictEqual(isCpcCode("G06N3/092"), "G06N 3/092");
+  assert.strictEqual(isCpcCode("G06F40/35"), "G06F 40/35");
+  assert.strictEqual(isCpcCode("G06F9/50"), "G06F 9/50");
+  // A bare subclass has no group part, so no space is added.
   assert.strictEqual(isCpcCode("A63F"), "A63F");
   // Never emit the concatenated form — that is what returned zero.
   assert.notStrictEqual(isCpcCode("A63F13/00"), "A63F13/00");
 });
 
-// Subgroups need a trailing /low to include their children; main groups
-// ("/00") are auto-posted and must NOT get one.
-test("/low is appended to subgroups only, never to main groups", () => {
-  assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00", "main group is auto-posted");
+// Do NOT re-add `/low`. The EPO's Espacenet notes say subgroup level needs it
+// to include children, but OPS rejected it with `HTTP 500 SERVER.DomainAccess`,
+// which took the whole Patents tab down. /low is Espacenet Smart-search syntax;
+// OPS CQL does not accept it. Use /api/patents/probe-cpc-format to re-test if
+// OPS behaviour ever changes.
+test("no /low suffix — OPS rejects it with a 500, even though Espacenet documents it", () => {
+  assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00", "main group");
   assert.strictEqual(isCpcCode("G06N20/00"), "G06N 20/00");
   assert.strictEqual(isCpcCode("G06T19/00"), "G06T 19/00");
-  assert.strictEqual(isCpcCode("A63F13/67"), "A63F 13/67/low", "subgroup needs /low for children");
-  assert.strictEqual(isCpcCode("G06N5/045"), "G06N 5/045/low");
+  assert.strictEqual(isCpcCode("A63F13/67"), "A63F 13/67", "subgroup — still no /low");
+  assert.strictEqual(isCpcCode("G06N5/045"), "G06N 5/045");
+  // Guard: nothing we send may end in /low.
+  for (const code of CPC_ALL_CODES) {
+    assert.ok(!/\/low$/i.test(isCpcCode(code)), `${code} must not be sent with /low`);
+  }
 });
 
 test("the CPC validator accepts subclasses, groups and subgroups", () => {
