@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { execFile } = require("child_process");
 const summariseEngine = require("./summarise-engine");
 const {
@@ -158,8 +159,10 @@ const {
   buildCacheKey,
   companyTokens,          // shared with the CQL builder so query + cross-ref agree
   applicantAliases,
-  CPC_PRESETS,
-  CPC_PRESET_CODES,
+  CPC_GROUPS,             // verified, grouped classification filters
+  CPC_CHIPS,
+  CPC_ALL_CODES,
+  CPC_DEFAULT_CODES,
   MAX_ITEMS: EPO_MAX_ITEMS,
 } = require("./lib/epoOps");
 const epoClient = createEpoClient({
@@ -4712,8 +4715,12 @@ async function readPatentCache(key) {
 // costs one OPS call.
 async function purgeStalePatentCache(pool, { maxAgeDays = 7 } = {}) {
   await ensurePatentsCacheTable(pool);
-  // Drop anything written by an older key format (pre-`v2~`).
-  const stale = await pool.query(`DELETE FROM patents_cache WHERE cache_key NOT LIKE 'v2~%'`);
+  // Drop anything written by an older key format (pre-`v2~`). Count rows live
+  // in the same table under a `cpccount:` prefix and are deliberately kept —
+  // they are still current and were expensive to produce.
+  const stale = await pool.query(
+    `DELETE FROM patents_cache WHERE cache_key NOT LIKE 'v2~%' AND cache_key NOT LIKE 'cpccount:%'`
+  );
   // Then the general TTL sweep, so the table cannot grow without bound.
   const aged = await pool.query(
     `DELETE FROM patents_cache WHERE updated_at < now() - ($1 || ' days')::interval`,
@@ -4816,7 +4823,15 @@ app.get("/api/patents/company-options", async (req, res) => {
     res.json({
       success: true,
       companies,
-      cpc: CPC_PRESET_CODES.map(code => ({ code, label: CPC_PRESETS[code] })),
+      // Grouped chips rather than a flat list: the old A63F/G06N/G06T/G10L/H04N
+      // set was far too broad (A63F covers playing cards, chess, roulette and
+      // pinball). Each chip maps to one or more verified CPC codes.
+      cpcGroups: CPC_GROUPS.map(g => ({
+        id: g.id,
+        label: g.label,
+        chips: g.chips.map(c => ({ id: c.id, label: c.label, codes: c.codes, hint: c.hint || "" })),
+      })),
+      cpcDefaults: CPC_DEFAULT_CODES,
       configured: epoClient.isConfigured(),
       attribution: "Data: EPO OPS",
     });
@@ -4917,6 +4932,208 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
   }
 });
 
+// =============================================================================
+// Patents — classification verification + per-chip hit counts
+// -----------------------------------------------------------------------------
+// These exist because the group-level CPC codes above are only useful if OPS
+// searches them HIERARCHICALLY — i.e. that `A63F13/00` also returns documents
+// classified A63F13/67. We proved that works at subclass level but never at
+// group level, and if it does not, every chip silently returns zero. That is
+// exactly the failure mode that cost two deploy cycles in #109/#110, so these
+// probes make the assumption checkable instead of assumed.
+// Both are quota-sensitive: one OPS call per item, cached, and aborted the
+// moment OPS throttles or the breaker opens. Partial results are returned
+// rather than an error, so the UI degrades instead of breaking.
+// =============================================================================
+
+// Namespaced so a count can never collide with (or be served as) a real search.
+function countCacheKey(kind, id, codes) {
+  return `cpccount:${kind}:${id}:${buildCacheKey({ cpc: codes, range: 1, sort: "relevance", abstracts: false })}`;
+}
+
+async function cpcCountsFor(items, kind) {
+  const counts = {};
+  let throttled = false;
+  for (const item of items) {
+    // Bail the instant OPS pushes back — finishing the loop would burn the
+    // remaining hourly quota for numbers that are nice-to-have at best.
+    const st = epoClient.status();
+    if (st.throttled || st.circuitOpen) { throttled = true; break; }
+
+    const codes = item.codes || [item.code];
+    const id = item.id || item.code;
+    const key = countCacheKey(kind, id, codes);
+    try {
+      const cached = await readPatentCache(key);
+      if (cached && typeof cached.count === "number") {
+        counts[id] = cached.count;
+        continue;
+      }
+      const res = await epoClient.search({ cpc: codes }, { limit: 1 });
+      counts[id] = res.totalAvailable || 0;
+      await writePatentCache(key, { kind, id, codes }, { count: counts[id] });
+    } catch (err) {
+      const code = err && err.code;
+      if (code === "epo_throttled" || code === "epo_circuit_open") { throttled = true; break; }
+      // One bad code must not sink the whole probe.
+      counts[id] = null;
+    }
+  }
+  return { counts, throttled };
+}
+
+// GET /api/patents/cpc-counts — matching publications per chip, for the UI.
+app.get("/api/patents/cpc-counts", whenAuth(requireAuth), async (req, res) => {
+  try {
+    if (!epoClient.isConfigured()) {
+      return res.status(503).json({ success: false, code: "epo_not_configured", error: "EPO OPS not configured." });
+    }
+    const { counts, throttled } = await cpcCountsFor(CPC_CHIPS, "chip");
+    res.json({ success: true, counts, throttled, attribution: "Data: EPO OPS" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/patents/validate-cpc — per-CODE counts. Admin-only: this is a
+// one-off verification tool, not a UI data source, and it costs one OPS call
+// per code. Run it after any change to the chip definitions; any code
+// reporting 0 is either wrong or not searched hierarchically.
+app.get("/api/patents/validate-cpc", whenAuth(requireAdminRole), async (req, res) => {
+  try {
+    if (!epoClient.isConfigured()) {
+      return res.status(503).json({ success: false, code: "epo_not_configured", error: "EPO OPS not configured." });
+    }
+    const items = CPC_ALL_CODES.map(code => ({ code }));
+    const { counts, throttled } = await cpcCountsFor(items, "code");
+    const dead = Object.entries(counts).filter(([, n]) => n === 0).map(([c]) => c);
+    res.json({
+      success: true,
+      counts,
+      throttled,
+      total: Object.keys(counts).length,
+      emptyCodes: dead,   // investigate these before trusting the chips
+      attribution: "Data: EPO OPS",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// =============================================================================
+// Patents — headline translation
+// -----------------------------------------------------------------------------
+// Patent titles arrive in whatever language the filing office used. The UI
+// shows them verbatim, which is correct, but a Chinese or French headline is
+// unreadable to most users — so offer a small opt-in translation of the TITLE
+// ONLY (translating abstracts too would ~5x the DeepL cost for little gain).
+// =============================================================================
+const MAX_TRANSLATE_CHARS = 400;   // abuse/cost guard: patent titles are short
+const TRANSLATABLE_LANGS = ["en", "zh-CN"];
+const PN_RE = /^[A-Z]{2}[0-9A-Z]{1,20}$/;
+
+let _patentTransEnsured = false;
+async function ensurePatentTranslationsTable(pool) {
+  if (_patentTransEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS patent_translations (
+      pn            TEXT NOT NULL,
+      lang          TEXT NOT NULL,
+      content_hash  TEXT NOT NULL,
+      title_source  TEXT NOT NULL,
+      title_target  TEXT NOT NULL,
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (pn, lang)
+    );
+  `);
+  _patentTransEnsured = true;
+}
+
+async function readPatentTranslation(pn, lang, hash) {
+  const pool = getDbPool();
+  if (!pool) return null;
+  try {
+    await ensurePatentTranslationsTable(pool);
+    const { rows } = await pool.query(
+      `SELECT title_source, title_target FROM patent_translations WHERE pn=$1 AND lang=$2 AND content_hash=$3`,
+      [pn, lang, hash]
+    );
+    const row = rows && rows[0];
+    return row ? row.title_target : null;
+  } catch (e) {
+    console.warn("[patents] translation read failed (non-fatal):", e.message);
+    return null;
+  }
+}
+
+async function writePatentTranslation(pn, lang, hash, source, target) {
+  const pool = getDbPool();
+  if (!pool) return;
+  try {
+    await ensurePatentTranslationsTable(pool);
+    await pool.query(
+      `INSERT INTO patent_translations (pn, lang, content_hash, title_source, title_target, updated_at)
+       VALUES ($1,$2,$3,$4,$5, now())
+       ON CONFLICT (pn, lang) DO UPDATE
+       SET content_hash=EXCLUDED.content_hash, title_source=EXCLUDED.title_source,
+           title_target=EXCLUDED.title_target, updated_at=now()`,
+      [pn, lang, hash, source, target]
+    );
+  } catch (e) {
+    console.warn("[patents] translation write failed (non-fatal):", e.message);
+  }
+}
+
+// POST /api/patents/translate — translate one patent headline.
+// Body: { pn, title, target }  (target: "en" | "zh-CN")
+// Auth-gated like /api/patents. Cached by (pn, lang, title hash) so a headline
+// is never paid for twice.
+app.post("/api/patents/translate", whenAuth(requireAuth), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const pn = String(body.pn || "").trim().toUpperCase();
+    const title = String(body.title || "").trim();
+    const targetRaw = String(body.target || "").trim().toLowerCase();
+    const target = targetRaw === "zh" ? "zh-CN" : targetRaw;
+
+    if (!PN_RE.test(pn)) {
+      return res.status(400).json({ success: false, code: "bad_pn", error: "A valid publication number is required." });
+    }
+    if (!title || title.length > MAX_TRANSLATE_CHARS) {
+      return res.status(400).json({
+        success: false, code: "bad_title",
+        error: `Title must be 1-${MAX_TRANSLATE_CHARS} characters.`,
+      });
+    }
+    if (!TRANSLATABLE_LANGS.includes(target)) {
+      return res.status(400).json({ success: false, code: "bad_target", error: 'target must be "en" or "zh-CN".' });
+    }
+
+    const hash = crypto.createHash("sha1").update(title).digest("hex").slice(0, 16);
+    const cached = await readPatentTranslation(pn, target, hash);
+    if (cached) {
+      return res.json({ success: true, pn, target, translated: cached, source: title, cached: true });
+    }
+
+    // mtService walks DeepL -> Google and applies chip-fidelity verification
+    // (it rejects a translation that mangles embedded codes, which matters for
+    // titles containing publication numbers or chemical/formula tokens).
+    // No source language: patent titles can be in any language, so let the
+    // provider auto-detect rather than guessing.
+    const translated = await mtService.translateText(title, { target, source: "" });
+    if (!translated || translated === title) {
+      return res.status(502).json({
+        success: false, code: "translation_unavailable",
+        error: "No translation provider returned a result. Check the DeepL key.",
+      });
+    }
+    await writePatentTranslation(pn, target, hash, title, translated);
+    res.json({ success: true, pn, target, translated, source: title, cached: false });
+  } catch (err) {
+    res.status(500).json({ success: false, code: "translate_failed", error: err.message });
+  }
+});
+
 const PORT = config.PORT;
 // Only bind a port when executed directly. Guarded so a test harness can
 // `require("./server")` (registering routes on `app`) without opening a socket.
@@ -4961,6 +5178,10 @@ if (require.main === module) {
       .then(() => purgeStalePatentCache(pool))
       .then((n) => { if (n) console.log(`  patents_cache purged ${n} stale row(s).`); })
       .catch((e) => console.warn("[patents] cache table ensure failed (queries will not be cached):", e.message));
+    // Patent headline translations (reuses the DeepL key already configured).
+    ensurePatentTranslationsTable(pool)
+      .then(() => {})
+      .catch((e) => console.warn("[patents] translations table ensure failed:", e.message));
     // DeepL liveness probe (PR #95): warm the cached status shortly after boot
     // so /healthz reports deeplWorking without waiting for the first ping.
     mtService.ensureDeeplStatus()
@@ -5058,8 +5279,15 @@ module.exports = {
   ensurePatentsCacheTable,
   purgeStalePatentCache,
   trackedCompanies,
-  CPC_PRESETS,
-  CPC_PRESET_CODES,
+  ensurePatentTranslationsTable,
+  readPatentTranslation,
+  writePatentTranslation,
+  cpcCountsFor,
+  MAX_TRANSLATE_CHARS,
+  CPC_GROUPS,
+  CPC_CHIPS,
+  CPC_ALL_CODES,
+  CPC_DEFAULT_CODES,
   EPO_MAX_ITEMS,
 
   // Reader proxy (Suggested Updates split-screen reader) — hardened, text-only.

@@ -67,7 +67,7 @@ function jsonResp(body, { status = 200, headers = {} } = {}) {
 }
 
 // A minimal but structurally real exchange-document.
-function opsDoc({ number = "4123456", applicant = "DeepMind Limited", date = "20250312", title = "Neural game character animation" } = {}) {
+function opsDoc({ number = "4123456", applicant = "DeepMind Limited", date = "20250312", title = "Neural game character animation", lang = "en" } = {}) {
   return {
     "bibliographic-data": {
       "publication-reference": {
@@ -79,7 +79,7 @@ function opsDoc({ number = "4123456", applicant = "DeepMind Limited", date = "20
           date: { "#text": date },
         }],
       },
-      "invention-title": { "@lang": "en", "#text": title },
+      "invention-title": { "@lang": lang, "#text": title },
       parties: { applicants: { applicant: [{ "applicant-name": { name: { "#text": applicant } } }] } },
     },
   };
@@ -141,8 +141,24 @@ test("company-options serves the KB company list and the CPC presets", async () 
   // Sorted by name so the dropdown is stable for the user.
   const names = body.companies.map(c => c.name);
   assert.deepStrictEqual(names, [...names].sort((a, b) => a.localeCompare(b)));
-  assert.deepStrictEqual(body.cpc.map(c => c.code), ["A63F", "G06N", "G06T", "G10L", "H04N"]);
-  for (const c of body.cpc) assert.ok(c.label, `${c.code} needs a label`);
+  // Grouped classification chips, not the old flat A63F/G06N/G06T/G10L/H04N set.
+  assert.ok(Array.isArray(body.cpcGroups) && body.cpcGroups.length >= 3);
+  const chips = body.cpcGroups.flatMap(g => g.chips);
+  assert.ok(chips.length > 0, "at least one chip is offered");
+  for (const g of body.cpcGroups) {
+    assert.ok(g.id && g.label, "group needs id + label");
+    for (const c of g.chips) {
+      assert.ok(c.id && c.label, "chip needs id + label");
+      assert.ok(Array.isArray(c.codes) && c.codes.length, `${c.id} needs codes`);
+    }
+  }
+  // The UI pre-selects this so a bare search is video games, not pinball.
+  assert.deepStrictEqual(body.cpcDefaults, ["A63F13/00"]);
+  // Broad subclasses must never be offered.
+  const offered = chips.flatMap(c => c.codes);
+  for (const broad of ["A63F", "G06N", "G06T", "G06F"]) {
+    assert.ok(!offered.includes(broad), `${broad} is too broad to be a chip`);
+  }
   assert.strictEqual(body.configured, true, "credentials are set in this process");
   assert.strictEqual(body.attribution, "Data: EPO OPS");
 });
@@ -446,4 +462,137 @@ test("the patents cache degrades gracefully with no database configured", async 
   assert.strictEqual(await srv.readPatentCache("any-key"), null, "cache miss with no pool");
   await srv.writePatentCache("any-key", { company: "x" }, { success: true });
   assert.strictEqual(await srv.readPatentCache("any-key"), null, "write is a no-op without a pool");
+});
+
+// ---------------------------------------------------------------------------
+// Headline translation
+// ---------------------------------------------------------------------------
+// A Chinese or French headline is unreadable to most users, so each card
+// carries the language OPS reported and the UI offers an opt-in translation.
+test("patent cards report the language of the headline", async () => {
+  const restore = stubOps({
+    docs: [
+      opsDoc({ number: "4123456", lang: "zh", title: "神经网络游戏角色动画" }),
+      opsDoc({ number: "4222222", lang: "fr", title: "Animation de personnage" }),
+    ],
+  });
+  try {
+    const { status, body } = await request(server, "/api/patents?cpc=A63F13/00&abstracts=0");
+    assert.strictEqual(status, 200);
+    const byId = Object.fromEntries(body.patents.map(p => [p.id, p]));
+    assert.strictEqual(byId["EP4123456A1"].titleLang, "zh");
+    assert.strictEqual(byId["EP4222222A1"].titleLang, "fr");
+    // Every variant is kept so the UI can offer and restore the original.
+    assert.ok(Array.isArray(byId["EP4123456A1"].titles));
+  } finally {
+    restore();
+  }
+});
+
+async function postJson(path, payload) {
+  const res = await realFetch(`http://127.0.0.1:${server.address().port}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  let json = null;
+  try { json = await res.json(); } catch (e) { /* non-JSON body */ }
+  return { status: res.status, body: json };
+}
+
+test("translate rejects malformed input rather than spending DeepL quota", async () => {
+  const base = { pn: "EP4123456A1", title: "A game method", target: "en" };
+  const cases = [
+    [{ ...base, pn: "../../etc/passwd" }, "bad_pn"],
+    [{ ...base, pn: "" }, "bad_pn"],
+    [{ ...base, title: "" }, "bad_title"],
+    [{ ...base, title: "x".repeat(5000) }, "bad_title"],
+    [{ ...base, target: "klingon" }, "bad_target"],
+    [{ ...base, target: "" }, "bad_target"],
+  ];
+  for (const [payload, code] of cases) {
+    const r = await postJson("/api/patents/translate", payload);
+    assert.strictEqual(r.status, 400, `${code}: expected 400, got ${r.status}`);
+    assert.strictEqual(r.body.code, code);
+  }
+});
+
+test("translate reports cleanly when no provider is configured", async () => {
+  // No DEEPL_API_KEY / GOOGLE_TRANSLATE_KEY in the test environment, so the
+  // mtService chain yields nothing. The endpoint must say so explicitly
+  // instead of silently returning the untranslated title as if it had worked.
+  const r = await postJson("/api/patents/translate", {
+    pn: "EP4123456A1",
+    title: "神经网络游戏角色动画",
+    target: "en",
+  });
+  assert.strictEqual(r.status, 502);
+  assert.strictEqual(r.body.success, false);
+  assert.strictEqual(r.body.code, "translation_unavailable");
+});
+
+test("translation cache degrades gracefully with no database configured", async () => {
+  assert.strictEqual(await srv.readPatentTranslation("EP4123456A1", "en", "abc"), null);
+  await srv.writePatentTranslation("EP4123456A1", "en", "abc", "src", "dst");
+  assert.strictEqual(await srv.readPatentTranslation("EP4123456A1", "en", "abc"), null);
+});
+
+// ---------------------------------------------------------------------------
+// Per-chip hit counts (quota-sensitive, cached, throttle-aware)
+// ---------------------------------------------------------------------------
+test("cpc-counts reports a count per chip and serves the second call from cache", async () => {
+  let searchCalls = 0;
+  const restore = stubFetch(async (url) => {
+    const u = String(url);
+    if (u.includes(TOKEN)) return jsonResp({ access_token: "tok", expires_in: 1199 });
+    if (u.includes(SEARCH)) {
+      searchCalls += 1;
+      return jsonResp(searchPayload([opsDoc()], "42"));
+    }
+    throw new Error(`unrouted: ${u}`);
+  });
+  try {
+    const { status, body } = await request(server, "/api/patents/cpc-counts");
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.success, true);
+    const ids = Object.keys(body.counts);
+    assert.strictEqual(ids.length, srv.CPC_CHIPS.length, "every chip is attempted");
+    for (const id of ids) assert.strictEqual(body.counts[id], 42);
+    assert.strictEqual(body.throttled, false);
+    assert.strictEqual(searchCalls, srv.CPC_CHIPS.length);
+
+    // Second call returns the same counts. NOTE: the zero-call caching path is
+    // only exercised with a DATABASE_URL present — without a pool the cache
+    // layer no-ops by design (see "the patents cache degrades gracefully"),
+    // so correctness is asserted here rather than call count.
+    const again = await request(server, "/api/patents/cpc-counts");
+    assert.strictEqual(again.body.counts[ids[0]], 42);
+    assert.deepStrictEqual(Object.keys(again.body.counts).sort(), [...ids].sort());
+  } finally {
+    restore();
+  }
+});
+
+test("cpc-counts stops as soon as OPS throttles instead of burning the quota", async () => {
+  let searchCalls = 0;
+  const restore = stubFetch(async (url) => {
+    const u = String(url);
+    if (u.includes(TOKEN)) return jsonResp({ access_token: "tok", expires_in: 1199 });
+    if (u.includes(SEARCH)) {
+      searchCalls += 1;
+      return jsonResp("", {
+        status: 403,
+        headers: { "Retry-After": "600", "X-Rejection-Reason": "Individual per hour traffic limit exceeded" },
+      });
+    }
+    throw new Error(`unrouted: ${u}`);
+  });
+  try {
+    const { status, body } = await request(server, "/api/patents/cpc-counts");
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.throttled, true, "the probe must report that it gave up");
+    assert.strictEqual(searchCalls, 1, "it must not keep hammering OPS after a throttle");
+  } finally {
+    restore();
+  }
 });
