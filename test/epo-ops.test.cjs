@@ -140,11 +140,11 @@ test("buildCql ANDs company, keyword, CPC and date range", () => {
   // Applicant: one phrase, right-truncated (see the tests below for why).
   assert.match(cql, /pa = "Google DeepMind\*"/);
   assert.match(cql, /ta all "neural"/);
-  assert.match(cql, /cpc = "A63F"/);
-  assert.match(cql, /cpc = "G06N"/);
+  assert.match(cql, /cpc=\/low A63F/);
+  assert.match(cql, /cpc=\/low G06N/);
   assert.match(cql, /pd within "20240101 20261231"/);
   // Multiple CPCs must be OR'd INSIDE a group, not AND'd flat.
-  assert.match(cql, /\(cpc = "A63F" OR cpc = "G06N"\)/);
+  assert.match(cql, /\(cpc=\/low A63F OR cpc=\/low G06N\)/);
   // Clauses combine with AND.
   assert.ok(cql.includes(") AND "), `expected AND-joined clauses, got: ${cql}`);
 });
@@ -225,7 +225,7 @@ test("buildCql strips quotes and rejects malformed CPC codes", () => {
   assert.ok(!cql.includes('\\'));
 
   // Garbage CPC is dropped rather than sent to OPS and 400-ing.
-  assert.strictEqual(buildCql({ cpc: ["ZZZZ", "not-a-code", "A63F"], keyword: "x" }), 'ta all "x" AND cpc = "A63F"');
+  assert.strictEqual(buildCql({ cpc: ["ZZZZ", "not-a-code", "A63F"], keyword: "x" }), 'ta all "x" AND cpc=/low A63F');
 });
 
 test("buildCql returns empty for an empty query and supports open-ended dates", () => {
@@ -398,8 +398,8 @@ test("CPC filters are grouped, labelled, and default to video games", () => {
       for (const code of c.codes) {
         const sent = isCpcCode(code);
         assert.ok(sent, `${code} must be accepted by the validator`);
-        // Must be emitted in OPS's spaced form, e.g. A63F 13/00.
-        assert.match(sent, /^[A-HY]\d{2}[A-Z]( \d{1,4}(\/\d{2,6}(\/low)?)?)?$/, `${code} -> ${sent}`);
+        // Must be emitted in OPS's concatenated form, e.g. A63F13/00.
+        assert.match(sent, /^[A-HY]\d{2}[A-Z]\d{1,4}(\/\d{2,6})?$/, `${code} -> ${sent}`);
       }
     }
   }
@@ -415,40 +415,43 @@ test("CPC filters are grouped, labelled, and default to video games", () => {
 test("broad A63F is what let pinball and roulette through — the default must not be it", () => {
   // A63F = "CARD, BOARD, OR ROULETTE GAMES; INDOOR GAMES USING SMALL MOVING
   // PLAYING BODIES; VIDEO GAMES; GAMES NOT OTHERWISE PROVIDED FOR".
-  assert.strictEqual(buildCql({ cpc: ["A63F"] }), 'cpc = "A63F"');
-  assert.strictEqual(buildCql({ cpc: ["A63F13/00"] }), 'cpc = "A63F 13/00"');
+  assert.strictEqual(buildCql({ cpc: ["A63F"] }), 'cpc=/low A63F');
+  assert.strictEqual(buildCql({ cpc: ["A63F13/00"] }), 'cpc=/low A63F13/00');
   assert.notStrictEqual(CPC_DEFAULT_CODES[0], "A63F");
 });
 
-// The bug this fixes: OPS indexes CPC in the SPACED form it also returns in
-// biblio data (`A63F 13/00`), not `A63F13/00`. The un-spaced form matched
-// nothing at all, so every group-level code reported zero results. The EPO's
-// own release notes write it as "C08F 220".
-test("CPC codes are sent in OPS's spaced form, not the concatenated form", () => {
-  assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00");
-  assert.strictEqual(isCpcCode("G06N3/092"), "G06N 3/092");
-  assert.strictEqual(isCpcCode("G06F40/35"), "G06F 40/35");
-  assert.strictEqual(isCpcCode("G06F9/50"), "G06F 9/50");
-  // A bare subclass has no group part, so no space is added.
+// OPS CQL searches CPC by the CONCATENATED symbol. The SPACED form (`A63F 13/00`)
+// is Espacenet display syntax and OPS CQL rejects it with HTTP 500
+// SERVER.DomainAccess — see the OPS v3.2 guide Appendix 4.2 (`cpc=A01B`).
+test("CPC codes are sent in OPS's concatenated form, not the spaced form", () => {
+  assert.strictEqual(isCpcCode("A63F13/00"), "A63F13/00");
+  assert.strictEqual(isCpcCode("G06N3/092"), "G06N3/092");
+  assert.strictEqual(isCpcCode("G06F40/35"), "G06F40/35");
+  assert.strictEqual(isCpcCode("G06F9/50"), "G06F9/50");
+  // A bare subclass has no group part.
   assert.strictEqual(isCpcCode("A63F"), "A63F");
-  // Never emit the concatenated form — that is what returned zero.
-  assert.notStrictEqual(isCpcCode("A63F13/00"), "A63F13/00");
+  // Spaced input is normalised to the concatenated form.
+  assert.strictEqual(isCpcCode("A63F 13/00"), "A63F13/00");
 });
 
-// Do NOT re-add `/low`. The EPO's Espacenet notes say subgroup level needs it
-// to include children, but OPS rejected it with `HTTP 500 SERVER.DomainAccess`,
-// which took the whole Patents tab down. /low is Espacenet Smart-search syntax;
-// OPS CQL does not accept it. Use /api/patents/probe-cpc-format to re-test if
-// OPS behaviour ever changes.
-test("no /low suffix — OPS rejects it with a 500, even though Espacenet documents it", () => {
-  assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00", "main group");
-  assert.strictEqual(isCpcCode("G06N20/00"), "G06N 20/00");
-  assert.strictEqual(isCpcCode("G06T19/00"), "G06T 19/00");
-  assert.strictEqual(isCpcCode("A63F13/67"), "A63F 13/67", "subgroup — still no /low");
-  assert.strictEqual(isCpcCode("G06N5/045"), "G06N 5/045");
-  // Guard: nothing we send may end in /low.
+// Hierarchy is the `/low` RELATION qualifier (`cpc=/low A63F13/00`), NOT a `/low`
+// appended to the symbol. PR #113/#114 appended `/low` to the VALUE
+// (`"A63F 13/00/low"`), which OPS rejected with HTTP 500 SERVER.DomainAccess.
+// The correct form is documented in the OPS v3.2 guide, Table 30: `cpc=/low A01B`
+// = "A01B and all subclasses".
+test("/low is a relation qualifier, never a suffix on the symbol", () => {
+  // isCpcCode emits the bare concatenated symbol — no /low, no space.
+  assert.strictEqual(isCpcCode("A63F13/00"), "A63F13/00", "main group");
+  assert.strictEqual(isCpcCode("G06N20/00"), "G06N20/00");
+  assert.strictEqual(isCpcCode("A63F13/67"), "A63F13/67", "subgroup");
+  // buildCql attaches /low as a qualifier, and never appends it to the value.
+  assert.strictEqual(buildCql({ cpc: ["A63F13/00"] }), "cpc=/low A63F13/00");
+  assert.strictEqual(buildCql({ cpc: ["A63F13/67"] }), "cpc=/low A63F13/67");
   for (const code of CPC_ALL_CODES) {
-    assert.ok(!/\/low$/i.test(isCpcCode(code)), `${code} must not be sent with /low`);
+    const cql = buildCql({ cpc: [code] });
+    assert.ok(cql.startsWith("cpc=/low "), `${code} must use the /low qualifier`);
+    const value = cql.slice("cpc=/low ".length);
+    assert.ok(!/\/low/i.test(value), `${code} must not append /low to the symbol`);
   }
 });
 
@@ -456,11 +459,11 @@ test("the CPC validator accepts subclasses, groups and subgroups", () => {
   for (const good of ["A63F", "G06N", "A63F13/00", "G06N3/092", "G06F40/35", "G06F9/50", "G06T13/40"]) {
     const sent = isCpcCode(good);
     assert.ok(sent, `${good} must be valid`);
-    // The canonical output is the spaced form; it round-trips.
+    // The canonical output is the concatenated form; it round-trips.
     assert.strictEqual(isCpcCode(sent), sent, `${good} -> ${sent} must be idempotent`);
   }
   // Case and stray whitespace are normalised.
-  assert.strictEqual(isCpcCode(" a63f13/00 "), "A63F 13/00");
+  assert.strictEqual(isCpcCode(" a63f13/00 "), "A63F13/00");
   for (const bad of ["", "NOTACODE", "A63F13/", "ZZZZ", "123", null]) {
     assert.strictEqual(isCpcCode(bad), "", `${JSON.stringify(bad)} must be rejected`);
   }
@@ -703,7 +706,7 @@ test("searchCql with bypassBreaker runs while the circuit is open and records no
   // A bypassing probe still reaches OPS...
   const before = searchAttempts;
   await assert.rejects(
-    () => client.searchCql('cpc = "A63F 13/00"', { bypassBreaker: true }),
+    () => client.searchCql('cpc=/low A63F13/00', { bypassBreaker: true }),
     /HTTP 500/
   );
   assert.strictEqual(searchAttempts, before + 1, "bypassBreaker still issues the HTTP call");

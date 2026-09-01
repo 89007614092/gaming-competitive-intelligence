@@ -163,7 +163,7 @@ const {
   CPC_CHIPS,
   CPC_ALL_CODES,
   CPC_DEFAULT_CODES,
-  isCpcCode,              // normalises to the spaced form OPS expects
+  isCpcCode,              // normalises to the concatenated form OPS expects
   normaliseCpc,
   CPC_CODE_RE,
   MAX_ITEMS: EPO_MAX_ITEMS,
@@ -5057,19 +5057,18 @@ app.get("/api/patents/validate-cpc", whenAuth(requireAuth), async (req, res) => 
 // GET /api/patents/probe-cpc-format — determine empirically which CPC spelling
 // OPS accepts, instead of guessing and taking the tab down again.
 //
-// History, because it explains why this exists: `A63F13/00` (concatenated)
-// returned 0 results everywhere; `A63F 13/67/low` (the form the EPO's Espacenet
-// notes recommend for subgroups) returned HTTP 500 SERVER.DomainAccess. Both
-// were wrong in different ways, and each cost a deploy to discover.
+// History, because it explains why this exists: the SPACED form (`A63F 13/00`)
+// returned HTTP 500 SERVER.DomainAccess, and the QUOTED form (`cpc = "A63F13/00"`)
+// returned 0 results everywhere. The OPS v3.2 guide (Appendix 4.2) resolves it:
+// CPC is UNQUOTED and CONCATENATED, with `/low` as a relation qualifier —
+// `cpc=/low A63F13/00`. Each wrong guess cost a deploy.
 //
 // This runs one search per candidate spelling and reports status + hit count,
-// so the correct form is measured rather than inferred. Admin-only: it spends
-// OPS searches (~2-3 per call).
+// so the correct form is measured rather than inferred.
 // Diagnostic only: gated to authenticated users (on a single-owner deployment
 // that means the owner). It deliberately issues a few live OPS searches, so it
 // is not opened to anonymous callers, but it does NOT require the admin role —
-// Molly's session was not resolving as "admin" (ADMIN_EMAILS / allowed_emails
-// not seeded) which blocked running the probe entirely.
+// the earlier admin gate was a regression that blocked running the probe.
 app.get("/api/patents/probe-cpc-format", whenAuth(requireAuth), async (req, res) => {
   try {
     if (!epoClient.isConfigured()) {
@@ -5079,19 +5078,18 @@ app.get("/api/patents/probe-cpc-format", whenAuth(requireAuth), async (req, res)
     if (!CPC_CODE_RE.test(raw)) {
       return res.status(400).json({ success: false, code: "bad_code", error: "Provide a CPC code, e.g. A63F13/00" });
     }
-    const spaced = raw.replace(/^([A-HY]\d{2}[A-Z])(\d+)/, "$1 $2");
-    const isSubgroup = /\//.test(raw) && !/\/(0+)$/.test(raw);
-
+    // Compare the forms that matter, per the OPS v3.2 guide (Appendix 4.2):
+    //   cpc = "A63F13/00"   — the old quoted form (returned 0)
+    //   cpc=A63F13/00       — unquoted exact match
+    //   cpc=/low A63F13/00  — unquoted + /low qualifier (symbol AND all lower levels)
     const candidates = [
-      ["concatenated", raw],
-      ["spaced", spaced],
+      ["quoted", `cpc = "${raw}"`],
+      ["unquoted", `cpc=${raw}`],
+      ["unquoted + /low", `cpc=/low ${raw}`],
     ];
-    // /low is offered only for comparison — it is not used in production.
-    if (req.query.includeLow === "1") candidates.push([`spaced + /low${isSubgroup ? "" : " (main group)"}`, `${spaced}/low`]);
 
     const results = {};
-    for (const [name, code] of candidates) {
-      const cql = `cpc = "${code}"`;
+    for (const [name, cql] of candidates) {
       try {
         const r = await epoClient.searchCql(cql, { limit: 1, bypassBreaker: true });
         results[name] = { cql, ok: true, count: r.totalAvailable };
@@ -5102,10 +5100,9 @@ app.get("/api/patents/probe-cpc-format", whenAuth(requireAuth), async (req, res)
     res.json({
       success: true,
       input: req.query.code || "A63F13/00",
-      isSubgroup,
       results,
       // What the app sends today, for comparison against the candidates.
-      current: `cpc = "${isCpcCode(raw)}"`,
+      current: `cpc=/low ${isCpcCode(raw)}`,
       attribution: "Data: EPO OPS",
     });
   } catch (err) {
