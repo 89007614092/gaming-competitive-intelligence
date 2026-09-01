@@ -682,6 +682,36 @@ test("repeated failures open the circuit and it re-closes after the cooldown", a
   assert.strictEqual(client.status().failures, 0, "a success resets the counter");
 });
 
+test("searchCql with bypassBreaker runs while the circuit is open and records no failure", async () => {
+  // Mirrors the real incident: bad `/low` searches tripped the breaker, then
+  // the diagnostic probe could not run because it, too, short-circuited.
+  let searchAttempts = 0;
+  const { fetchImpl } = router({
+    [TOKEN_NEEDLE]: tokenResp(1199),
+    [SEARCH_NEEDLE]: () => {
+      searchAttempts += 1;
+      return jsonResp("boom", { status: 500 });
+    },
+  });
+  let clock = 1_700_000_000_000;
+  const client = createEpoClient({ config: KEYS, fetchImpl, now: () => clock, threshold: 1, cooldownMs: 60_000 });
+
+  // One failure opens the circuit.
+  await assert.rejects(() => client.search({ cpc: ["A63F"] }), /HTTP 500/);
+  assert.strictEqual(client.status().circuitOpen, true, "circuit is open after one failure");
+
+  // A bypassing probe still reaches OPS...
+  const before = searchAttempts;
+  await assert.rejects(
+    () => client.searchCql('cpc = "A63F 13/00"', { bypassBreaker: true }),
+    /HTTP 500/
+  );
+  assert.strictEqual(searchAttempts, before + 1, "bypassBreaker still issues the HTTP call");
+  // ...and does NOT record a failure, so the probe can't poison the breaker.
+  assert.strictEqual(client.status().failures, 1, "failures counter unchanged by the bypassed probe");
+  assert.strictEqual(client.status().circuitOpen, true, "breaker stays open");
+});
+
 // ---------------------------------------------------------------------------
 // search / biblio / abstract
 // ---------------------------------------------------------------------------

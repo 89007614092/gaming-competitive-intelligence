@@ -596,3 +596,41 @@ test("cpc-counts stops as soon as OPS throttles instead of burning the quota", a
     restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/patents/probe-cpc-format
+// ---------------------------------------------------------------------------
+test("GET /api/patents/probe-cpc-format measures spellings and never trips the breaker", async () => {
+  // Auth is off in this harness, so the (relaxed) gate is inert and the probe
+  // runs without a session. We simulate OPS returning hits for the spaced form,
+  // zero hits for the concatenated form, and a 500 for the /low variant — the
+  // exact scenario that previously tripped the breaker AND blocked the probe.
+  const restore = stubFetch(async (url) => {
+    const u = String(url);
+    if (u.includes(TOKEN)) return jsonResp({ access_token: "tok", token_type: "Bearer", expires_in: 1199 });
+    if (u.includes(SEARCH)) {
+      const decoded = decodeURIComponent(u);
+      if (decoded.includes("/low")) return jsonResp("boom", { status: 500 });
+      if (decoded.includes("A63F 13/67")) return jsonResp(searchPayload([opsDoc()], "42"));
+      if (decoded.includes("A63F13/67")) return jsonResp(searchPayload([], "0"));
+      return jsonResp(searchPayload([opsDoc()], "1"));
+    }
+    throw new Error(`unrouted: ${u}`);
+  });
+  try {
+    const { status, body } = await request(server, "/api/patents/probe-cpc-format?code=A63F13/67&includeLow=1");
+    assert.strictEqual(status, 200, "probe must run without admin gating");
+    assert.strictEqual(body.success, true);
+    assert.strictEqual(body.results.spaced.ok, true, "spaced form returns hits");
+    assert.strictEqual(body.results.spaced.count, 42);
+    assert.strictEqual(body.results.concatenated.ok, true, "concatenated form returns zero (not an error)");
+    assert.strictEqual(body.results.concatenated.count, 0);
+    assert.strictEqual(body.results["spaced + /low"].ok, false, "/low variant 500s");
+    // A failing candidate must NOT trip OUR breaker (the probe passes
+    // bypassBreaker), otherwise the diagnostic would disable live searches.
+    assert.strictEqual(srv.epoClient.status().circuitOpen, false, "the probe must not poison the breaker");
+    assert.strictEqual(srv.epoClient.status().failures, 0, "no failure recorded for a bypassed call");
+  } finally {
+    restore();
+  }
+});
