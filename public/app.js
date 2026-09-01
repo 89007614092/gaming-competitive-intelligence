@@ -2807,7 +2807,11 @@ async function loadPatents() {
   renderPatentCpcGroups();
   renderPatentConfigNote();
   setupPatents();
-  loadPatentCpcCounts();   // optional per-chip counts, never blocks a search
+  // Hit counts are deliberately NOT fetched here. OPS reports a small search
+  // allowance (single digits to low teens per hour), and one call per chip
+  // would consume the whole budget on every visit to this tab — leaving
+  // nothing for actual searches. Opt-in via the "Show hit counts" button;
+  // see loadPatentCpcCounts().
   // Re-render the existing result set, e.g. after a language change.
   if (patentResults) renderPatents(patentResults);
 }
@@ -2853,16 +2857,35 @@ let patentCpcCountsRequested = false;
 async function loadPatentCpcCounts() {
   if (patentCpcCountsRequested) return;
   patentCpcCountsRequested = true;
+
+  const btn = document.getElementById("patentCpcCountsBtn");
+  const note = document.getElementById("patentCpcCountsNote");
+  if (btn) { btn.disabled = true; btn.textContent = window.t('patents.countsLoading'); }
+
   try {
     const res = await fetch(`${API_BASE}/patents/cpc-counts`);
     const json = await res.json();
     if (json && json.success) {
       patentCpcCounts = json.counts || {};
       renderPatentCpcGroups();
+      if (note) {
+        // Be honest when OPS ran out of allowance part-way through: the probe
+        // stops rather than exhausting the quota, so these are partial.
+        note.textContent = json.throttled
+          ? window.t('patents.countsPartial')
+          : window.t('patents.countsDone');
+        note.classList.toggle("warn", !!json.throttled);
+      }
+      if (btn) btn.textContent = window.t('patents.countsRefresh');
     }
   } catch (err) {
-    // Counts are a convenience, not data — swallow and carry on.
+    if (note) {
+      note.textContent = window.t('patents.countsFailed');
+      note.classList.add("warn");
+    }
+    if (btn) btn.textContent = window.t('patents.showCounts');
   }
+  if (btn) btn.disabled = false;
 }
 
 function chipCountHtml(chipId) {
@@ -2943,6 +2966,10 @@ function setupPatents() {
     if (!btn) return;
     translatePatentHeadline(btn);
   });
+
+  // Hit counts cost one OPS search per chip against a small hourly allowance,
+  // so they are explicitly requested — never fetched on tab open.
+  document.getElementById("patentCpcCountsBtn")?.addEventListener("click", loadPatentCpcCounts);
   patentUiReady = true;
 }
 

@@ -165,6 +165,38 @@ silently returns zero — exactly the failure mode we just spent two PRs fixing.
 3. Run it once after deploy. Any code returning 0 is either wrong or
    non-hierarchical → fix or drop it before exposing it as a chip.
 
+### 5a. Confirmed after deploy: the OPS search allowance is small
+
+`/healthz` now surfaces `patents.throttlingControl`, and the live value was:
+
+```
+busy (images=green:100, inpadoc=green:45, other=green:1000,
+      retrieval=green:100, search=green:15)
+```
+
+**`search` is the budget that matters, and it is small** (15 in that window).
+That changes the cost model for everything above:
+
+| Operation | OPS searches | Fits in one window? |
+|---|---|---|
+| One user search | 1 | ✔ |
+| Hit counts, all chips | 24 | ✘ |
+| `validate-cpc`, all codes | 37 | ✘ |
+
+Consequences, and the reason #111 was amended:
+
+- Hit counts must **never** be fetched automatically. Opening the Patents tab
+  would consume the entire allowance and make real searches return 429 for the
+  rest of the hour. They are now behind an explicit **"Show hit counts"**
+  button.
+- The probes are **resumable**: each chip/code is cached individually, so
+  repeated runs across successive windows eventually populate everything. They
+  abort at the first throttle signal rather than exhausting the quota, and say
+  so in the response (`throttled: true` → "these counts are partial").
+- This also constrains **Phase 2** (live patent landscape, ~31 companies): it
+  cannot be a synchronous fan-out under this allowance and would need a
+  cron-warmed cache regardless.
+
 Optionally, and I think worth it: **show live hit counts on the chips**
 (`Showing X of Y matches` already exists in the results header). It doubles as
 permanent verification and as a usability signal. Cost: one cached OPS call per

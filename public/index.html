@@ -694,6 +694,15 @@
              pinball. -->
         <div class="patent-cpc-groups" id="patentCpcGroups" role="group" aria-label="Classification filters"></div>
 
+        <!-- Hit counts cost one OPS search per chip, and OPS allows only a
+             small number of searches per hour. Fetching them automatically
+             would exhaust the allowance and break real searches, so they are
+             requested on demand instead. -->
+        <div class="patent-cpc-counts-tools">
+          <button type="button" class="btn btn-sm" id="patentCpcCountsBtn">Show hit counts</button>
+          <span class="patent-cpc-counts-note" id="patentCpcCountsNote"></span>
+        </div>
+
         <!-- Configuration / freshness note -->
         <p class="patent-config-note" id="patentConfigNote"></p>
 

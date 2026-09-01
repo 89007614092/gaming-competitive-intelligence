@@ -77,6 +77,13 @@
       'patents.showOriginal': 'Show original',
       'patents.translating': 'Translating…',
       'patents.translationFailed': 'Translation unavailable',
+      // Hit counts: one OPS search per chip against a small hourly allowance.
+      'patents.showCounts': 'Show hit counts',
+      'patents.countsRefresh': 'Refresh hit counts',
+      'patents.countsLoading': 'Counting…',
+      'patents.countsDone': 'Counts loaded from the European Patent Office.',
+      'patents.countsPartial': 'OPS ran out of search allowance part-way through — these counts are partial. Try again later.',
+      'patents.countsFailed': 'Could not load hit counts.',
       'patents.liveNote': 'Live results from the European Patent Office (EPO OPS). Queries are cached for 12 hours to stay within the EPO fair-use quota.',
       'patents.notConfiguredNote': 'Live patent search is not configured on this server — the EPO OPS credentials are missing.',
 
@@ -253,6 +260,12 @@
       'patents.showOriginal': '显示原文',
       'patents.translating': '正在翻译……',
       'patents.translationFailed': '翻译不可用',
+      'patents.showCounts': '显示命中数量',
+      'patents.countsRefresh': '刷新命中数量',
+      'patents.countsLoading': '正在统计……',
+      'patents.countsDone': '命中数量已加载。',
+      'patents.countsPartial': 'EPO 检索配额中途用尽——当前数量为部分结果，请稍后重试。',
+      'patents.countsFailed': '无法加载命中数量。',
       'patents.liveNote': '实时数据来自欧洲专利局（EPO OPS）。为遵守 EPO 的合理使用配额，检索结果会缓存 12 小时。',
       'patents.notConfiguredNote': '此服务器尚未配置实时专利检索——缺少 EPO OPS 凭据。',
 
