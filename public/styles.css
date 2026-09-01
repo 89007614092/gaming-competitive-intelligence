@@ -5236,3 +5236,17 @@ body {
   .patent-cpc-group { flex-direction: column; gap: 4px; }
   .patent-cpc-group-label { flex: 1 1 auto; padding-top: 0; }
 }
+
+/* Hit-count controls: opt-in, because one OPS search per chip is expensive. */
+.patent-cpc-counts-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+.patent-cpc-counts-note {
+  font-size: 11.5px;
+  color: var(--text-muted, #6b7280);
+}
+.patent-cpc-counts-note.warn { color: var(--warning, #d97706); font-weight: 600; }
