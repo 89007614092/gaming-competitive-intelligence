@@ -230,7 +230,7 @@ test("/api/patents normalises OPS results into the card shape the UI renders", a
     // The CQL actually sent to OPS is echoed back for debugging/transparency.
     // Applicant search must be token + truncation, never the all-words form.
     assert.match(body.cql, /pa = "DeepMind\*"/);
-    assert.match(body.cql, /\(cpc = "A63F" OR cpc = "G06N"\)/);
+    assert.match(body.cql, /\(cpc=\/low A63F OR cpc=\/low G06N\)/);
     assert.ok(!/pa all/.test(body.cql), "must never emit an all-words applicant clause");
     // The query is echoed so the UI can restore its filter state.
     assert.strictEqual(body.query.company, "DeepMind");
@@ -602,30 +602,30 @@ test("cpc-counts stops as soon as OPS throttles instead of burning the quota", a
 // ---------------------------------------------------------------------------
 test("GET /api/patents/probe-cpc-format measures spellings and never trips the breaker", async () => {
   // Auth is off in this harness, so the (relaxed) gate is inert and the probe
-  // runs without a session. We simulate OPS returning hits for the spaced form,
-  // zero hits for the concatenated form, and a 500 for the /low variant — the
-  // exact scenario that previously tripped the breaker AND blocked the probe.
+  // runs without a session. We simulate OPS: quoted form -> 0, plain unquoted
+  // -> 1 hit, and the /low qualifier -> 42 hits (the correct form).
   const restore = stubFetch(async (url) => {
     const u = String(url);
     if (u.includes(TOKEN)) return jsonResp({ access_token: "tok", token_type: "Bearer", expires_in: 1199 });
     if (u.includes(SEARCH)) {
       const decoded = decodeURIComponent(u);
-      if (decoded.includes("/low")) return jsonResp("boom", { status: 500 });
-      if (decoded.includes("A63F 13/67")) return jsonResp(searchPayload([opsDoc()], "42"));
-      if (decoded.includes("A63F13/67")) return jsonResp(searchPayload([], "0"));
+      if (decoded.includes("/low")) return jsonResp(searchPayload([opsDoc()], "42"));
+      if (decoded.includes('"')) return jsonResp(searchPayload([], "0"));
       return jsonResp(searchPayload([opsDoc()], "1"));
     }
     throw new Error(`unrouted: ${u}`);
   });
   try {
-    const { status, body } = await request(server, "/api/patents/probe-cpc-format?code=A63F13/67&includeLow=1");
+    const { status, body } = await request(server, "/api/patents/probe-cpc-format?code=A63F13/67");
     assert.strictEqual(status, 200, "probe must run without admin gating");
     assert.strictEqual(body.success, true);
-    assert.strictEqual(body.results.spaced.ok, true, "spaced form returns hits");
-    assert.strictEqual(body.results.spaced.count, 42);
-    assert.strictEqual(body.results.concatenated.ok, true, "concatenated form returns zero (not an error)");
-    assert.strictEqual(body.results.concatenated.count, 0);
-    assert.strictEqual(body.results["spaced + /low"].ok, false, "/low variant 500s");
+    assert.strictEqual(body.results.quoted.ok, true, "quoted form is accepted but empty");
+    assert.strictEqual(body.results.quoted.count, 0);
+    assert.strictEqual(body.results.unquoted.ok, true, "unquoted exact match returns hits");
+    assert.strictEqual(body.results.unquoted.count, 1);
+    assert.strictEqual(body.results["unquoted + /low"].ok, true, "/low qualifier returns hits");
+    assert.strictEqual(body.results["unquoted + /low"].count, 42);
+    assert.strictEqual(body.current, "cpc=/low A63F13/67", "the app now emits the /low-qualified concatenated form");
     // A failing candidate must NOT trip OUR breaker (the probe passes
     // bypassBreaker), otherwise the diagnostic would disable live searches.
     assert.strictEqual(srv.epoClient.status().circuitOpen, false, "the probe must not poison the breaker");
