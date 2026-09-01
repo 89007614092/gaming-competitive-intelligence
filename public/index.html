@@ -687,8 +687,12 @@
           <button class="btn btn-primary" id="patentSearchBtn" type="button">Search Patents</button>
         </div>
 
-        <!-- CPC classification chips (the AI x gaming set) -->
-        <div class="patent-cpc-row" id="patentCpcRow" role="group" aria-label="Classification filters"></div>
+        <!-- Classification filters, grouped and rendered from the server's
+             verified code list. "All video games" (A63F13/00) is pre-selected
+             so a bare search returns video games rather than the whole of
+             A63F, which also covers playing cards, board games, roulette and
+             pinball. -->
+        <div class="patent-cpc-groups" id="patentCpcGroups" role="group" aria-label="Classification filters"></div>
 
         <!-- Configuration / freshness note -->
         <p class="patent-config-note" id="patentConfigNote"></p>

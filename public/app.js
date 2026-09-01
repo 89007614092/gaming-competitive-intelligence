@@ -2774,10 +2774,13 @@ async function loadCompanyMap() {
 //     every query for 12h. The UI surfaces the `cached` flag so a stale-looking
 //     result is understandable rather than suspicious.
 // ===========================================================================
-let patentOptions = null;             // { companies, cpc, configured }
+let patentOptions = null;             // { companies, cpcGroups, cpcDefaults, configured }
 let patentResults = null;             // last successful search payload
 let patentUiReady = false;            // guards listener registration
-const patentSelectedCpc = new Set();  // active CPC classification chips
+let patentCpcDefaultsApplied = false; // default chip chosen once per session
+const patentSelectedCpc = new Set();  // active CPC codes (not chip ids)
+// Headline translations already fetched this session: pn -> translated title.
+const patentTranslations = new Map();
 
 async function loadPatents() {
   const results = document.getElementById("patentResults");
@@ -2800,9 +2803,11 @@ async function loadPatents() {
   }
 
   populatePatentCompanies(patentOptions.companies || []);
-  renderPatentCpcChips();
+  applyPatentCpcDefaults();
+  renderPatentCpcGroups();
   renderPatentConfigNote();
   setupPatents();
+  loadPatentCpcCounts();   // optional per-chip counts, never blocks a search
   // Re-render the existing result set, e.g. after a language change.
   if (patentResults) renderPatents(patentResults);
 }
@@ -2839,18 +2844,65 @@ function resolvePatentCompany(value) {
   return patentCompanyMap[raw] || raw;
 }
 
-function renderPatentCpcChips() {
-  const row = document.getElementById("patentCpcRow");
-  if (!row || !patentOptions) return;
-  row.innerHTML = (patentOptions.cpc || []).map(c => `
-    <button type="button"
-            class="patent-cpc-chip${patentSelectedCpc.has(c.code) ? " active" : ""}"
-            data-cpc="${escapeHtml(c.code)}"
-            aria-pressed="${patentSelectedCpc.has(c.code)}"
-            title="${escapeHtml(c.label)}">
-      <span class="patent-cpc-code">${escapeHtml(c.code)}</span>
-      <span class="patent-cpc-label">${escapeHtml(c.label)}</span>
-    </button>`).join("");
+// Per-chip hit counts, fetched once per session. These are optional: they cost
+// one OPS call per chip (cached server-side), so they are requested lazily and
+// never block a search. If they fail, the chips simply render without numbers.
+let patentCpcCounts = null;
+let patentCpcCountsRequested = false;
+
+async function loadPatentCpcCounts() {
+  if (patentCpcCountsRequested) return;
+  patentCpcCountsRequested = true;
+  try {
+    const res = await fetch(`${API_BASE}/patents/cpc-counts`);
+    const json = await res.json();
+    if (json && json.success) {
+      patentCpcCounts = json.counts || {};
+      renderPatentCpcGroups();
+    }
+  } catch (err) {
+    // Counts are a convenience, not data — swallow and carry on.
+  }
+}
+
+function chipCountHtml(chipId) {
+  const n = patentCpcCounts ? patentCpcCounts[chipId] : null;
+  if (typeof n !== "number") return "";
+  return `<span class="patent-cpc-count">${n.toLocaleString()}</span>`;
+}
+
+// Grouped classification chips. Each chip maps to one or more CPC codes and
+// toggles them together, so "Characters & physics" means 13/55 OR 13/57.
+function renderPatentCpcGroups() {
+  const host = document.getElementById("patentCpcGroups");
+  if (!host || !patentOptions) return;
+  host.innerHTML = (patentOptions.cpcGroups || []).map(g => `
+    <div class="patent-cpc-group">
+      <span class="patent-cpc-group-label">${escapeHtml(g.label)}</span>
+      <div class="patent-cpc-row">
+        ${(g.chips || []).map(c => {
+          const codes = c.codes || [];
+          const on = codes.length > 0 && codes.every(code => patentSelectedCpc.has(code));
+          const codeList = codes.join(", ");
+          return `<button type="button"
+                  class="patent-cpc-chip${on ? " active" : ""}"
+                  data-codes="${escapeHtml(codes.join(","))}"
+                  aria-pressed="${on}"
+                  title="${escapeHtml(codeList)}">
+            <span class="patent-cpc-label">${escapeHtml(c.label)}</span>
+            ${chipCountHtml(c.id)}
+          </button>`;
+        }).join("")}
+      </div>
+    </div>`).join("");
+}
+
+// "All video games" is pre-selected so an unqualified search returns video
+// games rather than everything in A63F (cards, board games, roulette, pinball).
+function applyPatentCpcDefaults() {
+  if (patentCpcDefaultsApplied || !patentOptions) return;
+  for (const code of patentOptions.cpcDefaults || []) patentSelectedCpc.add(code);
+  patentCpcDefaultsApplied = true;
 }
 
 function renderPatentConfigNote() {
@@ -2870,18 +2922,89 @@ function setupPatents() {
   const keyword = document.getElementById("patentKeyword");
   if (keyword) keyword.addEventListener("keydown", (e) => { if (e.key === "Enter") runPatentSearch(); });
 
-  // CPC chips are toggles — click anywhere in the row's chip flips it.
-  document.getElementById("patentCpcRow")?.addEventListener("click", (e) => {
+  // Classification chips are toggles. A chip carries ONE OR MORE codes and
+  // flips them together, so "Characters & physics" means 13/55 OR 13/57.
+  document.getElementById("patentCpcGroups")?.addEventListener("click", (e) => {
     const chip = e.target.closest(".patent-cpc-chip");
     if (!chip) return;
-    const code = chip.dataset.cpc;
-    if (patentSelectedCpc.has(code)) patentSelectedCpc.delete(code);
-    else patentSelectedCpc.add(code);
-    const on = patentSelectedCpc.has(code);
-    chip.classList.toggle("active", on);
-    chip.setAttribute("aria-pressed", String(on));
+    const codes = (chip.dataset.codes || "").split(",").filter(Boolean);
+    if (!codes.length) return;
+    const on = codes.every(code => patentSelectedCpc.has(code));
+    codes.forEach(code => {
+      if (on) patentSelectedCpc.delete(code);
+      else patentSelectedCpc.add(code);
+    });
+    renderPatentCpcGroups();
+  });
+
+  // Headline translation is delegated too — result cards are re-rendered often.
+  document.getElementById("patentResults")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".patent-translate-btn");
+    if (!btn) return;
+    translatePatentHeadline(btn);
   });
   patentUiReady = true;
+}
+
+// ---- Headline translation -------------------------------------------------
+// Patent titles arrive in whatever language the filing office used. Showing
+// them verbatim is correct, but a Chinese or French headline is unreadable to
+// most users — so offer an opt-in translation of the TITLE ONLY.
+function uiLang() {
+  return (typeof window.getLang === "function" && window.getLang()) || "en";
+}
+
+// Does this headline need a translate affordance? Prefer the language OPS told
+// us; when it did not, fall back to script detection (CJK is the common case).
+function patentNeedsTranslation(p) {
+  const ui = uiLang();
+  const lang = (p.titleLang || "").toLowerCase();
+  if (lang) {
+    const wantsEn = ui === "en";
+    if (wantsEn) return !/^en/i.test(lang);
+    return !/^zh/i.test(lang);
+  }
+  const title = String(p.title || "");
+  const cjk = /[一-鿿]/.test(title);
+  return ui === "en" ? cjk : !cjk;
+}
+
+async function translatePatentHeadline(btn) {
+  const pn = btn.dataset.pn || "";
+  const card = btn.closest(".patent-result-card");
+  const titleEl = card && card.querySelector(".patent-title-text");
+  if (!pn || !titleEl) return;
+
+  // Toggle back to the original if we already translated this one.
+  const cached = patentTranslations.get(pn);
+  if (cached) {
+    titleEl.textContent = cached.original;
+    btn.textContent = window.t('patents.translate');
+    patentTranslations.delete(pn);
+    return;
+  }
+
+  const original = titleEl.textContent;
+  btn.disabled = true;
+  btn.textContent = window.t('patents.translating');
+  try {
+    const res = await fetch(`${API_BASE}/patents/translate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pn, title: original, target: uiLang() }),
+    });
+    const json = await res.json();
+    if (!json || !json.success) throw new Error((json && json.error) || "translation failed");
+    titleEl.textContent = json.translated;
+    patentTranslations.set(pn, { original, translated: json.translated });
+    btn.textContent = window.t('patents.showOriginal');
+  } catch (err) {
+    btn.textContent = window.t('patents.translationFailed');
+    // Leave the original headline on screen — losing it would be worse.
+    setTimeout(() => { btn.disabled = false; btn.textContent = window.t('patents.translate'); }, 2500);
+    return;
+  }
+  btn.disabled = false;
 }
 
 async function runPatentSearch() {
@@ -2968,7 +3091,10 @@ function patentCardHtml(p) {
         <a class="patent-number" href="${safeHref(p.espacenetUrl)}" target="_blank" rel="noopener">${escapeHtml(p.id)}</a>
         <span class="patent-date">${escapeHtml(p.publicationDate || "")}</span>
       </div>
-      <h4>${escapeHtml(p.title)}</h4>
+      <h4><span class="patent-title-text">${escapeHtml(p.title)}</span></h4>
+      ${patentNeedsTranslation(p)
+        ? `<button type="button" class="patent-translate-btn" data-pn="${escapeHtml(p.id)}">${window.t('patents.translate')}</button>`
+        : ""}
       ${applicants ? `<p class="patent-applicant">${escapeHtml(applicants)}</p>` : ""}
       ${abstract}
       ${cpc ? `<div class="patent-trend-tags">${cpc}</div>` : ""}

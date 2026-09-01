@@ -26,8 +26,11 @@ const {
   applicantAliases,
   espacenetUrl,
   isoDate,
-  CPC_PRESETS,
-  CPC_PRESET_CODES,
+  CPC_GROUPS,
+  CPC_CHIPS,
+  CPC_ALL_CODES,
+  CPC_DEFAULT_CODES,
+  isCpcCode,
   MAX_ITEMS,
   MAX_ABSTRACT_LOOKUPS,
 } = require("../lib/epoOps");
@@ -383,9 +386,46 @@ test("isoDate converts OPS YYYYMMDD and passes through ISO values", () => {
   assert.strictEqual(isoDate("garbage"), "garbage", "raw value is preserved for debugging");
 });
 
-test("CPC presets match the AI x gaming set the UI renders", () => {
-  assert.deepStrictEqual(CPC_PRESET_CODES, ["A63F", "G06N", "G06T", "G10L", "H04N"]);
-  for (const code of CPC_PRESET_CODES) assert.ok(CPC_PRESETS[code], `${code} needs a human label`);
+test("CPC filters are grouped, labelled, and default to video games", () => {
+  assert.ok(CPC_GROUPS.length >= 3, "filters are presented in groups, not one flat row");
+  for (const g of CPC_GROUPS) {
+    assert.ok(g.id && g.label, "every group needs an id and a label");
+    for (const c of g.chips) {
+      assert.ok(c.id && c.label, "every chip needs an id and a label");
+      assert.ok(Array.isArray(c.codes) && c.codes.length, `${c.id} needs codes`);
+      // Every code the UI offers must survive the validator, or the chip is
+      // dead on arrival — this is exactly how group-level codes were lost.
+      for (const code of c.codes) {
+        assert.strictEqual(isCpcCode(code), code, `${code} must be accepted by the validator`);
+      }
+    }
+  }
+  // The default is the tightest useful filter: video games only.
+  assert.deepStrictEqual(CPC_DEFAULT_CODES, ["A63F13/00"]);
+  // Broad subclasses are legal CPC but must never be offered as chips.
+  const offered = CPC_CHIPS.flatMap(c => c.codes);
+  for (const broad of ["A63F", "G06N", "G06T", "G06F"]) {
+    assert.ok(!offered.includes(broad), `${broad} is too broad to be a chip`);
+  }
+});
+
+test("broad A63F is what let pinball and roulette through — the default must not be it", () => {
+  // A63F = "CARD, BOARD, OR ROULETTE GAMES; INDOOR GAMES USING SMALL MOVING
+  // PLAYING BODIES; VIDEO GAMES; GAMES NOT OTHERWISE PROVIDED FOR".
+  assert.strictEqual(buildCql({ cpc: ["A63F"] }), 'cpc = "A63F"');
+  assert.strictEqual(buildCql({ cpc: ["A63F13/00"] }), 'cpc = "A63F13/00"');
+  assert.notStrictEqual(CPC_DEFAULT_CODES[0], "A63F");
+});
+
+test("the CPC validator accepts subclasses, groups and subgroups", () => {
+  for (const good of ["A63F", "G06N", "A63F13/00", "G06N3/092", "G06F40/35", "G06F9/50", "G06T13/40"]) {
+    assert.strictEqual(isCpcCode(good), good.toUpperCase(), `${good} must be valid`);
+  }
+  // Case and stray whitespace are normalised.
+  assert.strictEqual(isCpcCode(" a63f13/00 "), "A63F13/00");
+  for (const bad of ["", "NOTACODE", "A63F13/", "ZZZZ", "123", null]) {
+    assert.strictEqual(isCpcCode(bad), "", `${JSON.stringify(bad)} must be rejected`);
+  }
 });
 
 // ---------------------------------------------------------------------------

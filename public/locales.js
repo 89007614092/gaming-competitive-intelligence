@@ -70,6 +70,13 @@
       'patents.showing': 'Showing {count} of {total} matches',
       'patents.cached': 'cached result',
       'patents.viewOnEspacenet': 'View on Espacenet',
+      // Opt-in headline translation. Titles arrive in the filing language;
+      // translating them all automatically would burn DeepL quota, so the
+      // button only appears when the headline is not in the UI language.
+      'patents.translate': 'Translate headline',
+      'patents.showOriginal': 'Show original',
+      'patents.translating': 'Translating…',
+      'patents.translationFailed': 'Translation unavailable',
       'patents.liveNote': 'Live results from the European Patent Office (EPO OPS). Queries are cached for 12 hours to stay within the EPO fair-use quota.',
       'patents.notConfiguredNote': 'Live patent search is not configured on this server — the EPO OPS credentials are missing.',
 
@@ -242,6 +249,10 @@
       'patents.showing': '显示 {count} 条，共 {total} 条匹配结果',
       'patents.cached': '缓存结果',
       'patents.viewOnEspacenet': '在 Espacenet 上查看',
+      'patents.translate': '翻译标题',
+      'patents.showOriginal': '显示原文',
+      'patents.translating': '正在翻译……',
+      'patents.translationFailed': '翻译不可用',
       'patents.liveNote': '实时数据来自欧洲专利局（EPO OPS）。为遵守 EPO 的合理使用配额，检索结果会缓存 12 小时。',
       'patents.notConfiguredNote': '此服务器尚未配置实时专利检索——缺少 EPO OPS 凭据。',
 
