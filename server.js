@@ -164,6 +164,8 @@ const {
   CPC_ALL_CODES,
   CPC_DEFAULT_CODES,
   isCpcCode,              // normalises to the spaced form OPS expects
+  normaliseCpc,
+  CPC_CODE_RE,
   MAX_ITEMS: EPO_MAX_ITEMS,
 } = require("./lib/epoOps");
 const epoClient = createEpoClient({
@@ -5041,6 +5043,60 @@ app.get("/api/patents/validate-cpc", whenAuth(requireAdminRole), async (req, res
       throttled,
       total: Object.keys(counts).length,
       emptyCodes: dead,   // investigate these before trusting the chips
+      attribution: "Data: EPO OPS",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/patents/probe-cpc-format — determine empirically which CPC spelling
+// OPS accepts, instead of guessing and taking the tab down again.
+//
+// History, because it explains why this exists: `A63F13/00` (concatenated)
+// returned 0 results everywhere; `A63F 13/67/low` (the form the EPO's Espacenet
+// notes recommend for subgroups) returned HTTP 500 SERVER.DomainAccess. Both
+// were wrong in different ways, and each cost a deploy to discover.
+//
+// This runs one search per candidate spelling and reports status + hit count,
+// so the correct form is measured rather than inferred. Admin-only: it spends
+// OPS searches (~2-3 per call).
+app.get("/api/patents/probe-cpc-format", whenAuth(requireAdminRole), async (req, res) => {
+  try {
+    if (!epoClient.isConfigured()) {
+      return res.status(503).json({ success: false, code: "epo_not_configured", error: "EPO OPS not configured." });
+    }
+    const raw = normaliseCpc(req.query.code || "A63F13/00").replace(/\/LOW$/, "");
+    if (!CPC_CODE_RE.test(raw)) {
+      return res.status(400).json({ success: false, code: "bad_code", error: "Provide a CPC code, e.g. A63F13/00" });
+    }
+    const spaced = raw.replace(/^([A-HY]\d{2}[A-Z])(\d+)/, "$1 $2");
+    const isSubgroup = /\//.test(raw) && !/\/(0+)$/.test(raw);
+
+    const candidates = [
+      ["concatenated", raw],
+      ["spaced", spaced],
+    ];
+    // /low is offered only for comparison — it is not used in production.
+    if (req.query.includeLow === "1") candidates.push([`spaced + /low${isSubgroup ? "" : " (main group)"}`, `${spaced}/low`]);
+
+    const results = {};
+    for (const [name, code] of candidates) {
+      const cql = `cpc = "${code}"`;
+      try {
+        const r = await epoClient.searchCql(cql, { limit: 1 });
+        results[name] = { cql, ok: true, count: r.totalAvailable };
+      } catch (e) {
+        results[name] = { cql, ok: false, code: e.code || null, error: String(e.message || e).slice(0, 180) };
+      }
+    }
+    res.json({
+      success: true,
+      input: req.query.code || "A63F13/00",
+      isSubgroup,
+      results,
+      // What the app sends today, for comparison against the candidates.
+      current: `cpc = "${isCpcCode(raw)}"`,
       attribution: "Data: EPO OPS",
     });
   } catch (err) {
