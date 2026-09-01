@@ -75,11 +75,15 @@ function exchangeDoc({ number = "4123456", country = "EP", kind = "A1", date = "
 
 // A realistic search envelope. `docs` may be an object (single hit) or an array.
 function searchPayload(docs, total = "348") {
+  // Real OPS shape for `/published-data/search/{abstract,biblio}`: the count
+  // lives on `ops:biblio-search`, wrapping an inner `ops:search-result`.
   return {
     "ops:world-patent-data": {
-      "ops:search-result": {
+      "ops:biblio-search": {
         "@total-result-count": total,
-        "exchange-documents": { "exchange-document": docs },
+        "ops:search-result": {
+          "exchange-documents": { "exchange-document": docs },
+        },
       },
     },
   };
@@ -339,6 +343,37 @@ test("diagnostics distinguish 'OPS found nothing' from 'we failed to parse it'",
   const junk = normaliseSearchResult({ unexpected: { shape: "entirely" } }, 25);
   assert.strictEqual(junk.patents.length, 0);
   assert.strictEqual(junk.diagnostics.recognised, false, "nothing recognisable was read");
+});
+
+// OPS wraps `biblio`/`abstract` searches in `ops:biblio-search` and puts
+// `total-result-count` THERE — not on the inner `ops:search-result`. Reading the
+// inner element yielded total 0 forever, so every result set rendered cards but
+// reported "Showing 25 of 0 matches" (cards came from the fallback scan).
+test("total-result-count is read from ops:biblio-search, not the inner search-result", () => {
+  const withBiblio = normaliseSearchResult({
+    "ops:world-patent-data": {
+      "ops:biblio-search": {
+        "@total-result-count": "9999",
+        "ops:search-result": {
+          "exchange-documents": { "exchange-document": [exchangeDoc()] },
+        },
+      },
+    },
+  }, 25);
+  assert.strictEqual(withBiblio.totalAvailable, 9999, "count read from the biblio-search envelope");
+  assert.strictEqual(withBiblio.diagnostics.totalResultCount, 9999);
+  assert.strictEqual(withBiblio.patents.length, 1, "documents found under the inner search-result");
+
+  // The bare form still works: count on ops:search-result directly.
+  const bare = normaliseSearchResult({
+    "ops:world-patent-data": {
+      "ops:search-result": {
+        "@total-result-count": "7",
+        "exchange-documents": { "exchange-document": [exchangeDoc()] },
+      },
+    },
+  }, 25);
+  assert.strictEqual(bare.totalAvailable, 7, "bare search-result still read as a fallback");
 });
 
 test("a healthy search reports docsSeen == docsKept", () => {
