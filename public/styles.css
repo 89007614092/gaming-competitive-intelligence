@@ -5237,16 +5237,93 @@ body {
   .patent-cpc-group-label { flex: 1 1 auto; padding-top: 0; }
 }
 
-/* Hit-count controls: opt-in, because one OPS search per chip is expensive. */
+/* Hit-count controls: opt-in, because one OPS search per chip is expensive.
+   Rendered as a quiet text link rather than a button — the filter area is
+   already busy, and this is a secondary action. */
 .patent-cpc-counts-tools {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin: 0 0 14px;
+  margin: 2px 0 14px;
 }
+.patent-cpc-counts-btn {
+  padding: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted, #6b7280);
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--border, #e2e5ee);
+  border-radius: 0;
+  cursor: pointer;
+}
+.patent-cpc-counts-btn:hover:not(:disabled) { color: var(--primary, #2563eb); }
+.patent-cpc-counts-btn:disabled { opacity: 0.5; cursor: default; }
 .patent-cpc-counts-note {
   font-size: 11.5px;
   color: var(--text-muted, #6b7280);
 }
 .patent-cpc-counts-note.warn { color: var(--warning, #d97706); font-weight: 600; }
+
+/* ---- Per-topic colour bands --------------------------------------------
+   Chips are colour-coded by topic so the four groups read as distinct bands
+   rather than a wall of identical grey buttons. Inactive chips stay quiet;
+   only selected ones take the topic colour. */
+.patent-cpc-group-label {
+  position: relative;
+  padding-left: 14px;
+}
+.patent-cpc-group-label::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted, #6b7280);
+}
+.patent-cpc-group[data-group="games"] .patent-cpc-group-label::before { background: #2563eb; }
+.patent-cpc-group[data-group="ai"] .patent-cpc-group-label::before { background: #7c3aed; }
+.patent-cpc-group[data-group="language"] .patent-cpc-group-label::before { background: #059669; }
+.patent-cpc-group[data-group="delivery"] .patent-cpc-group-label::before { background: #d97706; }
+
+.patent-cpc-group[data-group="games"] .patent-cpc-chip.active {
+  background: #eff6ff; border-color: #2563eb; color: #1d4ed8;
+}
+.patent-cpc-group[data-group="ai"] .patent-cpc-chip.active {
+  background: #f5f3ff; border-color: #7c3aed; color: #5b21b6;
+}
+.patent-cpc-group[data-group="language"] .patent-cpc-chip.active {
+  background: #ecfdf5; border-color: #059669; color: #065f46;
+}
+.patent-cpc-group[data-group="delivery"] .patent-cpc-chip.active {
+  background: #fffbeb; border-color: #d97706; color: #92400e;
+}
+
+/* Quieter chips: less chrome, more breathing room, counts held to the side. */
+.patent-cpc-chip {
+  gap: 6px;
+  padding: 5px 11px;
+  font-size: 12px;
+  border-color: var(--border, #e2e5ee);
+}
+.patent-cpc-chip:hover { border-color: currentColor; }
+.patent-cpc-count {
+  min-width: 18px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg, #f5f6fa);
+  border: 1px solid var(--border, #e2e5ee);
+  color: var(--text-muted, #6b7280);
+}
+.patent-cpc-chip.active .patent-cpc-count {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: currentColor;
+  color: inherit;
+}

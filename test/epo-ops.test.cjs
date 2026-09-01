@@ -396,7 +396,10 @@ test("CPC filters are grouped, labelled, and default to video games", () => {
       // Every code the UI offers must survive the validator, or the chip is
       // dead on arrival — this is exactly how group-level codes were lost.
       for (const code of c.codes) {
-        assert.strictEqual(isCpcCode(code), code, `${code} must be accepted by the validator`);
+        const sent = isCpcCode(code);
+        assert.ok(sent, `${code} must be accepted by the validator`);
+        // Must be emitted in OPS's spaced form, e.g. A63F 13/00.
+        assert.match(sent, /^[A-HY]\d{2}[A-Z]( \d{1,4}(\/\d{2,6}(\/low)?)?)?$/, `${code} -> ${sent}`);
       }
     }
   }
@@ -413,16 +416,44 @@ test("broad A63F is what let pinball and roulette through — the default must n
   // A63F = "CARD, BOARD, OR ROULETTE GAMES; INDOOR GAMES USING SMALL MOVING
   // PLAYING BODIES; VIDEO GAMES; GAMES NOT OTHERWISE PROVIDED FOR".
   assert.strictEqual(buildCql({ cpc: ["A63F"] }), 'cpc = "A63F"');
-  assert.strictEqual(buildCql({ cpc: ["A63F13/00"] }), 'cpc = "A63F13/00"');
+  assert.strictEqual(buildCql({ cpc: ["A63F13/00"] }), 'cpc = "A63F 13/00"');
   assert.notStrictEqual(CPC_DEFAULT_CODES[0], "A63F");
+});
+
+// The bug this fixes: OPS indexes CPC in the SPACED form it also returns in
+// biblio data (`A63F 13/00`), not `A63F13/00`. The un-spaced form matched
+// nothing at all, so every group-level code reported zero results. The EPO's
+// own release notes write it as "C08F 220".
+test("CPC codes are sent in OPS's spaced form, not the concatenated form", () => {
+  assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00");
+  assert.strictEqual(isCpcCode("G06N3/092"), "G06N 3/092/low");
+  assert.strictEqual(isCpcCode("G06F40/35"), "G06F 40/35/low");
+  assert.strictEqual(isCpcCode("G06F9/50"), "G06F 9/50/low");
+  // A bare subclass has no group, so no space and no /low.
+  assert.strictEqual(isCpcCode("A63F"), "A63F");
+  // Never emit the concatenated form — that is what returned zero.
+  assert.notStrictEqual(isCpcCode("A63F13/00"), "A63F13/00");
+});
+
+// Subgroups need a trailing /low to include their children; main groups
+// ("/00") are auto-posted and must NOT get one.
+test("/low is appended to subgroups only, never to main groups", () => {
+  assert.strictEqual(isCpcCode("A63F13/00"), "A63F 13/00", "main group is auto-posted");
+  assert.strictEqual(isCpcCode("G06N20/00"), "G06N 20/00");
+  assert.strictEqual(isCpcCode("G06T19/00"), "G06T 19/00");
+  assert.strictEqual(isCpcCode("A63F13/67"), "A63F 13/67/low", "subgroup needs /low for children");
+  assert.strictEqual(isCpcCode("G06N5/045"), "G06N 5/045/low");
 });
 
 test("the CPC validator accepts subclasses, groups and subgroups", () => {
   for (const good of ["A63F", "G06N", "A63F13/00", "G06N3/092", "G06F40/35", "G06F9/50", "G06T13/40"]) {
-    assert.strictEqual(isCpcCode(good), good.toUpperCase(), `${good} must be valid`);
+    const sent = isCpcCode(good);
+    assert.ok(sent, `${good} must be valid`);
+    // The canonical output is the spaced form; it round-trips.
+    assert.strictEqual(isCpcCode(sent), sent, `${good} -> ${sent} must be idempotent`);
   }
   // Case and stray whitespace are normalised.
-  assert.strictEqual(isCpcCode(" a63f13/00 "), "A63F13/00");
+  assert.strictEqual(isCpcCode(" a63f13/00 "), "A63F 13/00");
   for (const bad of ["", "NOTACODE", "A63F13/", "ZZZZ", "123", null]) {
     assert.strictEqual(isCpcCode(bad), "", `${JSON.stringify(bad)} must be rejected`);
   }

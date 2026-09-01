@@ -2899,8 +2899,10 @@ function chipCountHtml(chipId) {
 function renderPatentCpcGroups() {
   const host = document.getElementById("patentCpcGroups");
   if (!host || !patentOptions) return;
+  // `data-group` drives the per-topic colouring in CSS, so each topic reads as
+  // a distinct band instead of one undifferentiated wall of grey buttons.
   host.innerHTML = (patentOptions.cpcGroups || []).map(g => `
-    <div class="patent-cpc-group">
+    <div class="patent-cpc-group" data-group="${escapeHtml(g.id)}">
       <span class="patent-cpc-group-label">${escapeHtml(g.label)}</span>
       <div class="patent-cpc-row">
         ${(g.chips || []).map(c => {
