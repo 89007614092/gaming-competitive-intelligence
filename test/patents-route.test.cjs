@@ -86,11 +86,15 @@ function opsDoc({ number = "4123456", applicant = "DeepMind Limited", date = "20
 }
 
 function searchPayload(docs, total = "348") {
+  // Real OPS shape for `/published-data/search/{abstract,biblio}`: the count
+  // lives on `ops:biblio-search`, wrapping an inner `ops:search-result`.
   return {
     "ops:world-patent-data": {
-      "ops:search-result": {
+      "ops:biblio-search": {
         "@total-result-count": total,
-        "exchange-documents": { "exchange-document": docs },
+        "ops:search-result": {
+          "exchange-documents": { "exchange-document": docs },
+        },
       },
     },
   };
