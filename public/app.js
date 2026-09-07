@@ -174,7 +174,7 @@ function setupQA() {
   if (printBtn) printBtn.addEventListener("click", () => window.print());
 
   const styleSelect = document.getElementById("summaryStyle");
-  if (styleSelect) styleSelect.addEventListener("change", renderAnswerByStyle);
+  if (styleSelect) styleSelect.addEventListener("change", onAnswerStyleChange);
 
   document.querySelectorAll(".summary-suggestion").forEach(button => {
     button.addEventListener("click", () => {
@@ -382,24 +382,29 @@ async function runSummary() {
   document.getElementById("summaryTierNotice").style.display = "none";
   result.scrollIntoView({ behavior: "smooth", block: "start" });
 
+  const style = document.getElementById("summaryStyle")?.value || "full";
+  const payload = {
+    question,
+    useInternet,
+    useModel,
+    userSources,
+    teamSources,
+    lang: (typeof localStorage !== "undefined" && localStorage.getItem("LANG")) || "en",
+  };
+
   try {
     const response = await fetch(`${API_BASE}/summarise`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        question,
-        useInternet,
-        useModel,
-        userSources,
-        teamSources,
-        lang: (typeof localStorage !== "undefined" && localStorage.getItem("LANG")) || "en",
-      }),
+      body: JSON.stringify({ ...payload, style }),
     });
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Answer generation failed");
 
     lastAnswerText = data.answer || "";
     lastAnswerSources = data.sources || [];
+    lastAnswerStyle = style;
+    lastSummaryPayload = payload;
     renderAnswerByStyle();
     const sourceCount = data.sources?.length || 0;
     const internetLabel = data.internetUsed ? " · internet evidence included" : "";
@@ -535,6 +540,13 @@ function sectionsForStyle(sections, style) {
 
 let lastAnswerText = "";
 let lastAnswerSources = [];
+// Which style the currently-displayed answer was generated for, and the request
+// payload needed to regenerate it. The model now only emits the sections the
+// selected style needs, so switching style has to re-ask — we keep the payload
+// so we can do that without making the user retype anything.
+let lastAnswerStyle = "full";
+let lastSummaryPayload = null;
+let styleRegenInFlight = false;
 // Phase 3a: keys of saved News articles the user has chosen to attach as [S#] sources.
 let selectedMySourceKeys = new Set();
 // Thread D: citation_ids (e.g. "T2") of team sources the user has chosen to attach as [T#] evidence.
@@ -547,6 +559,41 @@ function renderAnswerByStyle() {
   const parsed = parseAnswer(lastAnswerText, lastAnswerSources);
   const chosen = sectionsForStyle(parsed.sections, style);
   answer.innerHTML = chosen.length ? chosen.map(parsed.renderSection).join("") : parsed.fullHtml;
+}
+
+// Option C (hybrid). The model now emits ONLY the sections the selected style
+// needs, so switching style has to re-ask — but we never blank the view:
+//   1. re-render instantly from whatever sections we already have, then
+//   2. re-ask with the new style and swap in the purpose-built answer.
+// Without (2), "Short conclusion" would only ever show a wrap-up of a body the
+// reader cannot see; without (1) the answer would disappear while we wait.
+async function regenerateForStyle(newStyle) {
+  if (!lastSummaryPayload || !lastAnswerText) return;  // nothing asked yet
+  if (styleRegenInFlight) return;                      // one regeneration at a time
+  if (newStyle === lastAnswerStyle) return;            // already generated for this style
+  styleRegenInFlight = true;
+  try {
+    const response = await fetch(`${API_BASE}/summarise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...lastSummaryPayload, style: newStyle }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) return;         // keep the instant render
+    lastAnswerText = data.answer || lastAnswerText;
+    lastAnswerSources = data.sources || lastAnswerSources;
+    lastAnswerStyle = newStyle;
+    renderAnswerByStyle();
+  } catch (_) {
+    // Best-effort: the instant pass already left something readable on screen.
+  } finally {
+    styleRegenInFlight = false;
+  }
+}
+
+function onAnswerStyleChange() {
+  renderAnswerByStyle();                                            // instant
+  regenerateForStyle(document.getElementById("summaryStyle")?.value || "full");
 }
 
 function renderSummaryEvidence(sources) {

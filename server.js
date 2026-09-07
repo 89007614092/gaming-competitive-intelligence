@@ -1359,6 +1359,12 @@ app.post("/api/summarise", whenAuth(requireAuth), async (req, res) => {
     // the model can answer in-language. Only 'zh-CN' triggers Chinese output;
     // anything else (including an unset body) defaults to English.
     const lang = req.body?.lang === "zh-CN" ? "zh-CN" : "en";
+    // Answer style — decides WHICH sections the model emits (full | detailed |
+    // bullets | conclusion). Whitelisted here so an unexpected value can never
+    // reach (and therefore inject into) the system prompt.
+    const style = ["full", "detailed", "bullets", "conclusion"].includes(req.body?.style)
+      ? req.body.style
+      : "full";
     const useInternet = req.body?.useInternet === true;
     // AI now runs on every answer by default. An explicit useModel:false is the
     // only opt-out (reserved); the UI always sends true.
@@ -1506,7 +1512,7 @@ app.post("/api/summarise", whenAuth(requireAuth), async (req, res) => {
         ]);
       };
       try {
-        answer = await raceModel(generateOpenSourceAnswer(question, groundedEvidence, lang));
+        answer = await raceModel(generateOpenSourceAnswer(question, groundedEvidence, lang, style));
         // B2: deep-fetch full text ONLY for web sources the model actually
         // cited, then re-run once with the enriched evidence. If nothing was
         // cited, no extraction happens at all (the core token-saving fix). On
@@ -1525,20 +1531,20 @@ app.post("/api/summarise", whenAuth(requireAuth), async (req, res) => {
             const enrichedEvidence = evidence.map(e => byId.get(e.id) || e);
             const groundedEnriched = lang === "zh-CN" ? await kbTranslate.translateEvidence(enrichedEvidence, lang) : enrichedEvidence;
             try {
-              answer = await raceModel(generateOpenSourceAnswer(question, groundedEnriched, lang));
+              answer = await raceModel(generateOpenSourceAnswer(question, groundedEnriched, lang, style));
             } catch (_) { /* keep the first answer on enrichment failure */ }
           }
         }
       } catch (error) {
         modelError = error.message;
         mode = "extractive-fallback";
-        answer = buildExtractiveAnswer(question, evidence);
+        answer = buildExtractiveAnswer(question, evidence, style);
       } finally {
         clearTimeout(modelTimer);
       }
     } else {
       mode = "extractive-citation";
-      answer = buildExtractiveAnswer(question, evidence);
+      answer = buildExtractiveAnswer(question, evidence, style);
     }
 
     res.json({
