@@ -484,6 +484,43 @@ function applyLanguageInstruction(systemPrompt, lang = "en") {
   );
 }
 
+// The reader's chosen "Answer style" decides WHICH sections the model emits,
+// instead of always generating all three and discarding two client-side. Before
+// this, selecting "Short conclusion" showed only the wrap-up — a sentence that
+// restated the question, because the model never knew a narrower view was wanted.
+// Appended AFTER applyLanguageInstruction so it can override the zh-CN directive's
+// "must include all three parts" requirement. The client-side filter
+// (sectionsForStyle) is unchanged: it looks for the same headings, so it simply
+// shows whatever sections the model actually emitted.
+const ANSWER_STYLES = new Set(["full", "detailed", "bullets", "conclusion"]);
+const STYLE_DIRECTIVES = {
+  detailed:
+    "- Emit ONLY these two sections, in this order: \"## Detailed Answer\", then \"## Conclusion\".\n" +
+    "- Do NOT emit \"## Key Points\".",
+  bullets:
+    "- Emit ONLY the \"## Key Points\" section: 3–7 bullets, each cited inline.\n" +
+    "- Do NOT emit \"## Detailed Answer\" or \"## Conclusion\".",
+  conclusion:
+    "- Emit ONLY the \"## Conclusion\" section.\n" +
+    "- It is the ONLY section the reader will see, so it must be a complete, self-contained answer to the question — never a one-sentence restatement of the question itself.",
+};
+
+// Anything unrecognised falls back to "full", which leaves the prompt untouched.
+function normaliseStyle(style) {
+  const s = String(style || "");
+  return ANSWER_STYLES.has(s) ? s : "full";
+}
+
+function applyStyleInstruction(systemPrompt, style = "full") {
+  const s = normaliseStyle(style);
+  if (s === "full" || !STYLE_DIRECTIVES[s]) return systemPrompt;
+  return (
+    systemPrompt +
+    `\n\nANSWER STYLE — the reader has selected the "${s}" view. Emit ONLY the sections listed below, using the same headings and in the same order. Where this conflicts with the three-section instruction above, THIS instruction takes precedence.\n` +
+    STYLE_DIRECTIVES[s]
+  );
+}
+
 // Pure citation gate used by runApiModelGeneration and unit-tested directly.
 // Accepts a reasoned model answer when it cites at least one source; the
 // extractive fallback is reserved for a wholly uncited answer.
@@ -494,7 +531,7 @@ function evaluateCitationGate(answer, evidence) {
   return { pass: citationCount >= 1, citedUser, citationCount };
 }
 
-async function runApiModelGeneration(question, evidence, lang = "en") {
+async function runApiModelGeneration(question, evidence, lang = "en", style = "full") {
   if (QA_MODEL_DISABLED) {
     throw new Error(
       process.env.SUMMARY_DISABLE_MODEL === "1"
@@ -509,7 +546,7 @@ async function runApiModelGeneration(question, evidence, lang = "en") {
   const messages = [
     {
       role: "system",
-      content: "You are a senior evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n- User-supplied items with IDs like [S1], [S2] ... (sources the user attached from their saved articles; treat them EXACTLY like web-sourced [W#] items — they are first-class, citable evidence. Cite them with [S#] whenever they bear on the answer, and distinguish them in your wording (e.g. \"Per the saved article [S2]…\"). Weigh them as authoritative context the user provided). These attached My Sources [S#] items are the user's primary evidence - lead with them. Supplement with application [A#] entries (always available) and, when web search is enabled, internet [W#] sources and team-shared [T#] sources an editor added to the shared library (treat [T#] as first-class citable evidence like [W#]). Cite the evidence that genuinely supports your answer; do not force-cite material irrelevant to the question, but ensure every attached [S#] is reflected wherever it bears on the answer (you may cite an [S#] alongside another source to prove the same claim).\n\n\n\nGround every claim in the supplied evidence and cite it inline. You MAY draw reasoned inferences and practical implications FROM that evidence — connecting the dots is analysis, not invention — but you must NEVER introduce facts, figures, dates, events, or sources that are not present in the evidence. When you state an inference that goes beyond a single literal excerpt, mark it as derived from its citations (e.g. \"Taken together, this implies… [A3][A1]\").\n\nWhen the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite them.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nUser-supplied [S#] sources are handled IDENTICALLY to web [W#] sources above: draw on them, cite them inline with their [S#] ID whenever they bear on the answer, and keep them distinguishable in your wording (e.g. \"Per the saved article [S2]…\"). They are first-class evidence the user attached specifically for this question — do not treat them as lesser than [A#] or [W#]. Because the user deliberately saved them for this work, weight [S#] as primary, authoritative evidence. If no [S#] sources are present, ignore this.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer built as a clear chain of reasoning, not a flat list of facts. For each substantive point:\n- State the claim.\n- Cite the supporting evidence INLINE with its exact ID in square brackets (e.g. [A1] or [W2]), placed immediately after the claim it supports.\n- Show the reasoning: connect the cited evidence to the claim with explicit logic (e.g. \"Because [A3] shows X and [A1] shows Y, this implies Z\"). Do not present conclusions as bare assertions.\nUse well-structured paragraphs and Markdown bullet lists where useful. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways, each cited inline with its supporting [A#]/[W#]/[S#] ID. Each bullet should capture a conclusion the reader would act on or remember, not just a fact.\n\n## Conclusion\nA 3–5 sentence wrap-up that:\n1. States the overall answer in one or two sentences.\n2. Gives 1–3 actionable recommendations or decisions a reader could act on, each grounded in and citing the evidence (e.g. \"Given [A3], [W2] and [S1], studios should…\").\n3. States any open caveats or evidence gaps.\nEnd with a complete sentence.\n\nBefore finalising, verify: (a) every conclusion traces to a cited claim, (b) at least one actionable implication is stated, (c) no unsupported facts were introduced.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
+      content: "You are a senior evidence-focused research analyst for a gaming competitive-intelligence knowledge base. You are given a question and a block of evidence. The evidence may contain two kinds of items:\n- Application-sourced items with IDs like [A1], [A2] … (curated knowledge-base entries).\n- Web-sourced items with IDs like [W1], [W2] … (retrieved from the internet; present only when web search is enabled).\n- User-supplied items with IDs like [S1], [S2] ... (sources the user attached from their saved articles; treat them EXACTLY like web-sourced [W#] items — they are first-class, citable evidence. Cite them with [S#] whenever they bear on the answer, and distinguish them in your wording (e.g. \"Per the saved article [S2]…\"). Weigh them as authoritative context the user provided). These attached My Sources [S#] items are the user's primary evidence - lead with them. Supplement with application [A#] entries (always available) and, when web search is enabled, internet [W#] sources and team-shared [T#] sources an editor added to the shared library (treat [T#] as first-class citable evidence like [W#]). Cite the evidence that genuinely supports your answer; do not force-cite material irrelevant to the question, but ensure every attached [S#] is reflected wherever it bears on the answer (you may cite an [S#] alongside another source to prove the same claim).\n\n\n\nGround every claim in the supplied evidence and cite it inline. You MAY draw reasoned inferences and practical implications FROM that evidence — connecting the dots is analysis, not invention — but you must NEVER introduce facts, figures, dates, events, or sources that are not present in the evidence. When you state an inference that goes beyond a single literal excerpt, mark it as derived from its citations (e.g. \"Taken together, this implies… [A3][A1]\").\n\nWhen the evidence on some part of the question is weak or partial, say so plainly and use appropriately calibrated language (e.g. \"There is thin evidence to suggest…\", \"Some evidence may suggest…\"), citing the source where one exists. When there is no evidence for a part of the question, state that plainly and do not invent facts to fill the gap. Conversely, when the evidence is strong and consistent, state your conclusions confidently and cite them.\n\nUse the web items to CORROBORATE, add recency/context to, or fill gaps in the application evidence. When you rely on a web item, cite it with its [W#] ID exactly as you would an application item, and keep application-sourced and web-sourced claims clearly distinguishable in your wording (e.g. \"Per the patch notes [A3]…\" vs \"Recent reporting [W2] suggests…\"). If no web items are present, rely solely on the application evidence.\n\nUser-supplied [S#] sources are handled IDENTICALLY to web [W#] sources above: draw on them, cite them inline with their [S#] ID whenever they bear on the answer, and keep them distinguishable in your wording (e.g. \"Per the saved article [S2]…\"). They are first-class evidence the user attached specifically for this question — do not treat them as lesser than [A#] or [W#]. Because the user deliberately saved them for this work, weight [S#] as primary, authoritative evidence. If no [S#] sources are present, ignore this.\n\nFormat your answer in Markdown using EXACTLY these three delimited sections, in this order, with no extra prose before or after:\n\n## Detailed Answer\nA detailed, comprehensive answer built as a clear chain of reasoning, not a flat list of facts. For each substantive point:\n- State the claim.\n- Cite the supporting evidence INLINE with its exact ID in square brackets (e.g. [A1] or [W2]), placed immediately after the claim it supports.\n- Show the reasoning: connect the cited evidence to the claim with explicit logic (e.g. \"Because [A3] shows X and [A1] shows Y, this implies Z\"). Do not present conclusions as bare assertions.\nUse well-structured paragraphs and Markdown bullet lists where useful. Do NOT add a separate list of evidence at the end. Always finish this section with a complete concluding sentence — never leave a sentence unfinished.\n\n## Key Points\nA Markdown bullet list (- ) of the 3–7 most important takeaways, each cited inline with its supporting [A#]/[W#]/[S#] ID. Each bullet should capture a conclusion the reader would act on or remember, not just a fact.\n\n## Conclusion\nA SELF-CONTAINED answer of 4–8 sentences that a reader who has seen NO other section could rely on:\n1. Answer the question DIRECTLY in the first sentence — do not restate, rephrase or echo the question, and do not open with \"In conclusion,\" or similar.\n2. Give 1–3 actionable recommendations or decisions a reader could act on, each grounded in and citing the evidence (e.g. \"Given [A3], [W2] and [S1], studios should…\").\n3. State any open caveats or evidence gaps.\nEvery claim must carry an inline citation. End with a complete sentence.\n\nBefore finalising, verify: (a) every conclusion traces to a cited claim, (b) at least one actionable implication is stated, (c) no unsupported facts were introduced.\n\nUse Markdown only (headings with ##, bullet lists with - ). Do NOT use HTML tags.",
     },
     {
       role: "user",
@@ -521,6 +558,9 @@ async function runApiModelGeneration(question, evidence, lang = "en") {
   // Simplified-Chinese instruction when lang === 'zh-CN'). Kept as a post-build
   // step so the large base prompt literal above is never duplicated/edited.
   messages[0].content = applyLanguageInstruction(messages[0].content, lang);
+  // Applied AFTER the language directive on purpose: the zh-CN directive says
+  // "include all three parts", which would otherwise fight a narrow style.
+  messages[0].content = applyStyleInstruction(messages[0].content, style);
 
   // Retry-after-aware Q&A resilience + same-account two-model failover are now
   // handled inside postQaChatCompletions: a short 429 throttle is waited out and
@@ -569,10 +609,10 @@ async function runApiModelGeneration(question, evidence, lang = "en") {
 
 // Serialise model calls so we never open two concurrent API requests at once
 // (keeps the host's rate limits happy and response ordering sane).
-function generateOpenSourceAnswer(question, evidence, lang = "en") {
+function generateOpenSourceAnswer(question, evidence, lang = "en", style = "full") {
   const task = qaQueue
     .catch(() => undefined)
-    .then(() => runApiModelGeneration(question, evidence, lang));
+    .then(() => runApiModelGeneration(question, evidence, lang, style));
   qaQueue = task.catch(() => undefined);
   return task;
 }
@@ -766,7 +806,7 @@ function webResultRelevance(question, results, limit = 5) {
 //     by a local scorer (real extractive summarisation, no API).
 //   - Conclusion       = a metadata-driven coverage note (counts, source types,
 //     recency) that uses the same calibrated thin/no-evidence phrasing.
-function buildExtractiveAnswer(question, evidence) {
+function buildExtractiveAnswer(question, evidence, style = "full") {
   const usable = evidence.filter(item => (item.excerpt || item.text || "").length >= 40);
   if (!usable.length) {
     return "## Conclusion\nNo sufficiently relevant evidence was found in the application data for that question. Try rephrasing, or enable internet search for broader coverage.";
@@ -871,16 +911,26 @@ function buildExtractiveAnswer(question, evidence) {
     conclusionLines.push("This answer draws only on curated application data and may not reflect the very latest developments — enable internet search for the most recent context.");
   }
 
-  return [
-    "## Detailed Answer",
-    detailedLines.join("\n").trim(),
-    "",
-    "## Key Points",
-    keyPointLines.join("\n"),
-    "",
-    "## Conclusion",
-    conclusionLines.join(" "),
-  ].join("\n").trim();
+  const s = normaliseStyle(style);
+
+  const detailedBlock = ["## Detailed Answer", detailedLines.join("\n").trim()];
+  const keyPointsBlock = ["## Key Points", keyPointLines.join("\n")];
+  const conclusionBlock = ["## Conclusion", conclusionLines.join(" ")];
+
+  // The standalone conclusion view is the only thing the reader sees, so it
+  // cannot be just the coverage metadata — lead with the top cited takeaways.
+  if (s === "conclusion") {
+    return [
+      "## Conclusion",
+      keyPointLines.length ? keyPointLines.join("\n") : "",
+      conclusionLines.join(" "),
+    ].filter(Boolean).join("\n").trim();
+  }
+  if (s === "bullets") return keyPointsBlock.join("\n").trim();
+  if (s === "detailed") {
+    return [...detailedBlock, "", ...conclusionBlock].join("\n").trim();
+  }
+  return [...detailedBlock, "", ...keyPointsBlock, "", ...conclusionBlock].join("\n").trim();
 }
 
 module.exports = {
@@ -898,6 +948,8 @@ module.exports = {
   nudgeForUserSources,
   runApiModelGeneration,
   applyLanguageInstruction,
+  applyStyleInstruction,
+  normaliseStyle,
   postQaChatCompletions,
   webResultRelevance,
   isModelReady,
