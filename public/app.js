@@ -367,7 +367,10 @@ async function runSummary() {
   // composer toggle is on (opt-in). Defaults to none, so team evidence is never
   // auto-injected into every answer (saves tokens; makes the "not cited" badge
   // meaningful because the user explicitly chose them).
-  const teamSources = document.getElementById("useTeamSources")?.checked === true
+  // NOTE: the field name must be `teamSourceIds` — that is what /api/summarise
+  // reads (server.js). It was sent as `teamSources` for a while, which meant the
+  // server never found the key and silently injected NO team evidence.
+  const teamSourceIds = document.getElementById("useTeamSources")?.checked === true
     ? [...selectedTeamSourceIds]
     : [];
 
@@ -388,7 +391,7 @@ async function runSummary() {
     useInternet,
     useModel,
     userSources,
-    teamSources,
+    teamSourceIds,
     lang: (typeof localStorage !== "undefined" && localStorage.getItem("LANG")) || "en",
   };
 

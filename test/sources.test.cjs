@@ -16,12 +16,33 @@ const test = require("node:test");
 const assert = require("node:assert");
 const http = require("http");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 const srv = require("../server");
 const { attachDb } = require("../lib/datasets");
 const sources = require("../lib/sources");
 
 function hash(s) { return crypto.createHash("sha256").update(s).digest("hex").slice(0, 16); }
+
+// The client/server contract for team sources is a bare field name, and there is
+// no frontend test harness — so a mismatch is invisible until someone notices
+// that no [T#] evidence ever arrives. public/app.js used to send `teamSources`
+// while /api/summarise read `teamSourceIds`, which silently injected nothing.
+// This pins the name at source level so the two cannot drift apart again.
+test("public/app.js sends team sources as `teamSourceIds` (matches /api/summarise)", () => {
+  const appSrc = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+  // The key must be sent...
+  assert.ok(
+    /\bteamSourceIds\b/.test(appSrc),
+    "public/app.js must send `teamSourceIds` — /api/summarise reads that name"
+  );
+  // ...and the old, wrong key must not be sent as a body field.
+  assert.ok(
+    !/[{,]\s*teamSources\s*[,}]/.test(appSrc),
+    "public/app.js must not send `teamSources` as a body field (server reads teamSourceIds)"
+  );
+});
 
 const READER_TEXT =
   "The UK CMA published new guidance on foundation-model risk assessment that " +
