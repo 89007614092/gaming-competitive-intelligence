@@ -3833,26 +3833,64 @@ function classifyItem(source, item, index) {
 }
 
 // Apply an approved proposal to the real curated dataset (user-gated write).
-function integrateProposal(prop, edit, target, targetCategoryKey) {
+//
+// `author` is { name, email }; it is stamped onto the affected entry so the KB can
+// show who added it. `proposalId` is the stable key that lets us find — and later
+// remove — exactly this integration.
+//
+// Returns { datasetName, data } so the caller can persist the mutated dataset to
+// the durable store. The disk write below is kept as the fallback for when no
+// database is configured (Render's disk is ephemeral, so on its own it does NOT
+// survive a restart — persistence comes from the caller writing to `datasets`).
+function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
   const fileMap = { timeline: "regulatory-timeline.json", knowledge: "knowledge.json", "use-cases": "current-use-cases.json" };
+  const datasetMap = { timeline: "regulatory-timeline", knowledge: "knowledge", "use-cases": "current-use-cases" };
   const file = fileMap[target];
+  const datasetName = datasetMap[target];
   if (!file) throw new Error("Unknown target dataset: " + target);
   const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", file), "utf8"));
   const publisher = prop.publisher;
   const url = prop.url;
 
+  // Attribution for a NEW entry: proposalId lets us remove it later; the rest
+  // are rendered as the "Added by …" label.
+  const stamp = {
+    proposalId: prop.id,
+    addedBy: author.name || "unknown",
+    addedByEmail: author.email || "",
+    addedAt: new Date().toISOString(),
+  };
+  // Attribution for an EDIT to an existing record — we must not claim the
+  // original author, so this is "last updated by" rather than "added by".
+  const editStamp = {
+    lastProposalId: stamp.proposalId,
+    lastUpdatedBy: stamp.addedBy,
+    lastUpdatedByEmail: stamp.addedByEmail,
+    lastUpdatedAt: stamp.addedAt,
+  };
+
   if (prop.matchedRecord && prop.matchedRecord.dataset === target) {
     if (target === "timeline") {
       const ev = (data.events || []).find(e => e.title === prop.matchedRecord.title);
-      if (ev) ev.description = `${ev.description || ""}\n\n${edit}`.trim();
+      if (ev) {
+        ev.description = `${ev.description || ""}\n\n${edit}`.trim();
+        Object.assign(ev, editStamp);
+      }
     } else if (target === "knowledge") {
       for (const cat of Object.values(data.categories || {})) {
         const sub = (cat.subsections || []).find(s => s.title === prop.matchedRecord.title);
-        if (sub) { sub.content = `${sub.content || ""}\n\n${edit}`.trim(); break; }
+        if (sub) {
+          sub.content = `${sub.content || ""}\n\n${edit}`.trim();
+          Object.assign(sub, editStamp);
+          break;
+        }
       }
     } else if (target === "use-cases") {
       const p = (data.patterns || []).find(p => p.title === prop.matchedRecord.title);
-      if (p) p.content = `${p.content || ""}\n\n${edit}`.trim();
+      if (p) {
+        p.content = `${p.content || ""}\n\n${edit}`.trim();
+        Object.assign(p, editStamp);
+      }
     }
   } else {
     if (target === "timeline") {
@@ -3867,15 +3905,16 @@ function integrateProposal(prop, edit, target, targetCategoryKey) {
         impact: `Proposed from ${publisher}. Verify via the official link before relying on it.`,
         link: url,
         linkLabel: publisher,
+        ...stamp,
       });
     } else if (target === "knowledge") {
       const key = sanitizeCategoryKey(targetCategoryKey) || sanitizeCategoryKey(prop.targetCategory) || "regulations";
       if (!data.categories[key]) data.categories[key] = { label: CATEGORY_LABELS[key] || key, icon: "", subsections: [] };
       data.categories[key].subsections = data.categories[key].subsections || [];
-      data.categories[key].subsections.unshift({ title: prop.title, content: edit, sources: [{ label: publisher, url }] });
+      data.categories[key].subsections.unshift({ title: prop.title, content: edit, sources: [{ label: publisher, url }], ...stamp });
     } else if (target === "use-cases") {
       data.patterns = data.patterns || [];
-      data.patterns.unshift({ title: prop.title, content: edit, games: [] });
+      data.patterns.unshift({ title: prop.title, content: edit, games: [], ...stamp });
     }
   }
 
@@ -3886,6 +3925,8 @@ function integrateProposal(prop, edit, target, targetCategoryKey) {
   if (target === "timeline") clearDatasetCache("regulatory-timeline");
   if (target === "knowledge") clearDatasetCache("knowledge");
   if (target === "use-cases") clearDatasetCache("current-use-cases");
+
+  return { datasetName, data };
 }
 function sourceRegistryJurisdiction(prop) {
   const s = (loadSourceRegistry() || []).find(x => x.id === prop.source);
@@ -4422,12 +4463,96 @@ app.delete("/api/sources/:id", requireEditor, async (req, res) => {
   }
 });
 
+// --- Durable persistence for integrated updates ------------------------------
+// Writing only to data/*.json means the change dies on the next restart, because
+// Render's filesystem is ephemeral. The Supabase `datasets` table is the durable
+// store — and once a row exists lib/datasets.js already treats it as the
+// authoritative, sticky copy — so every integrate now writes through to it.
+
+let _datasetStoreEnsured = false;
+async function ensureDatasetStore(pool) {
+  if (_datasetStoreEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS datasets (
+      name       TEXT PRIMARY KEY,
+      data       JSONB NOT NULL,
+      updated_by TEXT NOT NULL DEFAULT 'seed',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      version    INTEGER NOT NULL DEFAULT 1
+    );
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS datasets_backups (
+      id                BIGSERIAL PRIMARY KEY,
+      name              TEXT NOT NULL,
+      data              JSONB NOT NULL,
+      updated_by        TEXT,
+      version           INTEGER,
+      source_updated_at TIMESTAMPTZ,
+      snapshot_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+      note              TEXT
+    );
+  `);
+  _datasetStoreEnsured = true;
+}
+
+// Upsert a dataset and make it the authoritative (sticky) cache entry — mirrors
+// PUT /api/datasets/:name. Returns false when there is no database, so the caller
+// keeps the disk-only behaviour instead of failing the request outright.
+async function persistDataset(name, data, updatedBy) {
+  const pool = datasetsGetDbPool();
+  if (!pool) return false;
+  await ensureDatasetStore(pool);
+  // Snapshot the pristine seed the first time we overwrite it (updated_by is
+  // still 'seed'), so the as-shipped version is always recoverable. Later writes
+  // are covered by the version counter rather than another snapshot.
+  try {
+    await pool.query(
+      `INSERT INTO datasets_backups (name, data, updated_by, version, source_updated_at, note)
+       SELECT name, data, updated_by, version, updated_at, 'auto-pre-first-write'
+       FROM datasets WHERE name = $1 AND updated_by = 'seed'`,
+      [name]
+    );
+  } catch (_) { /* backup is best-effort; never block the write */ }
+  await pool.query(
+    `INSERT INTO datasets(name, data, updated_by, version)
+     VALUES($1, $2::jsonb, $3, 1)
+     ON CONFLICT (name) DO UPDATE
+     SET data = EXCLUDED.data, updated_by = EXCLUDED.updated_by,
+         updated_at = now(), version = datasets.version + 1`,
+    [name, JSON.stringify(data), updatedBy || "unknown"]
+  );
+  setDatasetCache(name, data);
+  return true;
+}
+
+// Display name for the "Added by" label. Step 2b will look up
+// allowed_emails.display_name; until then fall back to the email local-part so a
+// raw address is never rendered into the knowledge base.
+function resolveAuthorName(email) {
+  return String(email || "").split("@")[0] || "unknown";
+}
+
+// Integrate reads, mutates and rewrites a WHOLE dataset, so two overlapping
+// integrates would silently lose one. Serialise them end to end.
+let integrateLock = Promise.resolve();
+function withIntegrateLock(fn) {
+  const run = integrateLock.then(fn, fn);
+  integrateLock = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 // Integrate an approved proposal into the curated dataset (user-gated write).
-app.post("/api/proposed-changes/:id/integrate", requireAdmin, (req, res) => {
+app.post("/api/proposed-changes/:id/integrate", requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
     const prop = (proposedChanges.items || []).find(i => i.id === id);
     if (!prop) return res.status(404).json({ error: "Proposal not found" });
+    // Idempotency guard: two admins can have the queue open at once, and without
+    // this the second click integrates again and duplicates the entry.
+    if (prop.status !== "pending") {
+      return res.status(409).json({ error: `Proposal already ${prop.status}`, status: prop.status });
+    }
     const edit = (req.body && req.body.edit) ? String(req.body.edit) : (prop.suggestedEdit || prop.title);
     const target =
       (req.body && req.body.targetDataset) ||
@@ -4437,11 +4562,31 @@ app.post("/api/proposed-changes/:id/integrate", requireAdmin, (req, res) => {
     if (targetCategoryKey && !Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, targetCategoryKey)) {
       return res.status(400).json({ error: "Invalid targetCategoryKey" });
     }
-    integrateProposal(prop, edit, target, targetCategoryKey);
-    prop.status = "integrated";
-    (proposedChanges.integratedIds = proposedChanges.integratedIds || []).push(id);
-    saveProposed();
-    res.json({ success: true, target });
+
+    const email = (req.user && req.user.email) || "unknown";
+    const author = { name: resolveAuthorName(email), email };
+
+    const result = await withIntegrateLock(async () => {
+      // Re-check inside the lock — another request may have integrated it while
+      // we were queued.
+      if (prop.status !== "pending") return null;
+      const r = integrateProposal(prop, edit, target, targetCategoryKey, author);
+      prop.status = "integrated";
+      prop.integratedBy = author.name;
+      prop.integratedByEmail = email;
+      prop.integratedAt = new Date().toISOString();
+      // Retained so a mistaken integration can be undone / removed later.
+      prop.integratedEdit = edit;
+      prop.integratedTarget = target;
+      (proposedChanges.integratedIds = proposedChanges.integratedIds || []).push(id);
+      saveProposed();
+      return { ...r, persisted: await persistDataset(r.datasetName, r.data, email) };
+    });
+
+    if (!result) {
+      return res.status(409).json({ error: `Proposal already ${prop.status}`, status: prop.status });
+    }
+    res.json({ success: true, target, dataset: result.datasetName, persisted: result.persisted });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
