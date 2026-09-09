@@ -22,6 +22,10 @@ const { attachDb } = require("../lib/datasets");
 // integrateProposal() and saveProposed() genuinely rewrite files under data/,
 // so snapshot them and put them back afterwards — a test must never leave the
 // working tree dirty.
+//
+// SHARED ON-DISK FIXTURE: several test files mutate data/*.json, so the suite
+// must run with --test-concurrency=1 (see the `test` script in package.json).
+// Run in parallel, they clobber each other's restore and leak into the tree.
 const DATA_DIR = path.join(__dirname, "..", "data");
 const PROTECTED = [
   "knowledge.json",

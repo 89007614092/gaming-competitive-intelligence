@@ -3860,7 +3860,14 @@ function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
   const file = fileMap[target];
   const datasetName = datasetMap[target];
   if (!file) throw new Error("Unknown target dataset: " + target);
-  const data = JSON.parse(fs.readFileSync(path.join(__dirname, "data", file), "utf8"));
+  // Read the LIVE dataset, not the on-disk file. Once a dataset has a row in
+  // `datasets` it is sticky and authoritative (lib/datasets.js), and after a
+  // restart the disk file is back to the pristine repo copy — so reading from
+  // disk here would silently drop every integration made before the restart.
+  const live = getDataset(datasetName);
+  const data = live
+    ? JSON.parse(JSON.stringify(live))
+    : JSON.parse(fs.readFileSync(path.join(__dirname, "data", file), "utf8"));
   const publisher = prop.publisher;
   const url = prop.url;
 
@@ -4589,23 +4596,30 @@ async function persistDataset(name, data, updatedBy) {
   return true;
 }
 
-// Display name for the "Added by" label. Step 2b will look up
-// allowed_emails.display_name; until then fall back to the email local-part so a
-// raw address is never rendered into the knowledge base.
+// Display name for the "Added by" label — resolves allowed_emails.display_name
+// and falls back to the email local-part so a raw address is never rendered
+// into the knowledge base.
 // ---------------------------------------------------------------------------
 // Profile display names — the "Added by X" label on integrated entries.
 // ---------------------------------------------------------------------------
 const DISPLAY_NAME_MAX = 40;
+const REVERT_NOTE_MAX = 200;
 
 // Trim, collapse whitespace and strip control characters. The control-character
 // strip matters: the name is written into dataset JSON and rendered into HTML,
 // so it must never be able to introduce structure into either.
-function normaliseDisplayName(raw) {
+// Sanitise any user-supplied text that ends up stored and later rendered:
+// collapse whitespace, drop control characters, cap the length.
+function safeText(raw, max) {
   return String(raw == null ? "" : raw)
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, DISPLAY_NAME_MAX);
+    .slice(0, max);
+}
+
+function normaliseDisplayName(raw) {
+  return safeText(raw, DISPLAY_NAME_MAX);
 }
 
 // What we show when nobody has chosen a name: the email LOCAL PART only, never
@@ -4761,6 +4775,217 @@ app.put("/api/profile", whenAuth(requireAuth), async (req, res) => {
       success: true,
       displayName: r.displayName,
       usingFallbackName: !r.displayName,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Removing / flagging an integration (Suggested Updates 2b-ii) -----------
+
+// Which dataset a proposal's `integratedTarget` refers to.
+function datasetNameForTarget(target) {
+  return { timeline: "regulatory-timeline", knowledge: "knowledge", "use-cases": "current-use-cases" }[target] || null;
+}
+
+// Every array in a dataset that can hold integrated entries. These are the LIVE
+// arrays (not copies), so splicing one mutates the dataset.
+function entryListsFor(data, target) {
+  if (target === "timeline") return [data.events || []];
+  if (target === "knowledge") return Object.values(data.categories || {}).map((c) => c.subsections || []);
+  if (target === "use-cases") return [data.patterns || []];
+  return [];
+}
+
+// Mirror a dataset change to the on-disk copy and drop the cached read. The
+// database is authoritative when it is configured, but the disk copy is the
+// no-DB fallback and keeps local development consistent — so anything that
+// persists a change must also land here.
+function writeDatasetToDisk(target, data) {
+  const fileMap = { timeline: "regulatory-timeline.json", knowledge: "knowledge.json", "use-cases": "current-use-cases.json" };
+  const file = fileMap[target];
+  if (!file) return;
+  fs.writeFileSync(path.join(__dirname, "data", file), JSON.stringify(data, null, 2));
+  const datasetName = datasetNameForTarget(target);
+  if (datasetName) clearDatasetCache(datasetName);
+}
+
+// Locate the entry a proposal created. Knowledge entries live in one of several
+// categories, so every candidate list has to be searched.
+function findEntryByProposalId(data, target, proposalId) {
+  for (const list of entryListsFor(data, target)) {
+    const index = list.findIndex((e) => e && e.proposalId === proposalId);
+    if (index !== -1) return { list, index, entry: list[index] };
+  }
+  return null;
+}
+
+// Whether a finished proposal created a self-contained entry ("new", removable
+// by deleting it) or merged into curated text ("edit", only flag-for-revert).
+// Proposals integrated before integratedMode existed are inferred.
+function integratedModeOf(prop) {
+  return prop.integratedMode || (prop.matchedRecord ? "edit" : "new");
+}
+
+// POST /api/proposed-changes/:id/remove-integration — take back out an entry
+// this proposal ADDED. Only "new"-mode integrations: an edit was merged into
+// curated text, so deleting the record would destroy the original content.
+app.post("/api/proposed-changes/:id/remove-integration", requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const prop = (proposedChanges.items || []).find((i) => i.id === id);
+    if (!prop) return res.status(404).json({ error: "Proposal not found" });
+    if (prop.status !== "integrated") {
+      return res.status(409).json({ error: `Cannot remove a proposal that is ${prop.status}`, status: prop.status });
+    }
+    const mode = integratedModeOf(prop);
+    if (mode !== "new") {
+      return res.status(409).json({
+        error: "This update was merged into an existing entry, so it cannot be removed automatically. Flag it for revert instead.",
+        mode,
+      });
+    }
+    const target = prop.integratedTarget || (prop.matchedRecord && prop.matchedRecord.dataset) || "timeline";
+    const datasetName = datasetNameForTarget(target);
+    if (!datasetName) return res.status(400).json({ error: `Unknown target dataset: ${target}` });
+
+    const email = (req.user && req.user.email) || "unknown";
+    const author = { name: await resolveAuthorName(email), email };
+
+    const result = await withIntegrateLock(async () => {
+      if (prop.status !== "integrated") return null;
+      const live = getDataset(datasetName);
+      if (!live) return { error: "Dataset is unavailable" };
+      const data = JSON.parse(JSON.stringify(live));
+      const found = findEntryByProposalId(data, target, id);
+
+      prop.status = "removed";
+      prop.removedBy = author.name;
+      prop.removedByEmail = email;
+      prop.removedAt = new Date().toISOString();
+
+      if (!found) {
+        // Already gone (removed by hand, or the dataset was reset). Still mark it
+        // removed so the panel can drop the row instead of being stuck with it.
+        saveProposed();
+        return { datasetName, entryFound: false, persisted: false };
+      }
+
+      // Snapshot the whole entry so Undo can put it back exactly — including its
+      // position. This works regardless of when the update was integrated.
+      prop.removedEntry = { target, index: found.index, entry: found.entry };
+      found.list.splice(found.index, 1);
+      writeDatasetToDisk(target, data);
+      saveProposed();
+      return { datasetName, entryFound: true, data, persisted: await persistDataset(datasetName, data, email) };
+    });
+
+    if (!result) {
+      return res.status(409).json({ error: `Proposal already ${prop.status}`, status: prop.status });
+    }
+    if (result.error) return res.status(500).json({ error: result.error });
+    res.json({
+      success: true,
+      dataset: result.datasetName,
+      entryFound: result.entryFound,
+      persisted: result.persisted,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/proposed-changes/:id/undo-removal — put a removed entry back.
+app.post("/api/proposed-changes/:id/undo-removal", requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const prop = (proposedChanges.items || []).find((i) => i.id === id);
+    if (!prop) return res.status(404).json({ error: "Proposal not found" });
+    if (prop.status !== "removed") {
+      return res.status(409).json({ error: `Proposal is ${prop.status}, not removed`, status: prop.status });
+    }
+    if (!prop.removedEntry || !prop.removedEntry.entry) {
+      return res.status(400).json({ error: "No snapshot of the removed entry, so it cannot be restored automatically" });
+    }
+    const { target, index, entry } = prop.removedEntry;
+    const datasetName = datasetNameForTarget(target);
+    if (!datasetName) return res.status(400).json({ error: `Unknown target dataset: ${target}` });
+
+    const email = (req.user && req.user.email) || "unknown";
+
+    const result = await withIntegrateLock(async () => {
+      if (prop.status !== "removed") return null;
+      const live = getDataset(datasetName);
+      if (!live) return { error: "Dataset is unavailable" };
+      const data = JSON.parse(JSON.stringify(live));
+      // Never restore a duplicate if something re-added it meanwhile.
+      if (findEntryByProposalId(data, target, id)) {
+        prop.status = "integrated";
+        prop.removedBy = prop.removedByEmail = prop.removedAt = null;
+        prop.removedEntry = null;
+        saveProposed();
+        return { datasetName, alreadyPresent: true, persisted: false };
+      }
+      const lists = entryListsFor(data, target);
+      const list = lists[0] || [];
+      const at = Math.max(0, Math.min(Number(index) || 0, list.length));
+      list.splice(at, 0, entry);
+      writeDatasetToDisk(target, data);
+
+      prop.status = "integrated";
+      prop.removedBy = prop.removedByEmail = prop.removedAt = null;
+      prop.removedEntry = null;
+      saveProposed();
+      return { datasetName, alreadyPresent: false, data, persisted: await persistDataset(datasetName, data, email) };
+    });
+
+    if (!result) return res.status(409).json({ error: `Proposal already ${prop.status}`, status: prop.status });
+    if (result.error) return res.status(500).json({ error: result.error });
+    res.json({
+      success: true,
+      dataset: result.datasetName,
+      alreadyPresent: result.alreadyPresent,
+      persisted: result.persisted,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/proposed-changes/:id/flag-revert — mark an integrated update as
+// needing a manual revert. Deliberately does NOT touch the dataset: for an
+// edit-path update the text is woven into curated content, so only a person
+// should separate it. Send { "flag": false } to clear.
+app.post("/api/proposed-changes/:id/flag-revert", requireAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const prop = (proposedChanges.items || []).find((i) => i.id === id);
+    if (!prop) return res.status(404).json({ error: "Proposal not found" });
+    if (prop.status !== "integrated") {
+      return res.status(409).json({ error: `Only integrated updates can be flagged (this one is ${prop.status})`, status: prop.status });
+    }
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const flag = body.flag !== false;
+    const email = (req.user && req.user.email) || "unknown";
+
+    if (flag) {
+      prop.revertRequested = true;
+      prop.revertRequestedBy = await resolveAuthorName(email);
+      prop.revertRequestedByEmail = email;
+      prop.revertRequestedAt = new Date().toISOString();
+      prop.revertNote = safeText(body.note, REVERT_NOTE_MAX);
+    } else {
+      prop.revertRequested = false;
+      prop.revertRequestedBy = null;
+      prop.revertRequestedByEmail = null;
+      prop.revertRequestedAt = null;
+      prop.revertNote = null;
+    }
+    saveProposed();
+    res.json({
+      success: true,
+      revertRequested: flag,
+      mode: integratedModeOf(prop),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

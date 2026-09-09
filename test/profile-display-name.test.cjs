@@ -133,6 +133,9 @@ test("saveDisplayName upserts by email, and an empty name clears it to NULL", as
 // Profile endpoints + the recently-integrated projection
 // ---------------------------------------------------------------------------
 
+// SHARED ON-DISK FIXTURE: the integrate tests below genuinely rewrite
+// data/*.json, so the suite must run with --test-concurrency=1 (see the `test`
+// script in package.json). In parallel, files clobber each other's restore.
 const DATA_DIR = path.join(__dirname, "..", "data");
 const PROTECTED = ["knowledge.json", "regulatory-timeline.json", "current-use-cases.json", "proposed-changes.json"];
 const originals = new Map();
