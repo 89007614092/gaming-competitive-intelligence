@@ -4,6 +4,12 @@
 
 const API_BASE = "/api";
 
+// Who is signed in, as far as the UI knows. `role` gates the admin-only
+// controls (Remove / Undo / Flag in the Recently integrated list). Null when
+// auth is off or nobody is signed in.
+let currentUserRole = null;
+function isCurrentUserAdmin() { return currentUserRole === "admin"; }
+
 // Current UI language (mirrors the sidebar toggle, stored in localStorage "LANG").
 function currentUiLang() {
   try { return localStorage.getItem("LANG") === "zh-CN" ? "zh-CN" : "en"; } catch (_) { return "en"; }
@@ -50,6 +56,36 @@ function safeHref(url) {
   return /^https?:\/\//i.test(u) ? u : "#";
 }
 
+// "Added by X" — the public attribution on knowledge-base entries that came from
+// an integrated Suggested Update. An entry that was merged into existing curated
+// text says "Updated by" instead, because the original content was not theirs.
+// Only rendered when the entry actually carries attribution, so curated entries
+// written by hand stay clean.
+function attributionHtml(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  const t = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
+  const bits = [];
+  if (entry.addedBy) {
+    bits.push(`${t("kb.addedBy", "Added by")} <strong>${escapeHtml(entry.addedBy)}</strong>`);
+  }
+  if (entry.lastUpdatedBy) {
+    bits.push(`${t("kb.updatedBy", "Updated by")} <strong>${escapeHtml(entry.lastUpdatedBy)}</strong>`);
+  }
+  if (!bits.length) return "";
+  return `<div class="kb-added-by">${bits.join(" &middot; ")}</div>`;
+}
+
+// Same attribution as plain text, for renderers that build SVG <text> rather
+// than HTML (the Knowledge Base timeline graphic).
+function attributionText(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  const t = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
+  const bits = [];
+  if (entry.addedBy) bits.push(`${t("kb.addedBy", "Added by")} ${entry.addedBy}`);
+  if (entry.lastUpdatedBy) bits.push(`${t("kb.updatedBy", "Updated by")} ${entry.lastUpdatedBy}`);
+  return bits.join(" · ");
+}
+
 // ===== Init =====
 document.addEventListener("DOMContentLoaded", () => {
   restoreTabOrder();
@@ -84,6 +120,9 @@ function setupAuthUI() {
       if (data && data.user && data.user.email) {
         logoutBtn.style.display = "";
         logoutBtn.textContent = "Sign out (" + data.user.email + ")";
+        // Remember the role: the admin-only controls in the Recently integrated
+        // list are hidden without it.
+        currentUserRole = data.user.role || "user";
       }
     })
     .catch(() => { /* auth disabled or no session — leave hidden */ });
@@ -775,6 +814,7 @@ function setupSettings() {
 
   document.getElementById("settingsBtn").addEventListener("click", () => {
     modal.style.display = "flex";
+    loadProfileIntoSettings();
   });
 
   document.getElementById("closeSettings").addEventListener("click", () => {
@@ -784,6 +824,75 @@ function setupSettings() {
   // Click outside to close
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.style.display = "none";
+  });
+
+  setupDisplayNameField();
+}
+
+// --- Profile display name (Suggested Updates attribution) -------------------
+// The name is what shows publicly as "Added by X", so it is fetched from the
+// server rather than guessed at from the email address.
+async function loadProfileIntoSettings() {
+  const input = document.getElementById("displayNameInput");
+  const statusEl = document.getElementById("displayNameStatus");
+  const saveBtn = document.getElementById("saveDisplayName");
+  if (!input) return;
+  try {
+    const res = await fetch("/api/profile", { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      // No session or auth off: the field is meaningless, so hide the block.
+      const block = document.getElementById("settingsProfile");
+      if (block) block.style.display = "none";
+      return;
+    }
+    const json = await res.json();
+    const user = json && json.user;
+    currentUserRole = (user && user.role) || currentUserRole;
+    input.value = (user && user.displayName) || "";
+    input.placeholder = (user && user.usingFallbackName && user.email)
+      ? user.email.split("@")[0] + " (not set)"
+      : "e.g. Molly Barlow";
+    if (saveBtn) saveBtn.disabled = false;
+    if (statusEl) statusEl.style.display = "none";
+  } catch (_) { /* leave the field empty rather than blocking the modal */ }
+}
+
+function setupDisplayNameField() {
+  const input = document.getElementById("displayNameInput");
+  const saveBtn = document.getElementById("saveDisplayName");
+  const statusEl = document.getElementById("displayNameStatus");
+  if (!input || !saveBtn || !statusEl) return;
+
+  const say = (message, ok) => {
+    statusEl.textContent = message;
+    statusEl.className = "settings-profile-status " + (ok ? "is-ok" : "is-error");
+    statusEl.style.display = "";
+  };
+
+  const save = async () => {
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: input.value }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        say((json && json.error) || "Could not save that name.", false);
+        return;
+      }
+      say(window.t ? window.t("settings.profile.saved") : "Saved. It will appear on entries you add from now on.", true);
+    } catch (_) {
+      say("Could not reach the server.", false);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  };
+
+  saveBtn.addEventListener("click", save);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); save(); }
   });
 }
 
@@ -2204,6 +2313,7 @@ function renderKBContent(searchQuery = null) {
           <div class="kb-card-title">${escapeHtml(sub.title || "")}</div>
           <div class="kb-card-content">${displayContent}</div>
           ${sourceLinks}
+          ${attributionHtml(sub)}
         </div>`;
     }
 
@@ -2338,6 +2448,7 @@ function renderTimelineView(categories, container) {
       <text x="${marginLeft + 44}" y="${y + 16}" font-size="11" fill="#6b7280">
         ${wrapText(entry.content, 100, 2)}
       </text>
+      ${attributionText(entry) ? `<text x="${marginLeft + 44}" y="${y + 42}" font-size="10" fill="#6b7280">${escapeHtml(attributionText(entry))}</text>` : ""}
 
       <!-- Category badge -->
       <rect x="${marginLeft + 28}" y="${y - 40}" width="14" height="14" rx="7" fill="${color}"/>
@@ -3642,6 +3753,7 @@ function renderCurrentUseCases() {
           <div class="use-case-pattern-games">
             ${pattern.games.map(game => `<span>${game}</span>`).join("")}
           </div>
+          ${attributionHtml(pattern)}
         </article>
       `).join("")}
     </div>
@@ -4040,6 +4152,7 @@ function renderRegulatoryTimeline(filter) {
         <p>${e.description}</p>
         <div class="timeline-impact"><strong>Impact:</strong> ${e.impact}</div>
         ${linkHtml}
+        ${attributionHtml(e)}
       </div>`;
   });
 
@@ -5020,8 +5133,120 @@ async function renderReviewPanel() {
         if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
+
+    // Finished work: separate section, so it never reads as "still to review".
+    renderRecentlyIntegrated(json.recentlyIntegrated || []);
   } catch (err) {
     listEl.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
+  }
+}
+
+// --- Recently integrated (Suggested Updates 2b-iii) -------------------------
+// What the team has already added, newest first, with the action that applies:
+//   new  -> Remove (and Undo once removed)
+//   edit -> Flag for revert only: the text was merged into curated content, so
+//           removing the record would delete the original.
+// All actions are admin-only; everyone else sees the list read-only.
+function renderRecentlyIntegrated(items) {
+  const section = document.getElementById("reviewRecentSection");
+  const listEl = document.getElementById("reviewRecentList");
+  if (!section || !listEl) return;
+  if (!items.length) {
+    section.style.display = "none";
+    listEl.innerHTML = "";
+    return;
+  }
+  section.style.display = "";
+  const admin = isCurrentUserAdmin();
+  const t = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
+
+  const when = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? "" : d.toLocaleDateString(currentUiLang() === "zh-CN" ? "zh-CN" : "en-GB", {
+      day: "numeric", month: "short", year: "numeric",
+    });
+  };
+
+  listEl.innerHTML = items.map((it) => {
+    const isNew = it.integratedMode === "new";
+    const removed = it.status === "removed";
+    const flagged = it.revertRequested === true;
+
+    let actionHtml = "";
+    if (admin) {
+      if (removed) {
+        actionHtml = `<button class="btn btn-sm" data-undo-remove="${escapeHtml(it.id)}" type="button">${t("review.undoRemove", "Undo removal")}</button>`;
+      } else if (isNew) {
+        actionHtml = `<button class="btn btn-sm btn-danger" data-remove-integration="${escapeHtml(it.id)}" type="button">${t("review.removeEntry", "Remove")}</button>`;
+      } else {
+        actionHtml = flagged
+          ? `<button class="btn btn-sm" data-flag-revert="${escapeHtml(it.id)}" data-flag="false" type="button">${t("review.clearFlag", "Clear flag")}</button>`
+          : `<button class="btn btn-sm" data-flag-revert="${escapeHtml(it.id)}" data-flag="true" type="button">${t("review.flagRevert", "Flag for revert")}</button>`;
+      }
+    }
+
+    const badges = [
+      removed ? `<span class="recent-badge recent-badge-removed">${t("review.removed", "Removed")}</span>` : "",
+      flagged ? `<span class="recent-badge recent-badge-flagged">${t("review.revertRequested", "Revert requested")}</span>` : "",
+    ].join("");
+
+    return `
+      <div class="recent-card" data-id="${escapeHtml(it.id)}">
+        <div class="recent-head">
+          <span class="recent-target">${escapeHtml(it.integratedTarget || "")}</span>
+          ${badges}
+          <span class="recent-date">${escapeHtml(when(it.integratedAt))}</span>
+        </div>
+        <div class="recent-title">${escapeHtml(it.title || "")}</div>
+        <div class="recent-meta">
+          ${it.integratedBy ? `${t("kb.addedBy", "Added by")} <strong>${escapeHtml(it.integratedBy)}</strong>` : ""}
+          ${!isNew && it.matchedRecordTitle ? ` &middot; ${t("review.mergedInto", "merged into")} ${escapeHtml(it.matchedRecordTitle)}` : ""}
+        </div>
+        ${flagged && it.revertNote ? `<div class="recent-note">${escapeHtml(it.revertNote)}</div>` : ""}
+        ${actionHtml ? `<div class="recent-actions">${actionHtml}</div>` : ""}
+      </div>`;
+  }).join("");
+
+  if (!admin) return;
+
+  // The list element persists across renders, so wire the handler ONCE —
+  // attaching it on every render would stack duplicates and fire N times.
+  if (!listEl.dataset.recentWired) {
+    listEl.dataset.recentWired = "1";
+    listEl.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      if (btn.dataset.removeIntegration) {
+        await recentAction(btn, `/api/proposed-changes/${encodeURIComponent(btn.dataset.removeIntegration)}/remove-integration`, {});
+      } else if (btn.dataset.undoRemove) {
+        await recentAction(btn, `/api/proposed-changes/${encodeURIComponent(btn.dataset.undoRemove)}/undo-removal`, {});
+      } else if (btn.dataset.flagRevert) {
+        await recentAction(btn, `/api/proposed-changes/${encodeURIComponent(btn.dataset.flagRevert)}/flag-revert`, { flag: btn.dataset.flag !== "false" });
+      }
+    });
+  }
+}
+
+// Shared handler for the three Recently integrated actions: disable the button,
+// call the endpoint, show the outcome, then refresh both lists.
+async function recentAction(btn, url, body) {
+  btn.disabled = true;
+  try {
+    const res = await authedFetch(url, { method: "POST", body: JSON.stringify(body) });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showToast((json && json.error) || "That didn't work.", "error");
+      btn.disabled = false;
+      return;
+    }
+    showToast("Updated.", "success");
+    // Re-render the whole panel: the item may have moved between pending and
+    // recently-integrated, and its mode/badges will have changed.
+    await renderReviewPanel();
+  } catch (_) {
+    showToast("Could not reach the server.", "error");
+    btn.disabled = false;
   }
 }
 

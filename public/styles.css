@@ -5327,3 +5327,61 @@ body {
   border-color: currentColor;
   color: inherit;
 }
+
+/* ===== Suggested Updates: attribution + recently integrated (2b-iii) ===== */
+
+/* "Added by X" on knowledge-base entries that came from an integrated update. */
+.kb-added-by {
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  color: var(--text-muted, #6b7280);
+}
+.kb-added-by strong { color: var(--text, #1a1d28); font-weight: 600; }
+
+/* Settings > display name */
+.settings-profile { margin-top: 1.5rem; border-top: 1px solid var(--border, #e2e5ee); padding-top: 1.2rem; }
+.settings-section-title { margin: 0 0 0.35rem; font-size: 0.95rem; font-weight: 600; }
+.settings-profile-row { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
+.settings-profile-row .text-input { flex: 1 1 auto; }
+.settings-profile-status { margin: 0.6rem 0 0; font-size: 0.82rem; }
+.settings-profile-status.is-ok { color: #047857; }
+.settings-profile-status.is-error { color: #b91c1c; }
+
+/* Recently integrated section in the review panel */
+.review-recent {
+  margin-top: 2rem;
+  border-top: 1px solid var(--border, #e2e5ee);
+  padding-top: 1.2rem;
+}
+.review-recent-head h4 { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 600; }
+.review-recent-hint { margin: 0 0 1rem; font-size: 0.85rem; color: var(--text-muted, #6b7280); }
+
+.recent-card {
+  border: 1px solid var(--border, #e2e5ee);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  background: #fff;
+}
+.recent-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.recent-target {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-muted, #6b7280);
+}
+.recent-date { margin-left: auto; font-size: 0.75rem; color: var(--text-muted, #6b7280); }
+.recent-title { font-weight: 600; font-size: 0.95rem; }
+.recent-meta { margin-top: 0.25rem; font-size: 0.82rem; color: var(--text-muted, #6b7280); }
+.recent-note {
+  margin-top: 0.4rem; font-size: 0.82rem; font-style: italic;
+  color: var(--text-muted, #6b7280);
+}
+.recent-actions { margin-top: 0.7rem; display: flex; gap: 0.5rem; }
+
+.recent-badge {
+  font-size: 0.7rem; font-weight: 600; padding: 0.1rem 0.45rem;
+  border-radius: 999px; border: 1px solid transparent;
+}
+.recent-badge-removed { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+.recent-badge-flagged { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+
+.btn-danger { background: #b91c1c; color: #fff; border: 1px solid #b91c1c; }
+.btn-danger:hover:not(:disabled) { background: #991b1b; border-color: #991b1b; }

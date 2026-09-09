@@ -122,6 +122,23 @@
       'common.printPdf': 'Print / Save as PDF',
       'review.empty': "Nothing to review. The app's content already matches the monitored official sources.",
 
+      // Recently integrated (Suggested Updates attribution)
+      'review.recent.title': 'Recently integrated',
+      'review.recent.hint': 'Updates the team has already added. A new entry can be removed; one that was merged into existing text can only be flagged for an admin to revert.',
+      'review.removeEntry': 'Remove',
+      'review.undoRemove': 'Undo removal',
+      'review.flagRevert': 'Flag for revert',
+      'review.clearFlag': 'Clear flag',
+      'review.removed': 'Removed',
+      'review.revertRequested': 'Revert requested',
+      'review.mergedInto': 'merged into',
+      'kb.addedBy': 'Added by',
+      'kb.updatedBy': 'Updated by',
+      'settings.profile.title': 'Your display name',
+      'settings.profile.hint': 'Shown publicly as "Added by ..." on knowledge-base entries you add or update.',
+      'settings.profile.save': 'Save',
+      'settings.profile.saved': 'Saved. It will appear on entries you add from now on.',
+
       // Modals
       'modal.addCompetitors.title': 'Add Competitors',
       'modal.addCompetitors.subtitle': 'Choose competitors to include in focused News searches.',
@@ -303,6 +320,23 @@
       'common.printPdf': '打印 / 保存为 PDF',
       'review.empty': '暂无需审核的内容。应用内容已与受监控的官方来源一致。',
 
+      // 最近已整合（建议更新署名）
+      'review.recent.title': '最近已整合',
+      'review.recent.hint': '团队已添加的更新。新增条目可以移除；已合并到现有文本中的更新只能标记，由管理员手动还原。',
+      'review.removeEntry': '移除',
+      'review.undoRemove': '撤销移除',
+      'review.flagRevert': '标记为需还原',
+      'review.clearFlag': '清除标记',
+      'review.removed': '已移除',
+      'review.revertRequested': '已请求还原',
+      'review.mergedInto': '已合并至',
+      'kb.addedBy': '添加者',
+      'kb.updatedBy': '更新者',
+      'settings.profile.title': '你的显示名称',
+      'settings.profile.hint': '将公开显示为「添加者：…」，出现在你添加或更新的知识库条目上。',
+      'settings.profile.save': '保存',
+      'settings.profile.saved': '已保存。此后你添加的条目都会显示该名称。',
+
       // Modals
       'modal.addCompetitors.title': '添加竞争对手',
       'modal.addCompetitors.subtitle': '选择要纳入精选新闻搜索的竞争对手。',
@@ -461,6 +495,12 @@
     { sel: '#reviewPanelTitle', key: 'modal.review.title' },
     { sel: '#reviewPanelOverlay .modal-subtitle', key: 'modal.review.subtitle' },
     { sel: '#reviewPanelEmpty p', key: 'review.empty' },
+    // Recently integrated section (Suggested Updates attribution)
+    { sel: '#reviewRecentTitle', key: 'review.recent.title' },
+    { sel: '#reviewRecentHint', key: 'review.recent.hint' },
+    { sel: '#settingsProfileTitle', key: 'settings.profile.title' },
+    { sel: '#settingsProfileHint', key: 'settings.profile.hint' },
+    { sel: '#saveDisplayName', key: 'settings.profile.save' },
     // Sidebar "Suggested updates" button keeps its count <span>, so target the
     // label span only.
     { sel: '#suggestedUpdatesBtn .i18n-label', key: 'common.suggestedUpdates' },

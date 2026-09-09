@@ -760,6 +760,15 @@
       </div>
       <div class="modal-body">
         <p class="hint">Search is powered by different APIs.</p>
+        <div class="settings-profile" id="settingsProfile">
+          <h4 class="settings-section-title" id="settingsProfileTitle">Your display name</h4>
+          <p class="hint" id="settingsProfileHint">Shown publicly as "Added by ..." on knowledge-base entries you add or update.</p>
+          <div class="settings-profile-row">
+            <input class="text-input" id="displayNameInput" type="text" maxlength="40" autocomplete="off" placeholder="e.g. Molly Barlow" />
+            <button class="btn btn-sm btn-primary" id="saveDisplayName" type="button">Save</button>
+          </div>
+          <p class="settings-profile-status" id="displayNameStatus" style="display:none;"></p>
+        </div>
       </div>
     </div>
   </div>
@@ -780,6 +789,14 @@
           <p>Nothing to review. The app's content already matches the monitored official sources.</p>
         </div>
         <div class="review-list" id="reviewPanelList"></div>
+
+        <div class="review-recent" id="reviewRecentSection" style="display:none;">
+          <div class="review-recent-head">
+            <h4 id="reviewRecentTitle">Recently integrated</h4>
+            <p class="review-recent-hint" id="reviewRecentHint">Updates the team has already added. A new entry can be removed; one that was merged into existing text can only be flagged for an admin to revert.</p>
+          </div>
+          <div class="review-list" id="reviewRecentList"></div>
+        </div>
 
         <div id="readerSplitView" class="reader-split" style="display:none;">
           <div class="reader-split-head">
