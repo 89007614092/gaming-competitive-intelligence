@@ -344,6 +344,12 @@ let _pg = null;
 try { _pg = require("pg"); } catch { /* pg not installed (e.g. local dev) */ }
 let _dbPool = null;
 function getDbPool() {
+  // Prefer the pool attached through lib/datasets — that module's getDbPool is
+  // documented as the shared accessor, and keeping ONE pool means datasets,
+  // profiles and patents all share the same connections instead of each opening
+  // their own. Falls back to a lazily-created pool when nothing is attached.
+  const shared = datasetsGetDbPool();
+  if (shared) return shared;
   if (_dbPool) return _dbPool;
   if (!process.env.DATABASE_URL || !_pg) return null;
   // Pool options (incl. IPv4 pin + PG_FAMILY override) live in lib/dbPool.
@@ -2638,6 +2644,12 @@ async function ensureAllowedEmailsTable(pool) {
   await pool.query(
     `ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false`
   );
+  // v1.3: user-chosen display name, shown publicly as the "Added by X" label on
+  // integrated knowledge-base entries. Same idempotent pattern — a name set by
+  // hand in Supabase is never cleared by a deploy.
+  await pool.query(
+    `ALTER TABLE allowed_emails ADD COLUMN IF NOT EXISTS display_name TEXT`
+  );
   const seed = String(process.env.ALLOWED_EMAILS || "")
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (seed.length) {
@@ -3869,29 +3881,37 @@ function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
     lastUpdatedAt: stamp.addedAt,
   };
 
-  if (prop.matchedRecord && prop.matchedRecord.dataset === target) {
+  // Does this merge into a record we already have, or create a new one? The
+  // distinction decides how it can be removed later: a new entry is deleted
+  // outright, an edit has to be stripped back out of curated text.
+  let mode = "new";
+  let previousContent = null;
+
+  const matchedTitle =
+    prop.matchedRecord && prop.matchedRecord.dataset === target ? prop.matchedRecord.title : null;
+
+  let existing = null;
+  if (matchedTitle) {
     if (target === "timeline") {
-      const ev = (data.events || []).find(e => e.title === prop.matchedRecord.title);
-      if (ev) {
-        ev.description = `${ev.description || ""}\n\n${edit}`.trim();
-        Object.assign(ev, editStamp);
-      }
+      existing = (data.events || []).find(e => e.title === matchedTitle) || null;
     } else if (target === "knowledge") {
       for (const cat of Object.values(data.categories || {})) {
-        const sub = (cat.subsections || []).find(s => s.title === prop.matchedRecord.title);
-        if (sub) {
-          sub.content = `${sub.content || ""}\n\n${edit}`.trim();
-          Object.assign(sub, editStamp);
-          break;
-        }
+        existing = (cat.subsections || []).find(s => s.title === matchedTitle) || null;
+        if (existing) break;
       }
     } else if (target === "use-cases") {
-      const p = (data.patterns || []).find(p => p.title === prop.matchedRecord.title);
-      if (p) {
-        p.content = `${p.content || ""}\n\n${edit}`.trim();
-        Object.assign(p, editStamp);
-      }
+      existing = (data.patterns || []).find(p => p.title === matchedTitle) || null;
     }
+  }
+
+  if (existing) {
+    mode = "edit";
+    // Timeline events carry `description`; knowledge subsections and use-case
+    // patterns carry `content`.
+    const field = existing.content != null ? "content" : "description";
+    previousContent = existing[field] == null ? "" : existing[field];
+    existing[field] = `${previousContent}\n\n${edit}`.trim();
+    Object.assign(existing, editStamp);
   } else {
     if (target === "timeline") {
       data.events = data.events || [];
@@ -3926,7 +3946,7 @@ function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
   if (target === "knowledge") clearDatasetCache("knowledge");
   if (target === "use-cases") clearDatasetCache("current-use-cases");
 
-  return { datasetName, data };
+  return { datasetName, data, mode, previousContent };
 }
 function sourceRegistryJurisdiction(prop) {
   const s = (loadSourceRegistry() || []).find(x => x.id === prop.source);
@@ -4287,6 +4307,10 @@ app.post("/api/admin/proposed/reenrich", requireAdmin, async (req, res) => {
 // "AI rewrite unavailable" cards. `enrichingCount` reports how many pending
 // items are still in that pipeline (for a subtle "M enriching…" hint) without
 // rendering them.
+// How many finished integrations the review panel lists. Bounded because the
+// proposal store grows forever and only the recent ones are actionable.
+const RECENTLY_INTEGRATED_LIMIT = 20;
+
 app.get("/api/proposed-changes", (req, res) => {
   const pending = (proposedChanges.items || []).filter(i => i.status === "pending");
   const isPresentable = (i) =>
@@ -4296,7 +4320,46 @@ app.get("/api/proposed-changes", (req, res) => {
     (i) => !(i.styledSummary && i.styledSummary.length) && i.fetchStatus !== "blocked"
   ).length;
   presentable.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json({ success: true, pending: presentable, pendingCount: presentable.length, enrichingCount });
+
+  // What the team has already integrated, newest first, so a mistaken entry can
+  // be spotted and dealt with. Deliberately a PROJECTION rather than the raw
+  // proposal: integratedByEmail is never sent to the browser, because the label
+  // is public and must not leak email addresses.
+  const recentlyIntegrated = (proposedChanges.items || [])
+    .filter((i) => i.status === "integrated" || i.status === "removed")
+    .sort((a, b) => new Date(b.integratedAt || 0) - new Date(a.integratedAt || 0))
+    .slice(0, RECENTLY_INTEGRATED_LIMIT)
+    .map((i) => ({
+      id: i.id,
+      title: i.title,
+      publisher: i.publisher,
+      url: i.url,
+      status: i.status,
+      integratedBy: i.integratedBy || null,
+      integratedAt: i.integratedAt || null,
+      integratedTarget: i.integratedTarget || null,
+      // "new" = a self-contained entry that can be deleted outright.
+      // "edit" = merged into curated text, so it can only be flagged for revert.
+      // Proposals integrated before this field existed are inferred.
+      integratedMode: i.integratedMode || (i.matchedRecord ? "edit" : "new"),
+      matchedRecordTitle: (i.matchedRecord && i.matchedRecord.title) || null,
+      // Symmetric snapshot for an edited record, so a revert is an exact restore.
+      hasPreviousContent: !!i.integratedPreviousContent,
+      removedBy: i.removedBy || null,
+      removedAt: i.removedAt || null,
+      revertRequested: i.revertRequested === true,
+      revertRequestedBy: i.revertRequestedBy || null,
+      revertRequestedAt: i.revertRequestedAt || null,
+      revertNote: i.revertNote || null,
+    }));
+
+  res.json({
+    success: true,
+    pending: presentable,
+    pendingCount: presentable.length,
+    enrichingCount,
+    recentlyIntegrated,
+  });
 });
 
 // Optional shared-secret auth for state-changing endpoints. DISABLED by default
@@ -4529,8 +4592,68 @@ async function persistDataset(name, data, updatedBy) {
 // Display name for the "Added by" label. Step 2b will look up
 // allowed_emails.display_name; until then fall back to the email local-part so a
 // raw address is never rendered into the knowledge base.
-function resolveAuthorName(email) {
+// ---------------------------------------------------------------------------
+// Profile display names — the "Added by X" label on integrated entries.
+// ---------------------------------------------------------------------------
+const DISPLAY_NAME_MAX = 40;
+
+// Trim, collapse whitespace and strip control characters. The control-character
+// strip matters: the name is written into dataset JSON and rendered into HTML,
+// so it must never be able to introduce structure into either.
+function normaliseDisplayName(raw) {
+  return String(raw == null ? "" : raw)
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, DISPLAY_NAME_MAX);
+}
+
+// What we show when nobody has chosen a name: the email LOCAL PART only, never
+// the whole address — the label is public.
+function fallbackDisplayName(email) {
   return String(email || "").split("@")[0] || "unknown";
+}
+
+// Read a display name. FAIL SOFT by design: every caller must keep working with
+// no database, so an error yields the fallback instead of failing the request.
+async function lookupDisplayName(email) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e) return fallbackDisplayName(email);
+  const pool = getDbPool();
+  if (!pool) return fallbackDisplayName(email);
+  try {
+    const { rows } = await pool.query(
+      "SELECT display_name FROM allowed_emails WHERE email = $1 LIMIT 1",
+      [e]
+    );
+    return normaliseDisplayName(rows.length ? rows[0].display_name : "") || fallbackDisplayName(email);
+  } catch (err) {
+    console.warn("[profile] display_name lookup failed:", err.message);
+    return fallbackDisplayName(email);
+  }
+}
+
+async function saveDisplayName(email, raw) {
+  const e = String(email || "").trim().toLowerCase();
+  if (!e) return { ok: false, error: "no email on this session" };
+  const pool = getDbPool();
+  if (!pool) return { ok: false, error: "no database configured" };
+  // An empty name clears it back to the fallback rather than storing "".
+  const name = normaliseDisplayName(raw);
+  await pool.query(
+    `INSERT INTO allowed_emails (email, display_name)
+     VALUES ($1, $2)
+     ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name`,
+    [e, name || null]
+  );
+  return { ok: true, displayName: name };
+}
+
+// Resolve the label stamped onto an integrated entry. Async because the real
+// name lives in the database; the fallback means an unconfigured or unreachable
+// database never blocks an integrate.
+async function resolveAuthorName(email) {
+  return lookupDisplayName(email);
 }
 
 // Integrate reads, mutates and rewrites a WHOLE dataset, so two overlapping
@@ -4564,7 +4687,7 @@ app.post("/api/proposed-changes/:id/integrate", requireAdmin, async (req, res) =
     }
 
     const email = (req.user && req.user.email) || "unknown";
-    const author = { name: resolveAuthorName(email), email };
+    const author = { name: await resolveAuthorName(email), email };
 
     const result = await withIntegrateLock(async () => {
       // Re-check inside the lock — another request may have integrated it while
@@ -4578,6 +4701,16 @@ app.post("/api/proposed-changes/:id/integrate", requireAdmin, async (req, res) =
       // Retained so a mistaken integration can be undone / removed later.
       prop.integratedEdit = edit;
       prop.integratedTarget = target;
+      // Whether this merged into an existing curated record (removable only by
+      // stripping text) or created a brand-new entry (removable by deleting it).
+      // Drives which action the "Recently integrated" list offers.
+      prop.integratedMode = r.mode;
+      if (r.mode === "edit") {
+        // Exact pre-integration content, so reverting later is a restore rather
+        // than string surgery. Capped so a pathological entry can't bloat the
+        // proposal store. Only set from now on — earlier edits have no snapshot.
+        prop.integratedPreviousContent = String(r.previousContent || "").slice(0, 20000);
+      }
       (proposedChanges.integratedIds = proposedChanges.integratedIds || []).push(id);
       saveProposed();
       return { ...r, persisted: await persistDataset(r.datasetName, r.data, email) };
@@ -4587,6 +4720,48 @@ app.post("/api/proposed-changes/:id/integrate", requireAdmin, async (req, res) =
       return res.status(409).json({ error: `Proposal already ${prop.status}`, status: prop.status });
     }
     res.json({ success: true, target, dataset: result.datasetName, persisted: result.persisted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/profile — the signed-in user's identity and chosen display name.
+// The name is what appears publicly as "Added by X" on integrated entries.
+app.get("/api/profile", whenAuth(requireAuth), async (req, res) => {
+  if (!req.user || !req.user.email) return res.status(401).json({ error: "not signed in" });
+  const email = req.user.email;
+  const displayName = await lookupDisplayName(email);
+  res.json({
+    success: true,
+    user: {
+      email,
+      role: req.user.role || "user",
+      displayName,
+      // True when the name is the auto-generated fallback rather than one the
+      // user chose — the UI nudges them to set a real one in that case.
+      usingFallbackName: displayName === fallbackDisplayName(email),
+    },
+  });
+});
+
+// PUT /api/profile — set your own display name. Self-service only: admins
+// cannot rename other people (deliberate v1 limit, easy to add later).
+app.put("/api/profile", whenAuth(requireAuth), async (req, res) => {
+  if (!req.user || !req.user.email) return res.status(401).json({ error: "not signed in" });
+  const body = req.body && typeof req.body === "object" ? req.body : null;
+  if (!body || !Object.prototype.hasOwnProperty.call(body, "displayName")) {
+    return res.status(400).json({ error: "Expected a displayName field" });
+  }
+  try {
+    const r = await saveDisplayName(req.user.email, body.displayName);
+    // No database configured is a 503, not a 500 — it is a deployment state,
+    // not a bug in the request.
+    if (!r.ok) return res.status(503).json({ error: r.error });
+    res.json({
+      success: true,
+      displayName: r.displayName,
+      usingFallbackName: !r.displayName,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -5551,4 +5726,12 @@ module.exports = {
   newsChains,
   scannerChains,
   resolvedUrlMap,
+
+  // Profile display names (Suggested Updates v2 attribution) — pure/DB helpers
+  // exported so they can be tested without standing up a session.
+  normaliseDisplayName,
+  fallbackDisplayName,
+  lookupDisplayName,
+  saveDisplayName,
+  DISPLAY_NAME_MAX,
 };

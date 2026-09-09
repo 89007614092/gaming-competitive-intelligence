@@ -15,7 +15,7 @@ const http = require("http");
 
 // --- lib/datasets unit tests ------------------------------------------------
 const {
-  getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb,
+  getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool,
 } = require("../lib/datasets");
 
 test("primeDatasetCacheFromDb makes the DB value authoritative over disk", async () => {
@@ -81,11 +81,20 @@ test("PUT /api/datasets/:name route", async (t) => {
     assert.strictEqual(r.status, 401);
   });
 
-  await t.test("correct key but no DATABASE_URL -> 500 db-not-configured", async () => {
-    const r = await request(server, "PUT", "/api/datasets/knowledge", { a: 1 },
-      { "x-admin-key": "test-editor-key" });
-    assert.strictEqual(r.status, 500);
-    assert.strictEqual(r.body && r.body.error, "Database not configured");
+  await t.test("correct key but no database configured -> 500 db-not-configured", async () => {
+    // "No database" means no pool attached — getDbPool() prefers the pool handed
+    // to attachDb over one built from DATABASE_URL, so an earlier test's fake
+    // pool has to be detached rather than relying on the env var being unset.
+    const previous = getDbPool();
+    attachDb(null);
+    try {
+      const r = await request(server, "PUT", "/api/datasets/knowledge", { a: 1 },
+        { "x-admin-key": "test-editor-key" });
+      assert.strictEqual(r.status, 500);
+      assert.strictEqual(r.body && r.body.error, "Database not configured");
+    } finally {
+      attachDb(previous);
+    }
   });
 
   await t.test("unknown dataset -> 404", async () => {
