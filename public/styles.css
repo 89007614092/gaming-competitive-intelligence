@@ -5385,3 +5385,8 @@ body {
 
 .btn-danger { background: #b91c1c; color: #fff; border: 1px solid #b91c1c; }
 .btn-danger:hover:not(:disabled) { background: #991b1b; border-color: #991b1b; }
+
+/* Review panel tabs: "Suggested updates" / "Recently integrated" */
+.review-tabs { margin-bottom: 1.1rem; }
+.review-tabs .sub-tab-btn { display: inline-flex; align-items: center; gap: 0.4rem; }
+.review-pane { display: block; }
