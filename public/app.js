@@ -3296,9 +3296,17 @@ function patentCardHtml(p) {
 function renderCompanyMap(companies, regions) {
   const container = document.getElementById("companyMapContainer");
 
+  // Companies added from a Suggested Update are text-only and have no
+  // coordinates. Plotting them would put a marker at 0,0, and feeding undefined
+  // into Math.min would turn every bound into NaN and break the whole map — so
+  // they are excluded here and listed separately below.
+  const mappable = companies.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lon));
+  const unmapped = companies.filter(c => !Number.isFinite(c.lat) || !Number.isFinite(c.lon));
+  renderUnmappedCompanies(unmapped);
+
   // Compute bounds
-  const lats = companies.map(c => c.lat);
-  const lons = companies.map(c => c.lon);
+  const lats = mappable.map(c => c.lat);
+  const lons = mappable.map(c => c.lon);
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
   const minLon = Math.min(...lons);
@@ -3322,14 +3330,35 @@ function renderCompanyMap(companies, regions) {
     const checkTMap = setInterval(() => {
       if (typeof TMap !== "undefined") {
         clearInterval(checkTMap);
-        initMap(companies, regions, centerLat, centerLon, zoom);
+        initMap(mappable, regions, centerLat, centerLon, zoom);
       }
     }, 200);
     // Timeout after 10s
     setTimeout(() => { clearInterval(checkTMap); }, 10000);
   } else {
-    initMap(companies, regions, centerLat, centerLon, zoom);
+    initMap(mappable, regions, centerLat, centerLon, zoom);
   }
+}
+
+// Companies added from a Suggested Update have no coordinates, so they cannot
+// appear on the map. Listing them keeps them from being silently invisible.
+function renderUnmappedCompanies(unmapped) {
+  const host = document.getElementById("companyMapContainer");
+  if (!host || !host.parentElement) return;
+  let el = document.getElementById("unmappedCompanies");
+  if (!unmapped.length) {
+    if (el) el.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "unmappedCompanies";
+    el.className = "unmapped-companies";
+    host.parentElement.appendChild(el);
+  }
+  el.innerHTML = `
+    <h4 class="unmapped-companies-title">Added without a location</h4>
+    <ul>${unmapped.map(c => `<li><strong>${escapeHtml(c.name || "")}</strong>${c.description ? ` — ${escapeHtml(c.description)}` : ""}</li>`).join("")}</ul>`;
 }
 
 function initMap(companies, regions, centerLat, centerLon, zoom) {
@@ -4574,7 +4603,12 @@ async function integrateProposalCard(card) {
   const catKey = card.querySelector(".proposal-catkey");
   const body = { edit: editBox ? editBox.value : "" };
   if (targetSel && targetSel.value) body.targetDataset = targetSel.value;
-  if (catKey && catKey.value) body.targetCategoryKey = catKey.value;
+  // Only send the section when the field is actually shown — a stale hidden
+  // value would otherwise leak a knowledge category into a Risks integration.
+  const catField = catKey && catKey.closest(".proposal-field-category");
+  if (catKey && catKey.value && catField && catField.style.display !== "none") {
+    body.targetCategoryKey = catKey.value;
+  }
   if (integrateBtn) integrateBtn.disabled = true;
   try {
     const res = await authedFetch(`${API_BASE}/proposed-changes/${id}/integrate`, {
@@ -5065,8 +5099,10 @@ async function renderReviewPanel() {
            : (p.category === "use-case" ? "use-cases"
               : p.detectedAction === "deadline" ? "timeline"
               : "knowledge"));
-      const showCatKey = targetDefault === "knowledge";
-      const catKey = p.targetCategory || "regulations";
+      // The Knowledge Base is split into sections and Risks into risk
+      // categories; the other targets are flat lists, so no section field.
+      const showCatKey = targetDefault === "knowledge" || targetDefault === "risks";
+      const catKey = p.targetCategory || (targetDefault === "risks" ? "content-labelling" : "regulations");
       const reasonKey = reasonLabels[p.updateCategory] ? p.updateCategory : "new-development";
       return `
       <div class="proposal-card" data-id="${p.id}" data-url="${escapeHtml(p.url || "")}">
@@ -5089,11 +5125,15 @@ async function renderReviewPanel() {
               <option value="timeline" ${targetDefault === "timeline" ? "selected" : ""}>AI Regulatory Timeline</option>
               <option value="knowledge" ${targetDefault === "knowledge" ? "selected" : ""}>Knowledge Base</option>
               <option value="use-cases" ${targetDefault === "use-cases" ? "selected" : ""}>AI Use Cases</option>
+              <option value="network" ${targetDefault === "network" ? "selected" : ""}>Competitor Web</option>
+              <option value="tencent-products" ${targetDefault === "tencent-products" ? "selected" : ""}>Tencent Products</option>
+              <option value="risks" ${targetDefault === "risks" ? "selected" : ""}>Risks</option>
+              <option value="company-locations" ${targetDefault === "company-locations" ? "selected" : ""}>Company Locations</option>
             </select>
           </label>
           <label class="proposal-field proposal-field-category" style="display:${showCatKey ? "" : "none"}">
             Section:
-            <select class="proposal-catkey text-input">${kbCategoryOptions(catKey)}</select>
+            <select class="proposal-catkey text-input">${subTargetOptions(targetDefault, catKey)}</select>
           </label>
         </div>
         <div class="proposal-actions">
@@ -5150,8 +5190,15 @@ async function renderReviewPanel() {
         if (!sel) return;
         const card = sel.closest(".proposal-card");
         const field = card && card.querySelector(".proposal-field-category");
-        // Only the Knowledge Base is split into sections.
-        if (field) field.style.display = sel.value === "knowledge" ? "" : "none";
+        if (!field) return;
+        // Only the Knowledge Base and Risks are subdivided, and their options
+        // differ — so the select has to be rebuilt, not just shown or hidden.
+        const subdivided = sel.value === "knowledge" || sel.value === "risks";
+        field.style.display = subdivided ? "" : "none";
+        if (subdivided) {
+          const catSel = field.querySelector(".proposal-catkey");
+          if (catSel) catSel.innerHTML = subTargetOptions(sel.value, catSel.value);
+        }
       });
     }
 
@@ -5294,19 +5341,29 @@ function setupReviewTabs() {
   });
 }
 
-// Options for the "Section:" selector, taken from the REAL knowledge-base
-// categories rather than a hard-coded list — a stale list is how an update ends
-// up in a category that does not exist. Falls back to the known set if the KB
-// has not loaded yet.
-function kbCategoryOptions(selected) {
-  const live = kbData && kbData.categories ? kbData.categories : null;
-  const entries = live
-    ? Object.entries(live).map(([key, cat]) => [key, cat.label || key])
-    : [["regulations", "Regulatory Frameworks"], ["technology", "AI & Gaming Technology"],
-       ["competitors", "Competitor AI Ecosystem"], ["case-studies", "Case Studies"],
-       ["current-game-ai", "Current Game AI Uses"], ["tencent-products", "Tencent Products & Strategy"],
-       ["strategic-insights", "Strategic Insights"], ["regulatory-timeline", "Regulatory Timeline"]];
-  const chosen = entries.some(([k]) => k === selected) ? selected : entries[0][0];
+// Options for the "Section:" selector, per target. Taken from the REAL datasets
+// rather than a hard-coded list — a stale list is how an update ends up in a
+// section that does not exist. Falls back to the known set if data hasn't
+// loaded. Only the Knowledge Base and Risks are subdivided; anything else gets
+// no options (and the field is hidden).
+function subTargetOptions(target, selected) {
+  let entries = [];
+  if (target === "knowledge") {
+    const live = kbData && kbData.categories ? kbData.categories : null;
+    entries = live
+      ? Object.entries(live).map(([key, cat]) => [key, cat.label || key])
+      : [["regulations", "Regulatory Frameworks"], ["technology", "AI & Gaming Technology"],
+         ["competitors", "Competitor AI Ecosystem"], ["case-studies", "Case Studies"],
+         ["current-game-ai", "Current Game AI Uses"], ["tencent-products", "Tencent Products & Strategy"],
+         ["strategic-insights", "Strategic Insights"], ["regulatory-timeline", "Regulatory Timeline"]];
+  } else if (target === "risks") {
+    const live = typeof risksData !== "undefined" && risksData && risksData.categories
+      ? risksData.categories : null;
+    entries = live
+      ? Object.values(live).map((cat) => [cat.id || cat.title, cat.title || cat.id])
+      : [["content-labelling", "Content Labelling"]];
+  }
+  const chosen = entries.some(([k]) => k === selected) ? selected : (entries[0] && entries[0][0]);
   return entries
     .map(([key, label]) => `<option value="${escapeHtml(key)}" ${key === chosen ? "selected" : ""}>${escapeHtml(label)}</option>`)
     .join("");

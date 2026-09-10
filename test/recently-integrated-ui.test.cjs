@@ -149,7 +149,7 @@ test("the section field reacts to the Add to dropdown", () => {
   );
   assert.ok(
     /proposal-field-category[\s\S]{0,300}sel\.value === "knowledge"/.test(APP_JS),
-    "the section field must show only for the Knowledge Base"
+    "the section field must show for the Knowledge Base"
   );
 });
 
@@ -165,8 +165,14 @@ test("the section field is a selector built from real knowledge categories", () 
     "the old free-text category input must be gone"
   );
   assert.ok(
-    /function kbCategoryOptions/.test(APP_JS) && /kbData\.categories/.test(APP_JS),
+    /function subTargetOptions/.test(APP_JS) && /kbData\.categories/.test(APP_JS),
     "options must come from the live knowledge-base categories"
+  );
+  // Risks are subdivided too, from a different dataset — so the options have to
+  // depend on which target is selected, not be fixed at render time.
+  assert.ok(
+    /subTargetOptions\(sel\.value/.test(APP_JS),
+    "switching target must rebuild the section options"
   );
 });
 
