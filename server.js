@@ -2988,6 +2988,31 @@ function buildExistingIndex() {
   if (uc) {
     (uc.patterns || []).forEach((p, i) => push("use-cases", `uc:${i}`, p.title, `${p.title} ${p.content || ""} ${(p.games || []).join(" ")}`));
   }
+  // Competitor Web, Tencent Products, Risks and Company Locations. These were
+  // never indexed before, so the monitor could not match — and therefore could
+  // never propose — anything against them.
+  const net = getDataset("network");
+  if (net) {
+    (net.competitors || []).forEach((c, i) =>
+      push("network", `network:${i}`, c.name, `${c.name || ""} ${c.description || ""} ${(c.sectors || []).join(" ")} ${(c.useCases || []).join(" ")}`));
+  }
+  const tp = getDataset("tencent-products");
+  if (tp) {
+    (tp.products || []).forEach((p, i) =>
+      push("tencent-products", `tencent-products:${i}`, p.name, `${p.name || ""} ${p.description || ""} ${(p.sectors || []).join(" ")}`));
+  }
+  const rk = getDataset("risks");
+  if (rk) {
+    for (const [key, cat] of Object.entries(rk.categories || {})) {
+      (cat.risks || []).forEach((r, i) =>
+        push("risks", `risks:${key}:${i}`, r.title, `${r.title || ""} ${r.description || ""} ${cat.title || ""} ${(r.affectedCompanies || []).join(" ")}`));
+    }
+  }
+  const cl = getDataset("company-locations");
+  if (cl) {
+    (cl.companies || []).forEach((c, i) =>
+      push("company-locations", `company-locations:${i}`, c.name, `${c.name || ""} ${c.description || ""} ${c.city || ""} ${c.country || ""} ${c.sector || ""}`));
+  }
   return records;
 }
 
@@ -3017,15 +3042,21 @@ function bestMatch(itemTokens, itemStrong, index) {
 // ARTICLE CONTENT (not just the source's category). This fixes the case where a
 // regulator (e.g. AISI) publishes a model-capability assessment that should land
 // under "Case Studies", not "Regulations".
+// These MUST stay in step with the actual `categories` in data/knowledge.json —
+// this list is what `sanitizeCategoryKey` accepts, and an unknown key falls back
+// to the default rather than creating a stray category. It had drifted: it
+// offered "use-cases" (not a knowledge category — picking it created an empty
+// stray one) while omitting "regulatory-timeline" (a real one). Corrected to
+// match the file.
 const CATEGORY_LABELS = {
-  "regulations": "Regulatory Development",
-  "case-studies": "Case Study",
-  "technology": "Technology",
-  "use-cases": "AI Use Case",
-  "strategic-insights": "Strategic Insight",
-  "competitors": "Competitor Note",
-  "tencent-products": "Tencent Product",
-  "current-game-ai": "Current Game AI",
+  "regulations": "Regulatory Frameworks",
+  "case-studies": "Case Studies",
+  "technology": "AI & Gaming Technology",
+  "strategic-insights": "Strategic Insights",
+  "competitors": "Competitor AI Ecosystem",
+  "tencent-products": "Tencent Products & Strategy",
+  "current-game-ai": "Current Game AI Uses",
+  "regulatory-timeline": "Regulatory Timeline",
 };
 
 // Only allow category keys that exist in CATEGORY_LABELS. This blocks both
@@ -3854,9 +3885,46 @@ function classifyItem(source, item, index) {
 // the durable store. The disk write below is kept as the fallback for when no
 // database is configured (Render's disk is ephemeral, so on its own it does NOT
 // survive a restart — persistence comes from the caller writing to `datasets`).
+// Stable id for a newly created entry, derived from its title. Used by the
+// datasets that key their records by id (competitors, products, risks,
+// companies) so a later removal can find the same record again.
+function slugifyId(title) {
+  const base = String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return base || `entry-${Date.now()}`;
+}
+
+// Risk entries live under one of the dataset's existing categories. Only a known
+// key is accepted — an unknown one would silently create a new risk taxonomy.
+function sanitizeRiskCategoryKey(data, key) {
+  const cats = (data && data.categories) || {};
+  if (key && Object.prototype.hasOwnProperty.call(cats, key)) return key;
+  const first = Object.keys(cats)[0];
+  return first || "content-labelling";
+}
+
 function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
-  const fileMap = { timeline: "regulatory-timeline.json", knowledge: "knowledge.json", "use-cases": "current-use-cases.json" };
-  const datasetMap = { timeline: "regulatory-timeline", knowledge: "knowledge", "use-cases": "current-use-cases" };
+  const fileMap = {
+    timeline: "regulatory-timeline.json",
+    knowledge: "knowledge.json",
+    "use-cases": "current-use-cases.json",
+    network: "network.json",
+    "tencent-products": "tencent-products.json",
+    risks: "risks.json",
+    "company-locations": "company-locations.json",
+  };
+  const datasetMap = {
+    timeline: "regulatory-timeline",
+    knowledge: "knowledge",
+    "use-cases": "current-use-cases",
+    network: "network",
+    "tencent-products": "tencent-products",
+    risks: "risks",
+    "company-locations": "company-locations",
+  };
   const file = fileMap[target];
   const datasetName = datasetMap[target];
   if (!file) throw new Error("Unknown target dataset: " + target);
@@ -3897,17 +3965,14 @@ function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
   const matchedTitle =
     prop.matchedRecord && prop.matchedRecord.dataset === target ? prop.matchedRecord.title : null;
 
+  // Search every list this dataset keeps entries in. Timeline events, knowledge
+  // subsections and use-case patterns are matched on `title`; competitors,
+  // products, risks and companies on `name`/`title` as appropriate.
   let existing = null;
   if (matchedTitle) {
-    if (target === "timeline") {
-      existing = (data.events || []).find(e => e.title === matchedTitle) || null;
-    } else if (target === "knowledge") {
-      for (const cat of Object.values(data.categories || {})) {
-        existing = (cat.subsections || []).find(s => s.title === matchedTitle) || null;
-        if (existing) break;
-      }
-    } else if (target === "use-cases") {
-      existing = (data.patterns || []).find(p => p.title === matchedTitle) || null;
+    for (const list of entryListsFor(data, target)) {
+      existing = list.find((e) => e && (e.title === matchedTitle || e.name === matchedTitle)) || null;
+      if (existing) break;
     }
   }
 
@@ -3942,6 +4007,61 @@ function integrateProposal(prop, edit, target, targetCategoryKey, author = {}) {
     } else if (target === "use-cases") {
       data.patterns = data.patterns || [];
       data.patterns.unshift({ title: prop.title, content: edit, games: [], ...stamp });
+    } else if (target === "network") {
+      // Competitor Web — a note about a company we track.
+      data.competitors = data.competitors || [];
+      data.competitors.unshift({
+        id: slugifyId(prop.title),
+        name: prop.title,
+        sectors: [],
+        description: edit,
+        url: url || "",
+        useCases: [],
+        ...stamp,
+      });
+    } else if (target === "tencent-products") {
+      data.products = data.products || [];
+      data.products.unshift({
+        id: slugifyId(prop.title),
+        name: prop.title,
+        sectors: [],
+        description: edit,
+        url: url || "",
+        ...stamp,
+      });
+    } else if (target === "risks") {
+      // Risks are grouped under one of the existing risk categories; the key
+      // arrives in targetCategoryKey and is validated by the route.
+      const key = sanitizeRiskCategoryKey(data, targetCategoryKey);
+      data.categories = data.categories || {};
+      data.categories[key] = data.categories[key] || { id: key, title: key, description: "", severity: "medium", regulations: [], risks: [] };
+      data.categories[key].risks = data.categories[key].risks || [];
+      data.categories[key].risks.unshift({
+        id: slugifyId(prop.title),
+        title: prop.title,
+        description: edit,
+        affectedCompanies: [],
+        products: [],
+        severity: "medium",
+        sources: [{ label: publisher, url }],
+        ...stamp,
+      });
+    } else if (target === "company-locations") {
+      // No coordinates: a text update cannot know where a company sits. Entries
+      // added this way are deliberately left without lat/lon, and the map skips
+      // them (see renderCompanyMap) rather than plotting them at 0,0.
+      data.companies = data.companies || [];
+      data.companies.push({
+        id: slugifyId(prop.title),
+        name: prop.title,
+        city: "", country: "", region: "", sector: "",
+        description: edit,
+        officeFunction: "",
+        relevantProducts: [],
+        sources: [{ label: publisher, url }],
+        url: url || "",
+        ...stamp,
+      });
     }
   }
 
@@ -4605,11 +4725,10 @@ async function persistDataset(name, data, updatedBy) {
 const DISPLAY_NAME_MAX = 40;
 const REVERT_NOTE_MAX = 200;
 
-// Trim, collapse whitespace and strip control characters. The control-character
-// strip matters: the name is written into dataset JSON and rendered into HTML,
-// so it must never be able to introduce structure into either.
 // Sanitise any user-supplied text that ends up stored and later rendered:
-// collapse whitespace, drop control characters, cap the length.
+// collapse whitespace, drop control characters, cap the length. The
+// control-character strip matters — the value is written into dataset JSON and
+// rendered into HTML, so it must not be able to introduce structure into either.
 function safeText(raw, max) {
   return String(raw == null ? "" : raw)
     .replace(/[\u0000-\u001F\u007F]/g, " ")
@@ -4696,8 +4815,20 @@ app.post("/api/proposed-changes/:id/integrate", requireAdmin, async (req, res) =
       (prop.matchedRecord && prop.matchedRecord.dataset) ||
       (prop.category === "use-case" ? "use-cases" : prop.category === "academic" ? "knowledge" : "timeline");
     const targetCategoryKey = req.body && req.body.targetCategoryKey;
-    if (targetCategoryKey && !Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, targetCategoryKey)) {
+    // The key means different things per target: a knowledge category for the
+    // Knowledge Base, a risk category for Risks. Validate it against whichever
+    // applies — validating a risk key against the knowledge list would reject
+    // every one of them.
+    if (targetCategoryKey && target === "knowledge" &&
+        !Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, targetCategoryKey)) {
       return res.status(400).json({ error: "Invalid targetCategoryKey" });
+    }
+    if (targetCategoryKey && target === "risks") {
+      const rk = getDataset("risks");
+      const known = rk && rk.categories ? rk.categories : {};
+      if (!Object.prototype.hasOwnProperty.call(known, targetCategoryKey)) {
+        return res.status(400).json({ error: "Invalid targetCategoryKey for risks" });
+      }
     }
 
     const email = (req.user && req.user.email) || "unknown";
@@ -4785,7 +4916,15 @@ app.put("/api/profile", whenAuth(requireAuth), async (req, res) => {
 
 // Which dataset a proposal's `integratedTarget` refers to.
 function datasetNameForTarget(target) {
-  return { timeline: "regulatory-timeline", knowledge: "knowledge", "use-cases": "current-use-cases" }[target] || null;
+  return {
+    timeline: "regulatory-timeline",
+    knowledge: "knowledge",
+    "use-cases": "current-use-cases",
+    network: "network",
+    "tencent-products": "tencent-products",
+    risks: "risks",
+    "company-locations": "company-locations",
+  }[target] || null;
 }
 
 // Every array in a dataset that can hold integrated entries. These are the LIVE
@@ -4794,6 +4933,11 @@ function entryListsFor(data, target) {
   if (target === "timeline") return [data.events || []];
   if (target === "knowledge") return Object.values(data.categories || {}).map((c) => c.subsections || []);
   if (target === "use-cases") return [data.patterns || []];
+  if (target === "network") return [data.competitors || []];
+  if (target === "tencent-products") return [data.products || []];
+  // Risks are nested one level deeper: categories[].risks[].
+  if (target === "risks") return Object.values(data.categories || {}).map((c) => c.risks || []);
+  if (target === "company-locations") return [data.companies || []];
   return [];
 }
 
@@ -4802,7 +4946,15 @@ function entryListsFor(data, target) {
 // no-DB fallback and keeps local development consistent — so anything that
 // persists a change must also land here.
 function writeDatasetToDisk(target, data) {
-  const fileMap = { timeline: "regulatory-timeline.json", knowledge: "knowledge.json", "use-cases": "current-use-cases.json" };
+  const fileMap = {
+    timeline: "regulatory-timeline.json",
+    knowledge: "knowledge.json",
+    "use-cases": "current-use-cases.json",
+    network: "network.json",
+    "tencent-products": "tencent-products.json",
+    risks: "risks.json",
+    "company-locations": "company-locations.json",
+  };
   const file = fileMap[target];
   if (!file) return;
   fs.writeFileSync(path.join(__dirname, "data", file), JSON.stringify(data, null, 2));
@@ -5951,6 +6103,10 @@ module.exports = {
   newsChains,
   scannerChains,
   resolvedUrlMap,
+
+  // Knowledge category list — exported so a test can assert it has not drifted
+  // from the real categories in data/knowledge.json.
+  CATEGORY_LABELS,
 
   // Profile display names (Suggested Updates v2 attribution) — pure/DB helpers
   // exported so they can be tested without standing up a session.

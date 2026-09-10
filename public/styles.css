@@ -5390,3 +5390,10 @@ body {
 .review-tabs { margin-bottom: 1.1rem; }
 .review-tabs .sub-tab-btn { display: inline-flex; align-items: center; gap: 0.4rem; }
 .review-pane { display: block; }
+
+/* Companies added from a Suggested Update have no coordinates, so they are
+   listed beneath the map instead of being plotted at 0,0. */
+.unmapped-companies { margin-top: 1rem; padding-top: 0.9rem; border-top: 1px solid var(--border, #e2e5ee); }
+.unmapped-companies-title { margin: 0 0 0.4rem; font-size: 0.95rem; font-weight: 600; }
+.unmapped-companies ul { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; color: var(--text-muted, #6b7280); }
+.unmapped-companies li { margin-bottom: 0.35rem; }
