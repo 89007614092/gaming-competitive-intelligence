@@ -99,6 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNewsCompetitors();
   setupMySources();
   setupTeamSourcesComposer();
+  setupReviewTabs();
   setupQA();
   setupTabDragDrop();
   setupSourceMonitor();
@@ -4970,6 +4971,8 @@ async function renderReviewPanel() {
     const json = res.ok ? await res.json() : { pending: [] };
     const items = json.pending || [];
     const enriching = json.enrichingCount || 0;
+    const pendingCountEl = document.getElementById("reviewTabPendingCount");
+    if (pendingCountEl) pendingCountEl.textContent = String(items.length);
     const hintEl = document.getElementById("reviewEnrichingHint");
     if (hintEl) {
       if (enriching > 0) {
@@ -5088,7 +5091,10 @@ async function renderReviewPanel() {
               <option value="use-cases" ${targetDefault === "use-cases" ? "selected" : ""}>AI Use Cases</option>
             </select>
           </label>
-          ${showCatKey ? `<input class="proposal-catkey text-input" placeholder="Category key (e.g. regulations)" value="${escapeHtml(catKey)}" />` : ""}
+          <label class="proposal-field proposal-field-category" style="display:${showCatKey ? "" : "none"}">
+            Section:
+            <select class="proposal-catkey text-input">${kbCategoryOptions(catKey)}</select>
+          </label>
         </div>
         <div class="proposal-actions">
           <button class="btn btn-sm btn-primary" data-integrate="${p.id}" type="button">Integrate</button>
@@ -5134,7 +5140,23 @@ async function renderReviewPanel() {
       });
     }
 
-    // Finished work: separate section, so it never reads as "still to review".
+    // Changing "Add to" must update the card immediately. Previously the
+    // section field was decided once at render time and nothing listened for
+    // the change, so switching target appeared to do nothing.
+    if (!listEl.dataset.targetWired) {
+      listEl.dataset.targetWired = "1";
+      listEl.addEventListener("change", (e) => {
+        const sel = e.target.closest("select.proposal-target");
+        if (!sel) return;
+        const card = sel.closest(".proposal-card");
+        const field = card && card.querySelector(".proposal-field-category");
+        // Only the Knowledge Base is split into sections.
+        if (field) field.style.display = sel.value === "knowledge" ? "" : "none";
+      });
+    }
+
+    // Finished work: rendered into its own tab, so it never reads as "still to
+    // review".
     renderRecentlyIntegrated(json.recentlyIntegrated || []);
   } catch (err) {
     listEl.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
@@ -5148,17 +5170,16 @@ async function renderReviewPanel() {
 //           removing the record would delete the original.
 // All actions are admin-only; everyone else sees the list read-only.
 function renderRecentlyIntegrated(items) {
-  const section = document.getElementById("reviewRecentSection");
   const listEl = document.getElementById("reviewRecentList");
-  if (!section || !listEl) return;
+  if (!listEl) return;
+  const countEl = document.getElementById("reviewTabRecentCount");
+  if (countEl) countEl.textContent = String(items.length);
+  const t = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
   if (!items.length) {
-    section.style.display = "none";
-    listEl.innerHTML = "";
+    listEl.innerHTML = `<div class="review-empty"><p>${t("review.recent.empty", "Nothing has been integrated yet.")}</p></div>`;
     return;
   }
-  section.style.display = "";
   const admin = isCurrentUserAdmin();
-  const t = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
 
   const when = (iso) => {
     if (!iso) return "";
@@ -5248,6 +5269,47 @@ async function recentAction(btn, url, body) {
     showToast("Could not reach the server.", "error");
     btn.disabled = false;
   }
+}
+
+// Tabs at the top of the review panel: pending suggestions vs what the team has
+// already integrated. Wired once — the bar persists across re-renders.
+function setupReviewTabs() {
+  const bar = document.getElementById("reviewTabs");
+  if (!bar || bar.dataset.wired) return;
+  bar.dataset.wired = "1";
+  const panes = {
+    pending: document.getElementById("reviewPanePending"),
+    recent: document.getElementById("reviewPaneRecent"),
+  };
+  bar.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-review-tab]");
+    if (!btn) return;
+    const which = btn.dataset.reviewTab;
+    for (const b of bar.querySelectorAll("[data-review-tab]")) {
+      b.classList.toggle("active", b === btn);
+    }
+    for (const [key, pane] of Object.entries(panes)) {
+      if (pane) pane.style.display = key === which ? "" : "none";
+    }
+  });
+}
+
+// Options for the "Section:" selector, taken from the REAL knowledge-base
+// categories rather than a hard-coded list — a stale list is how an update ends
+// up in a category that does not exist. Falls back to the known set if the KB
+// has not loaded yet.
+function kbCategoryOptions(selected) {
+  const live = kbData && kbData.categories ? kbData.categories : null;
+  const entries = live
+    ? Object.entries(live).map(([key, cat]) => [key, cat.label || key])
+    : [["regulations", "Regulatory Frameworks"], ["technology", "AI & Gaming Technology"],
+       ["competitors", "Competitor AI Ecosystem"], ["case-studies", "Case Studies"],
+       ["current-game-ai", "Current Game AI Uses"], ["tencent-products", "Tencent Products & Strategy"],
+       ["strategic-insights", "Strategic Insights"], ["regulatory-timeline", "Regulatory Timeline"]];
+  const chosen = entries.some(([k]) => k === selected) ? selected : entries[0][0];
+  return entries
+    .map(([key, label]) => `<option value="${escapeHtml(key)}" ${key === chosen ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
 }
 
 function checkReviewEmpty() {

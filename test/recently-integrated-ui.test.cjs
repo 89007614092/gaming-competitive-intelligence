@@ -21,7 +21,9 @@ const SERVER_JS = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8
 
 // Every key the Recently integrated UI and the attribution chip rely on.
 const NEW_KEYS = [
-  "review.recent.title",
+  "review.tab.pending",
+  "review.tab.recent",
+  "review.recent.empty",
   "review.recent.hint",
   "review.removeEntry",
   "review.undoRemove",
@@ -64,21 +66,47 @@ test("the new keys are translated, not copies of the English text", () => {
 
 test("the static-shell selectors are wired, and their keys resolve", () => {
   const mapped = I18N_MAP.filter((m) => [
-    "#reviewRecentTitle", "#reviewRecentHint",
+    "#reviewTabPending .i18n-label", "#reviewTabRecent .i18n-label", "#reviewRecentHint",
     "#settingsProfileTitle", "#settingsProfileHint", "#saveDisplayName",
   ].includes(m.sel));
-  assert.strictEqual(mapped.length, 5, "all five static strings must be mapped");
+  assert.strictEqual(mapped.length, 6, "every static string must be mapped");
   for (const m of mapped) {
     for (const lang of ["en", "zh-CN"]) {
       assert.ok(LOCALES[lang][m.key], `${lang} is missing ${m.key} (used by ${m.sel})`);
     }
   }
   // And the elements those selectors target actually exist in the markup.
-  for (const sel of ["#reviewRecentTitle", "#reviewRecentHint", "#settingsProfileTitle",
-    "#settingsProfileHint", "#saveDisplayName"]) {
+  for (const sel of ["#reviewTabPending", "#reviewTabRecent", "#reviewRecentHint",
+    "#settingsProfileTitle", "#settingsProfileHint", "#saveDisplayName"]) {
     const id = sel.replace("#", "");
     assert.ok(INDEX_HTML.includes(`id="${id}"`), `${sel} must exist in index.html`);
   }
+});
+
+test("the review panel has a tab per section, each with a count", () => {
+  for (const id of ["reviewTabs", "reviewPanePending", "reviewPaneRecent",
+    "reviewTabPendingCount", "reviewTabRecentCount"]) {
+    assert.ok(INDEX_HTML.includes(`id="${id}"`), `${id} must exist in index.html`);
+  }
+  assert.ok(/setupReviewTabs\(/.test(APP_JS), "tabs must be wired up");
+  assert.ok(
+    /reviewTabPendingCount[\s\S]{0,200}textContent = String\(items\.length\)/.test(APP_JS),
+    "the pending tab must show how many updates are waiting"
+  );
+  assert.ok(
+    /reviewTabRecentCount[\s\S]{0,200}textContent = String\(items\.length\)/.test(APP_JS),
+    "the recent tab must show how many have been integrated"
+  );
+});
+
+// Molly asked for one specific change: the button that opens the panel reads
+// "Updates", not "Suggested updates". Guarded because it is easy to revert by
+// accident when editing copy, and there is no other test that would notice.
+test("the landing-page button reads \"Updates\"", () => {
+  assert.strictEqual(LOCALES.en["common.suggestedUpdates"], "Updates");
+  assert.strictEqual(LOCALES["zh-CN"]["common.suggestedUpdates"], "更新");
+  // The modal keeps its own, more descriptive title.
+  assert.strictEqual(LOCALES.en["modal.review.title"], "Suggested updates");
 });
 
 test("the client reads the field the server actually sends", () => {
@@ -102,16 +130,43 @@ test("the client calls the three endpoints the server defines", () => {
   }
 });
 
-test("the Recently integrated section renders inside the review panel", () => {
-  for (const id of ["reviewRecentSection", "reviewRecentList"]) {
-    assert.ok(INDEX_HTML.includes(`id="${id}"`), `${id} must exist in index.html`);
-  }
-  assert.ok(/renderRecentlyIntegrated\(/.test(APP_JS), "the section must be rendered");
-  // Guarded: it is hidden when there is nothing to show, rather than showing an
-  // empty heading.
+test("the Recently integrated list renders, with an empty state", () => {
+  assert.ok(INDEX_HTML.includes(`id="reviewRecentList"`), "reviewRecentList must exist");
+  assert.ok(/renderRecentlyIntegrated\(/.test(APP_JS), "the list must be rendered");
+  // An empty tab must explain itself rather than showing a blank panel.
   assert.ok(
-    /reviewRecentSection[\s\S]{0,400}style\.display = "none"/.test(APP_JS),
-    "the section must hide itself when the list is empty"
+    /review\.recent\.empty/.test(APP_JS),
+    "an empty Recently integrated tab must show a message"
+  );
+});
+
+// The bug Molly reported: switching "Add to" did nothing, because the section
+// field was decided once at render time and no listener existed for the change.
+test("the section field reacts to the Add to dropdown", () => {
+  assert.ok(
+    /addEventListener\("change"[\s\S]{0,400}select\.proposal-target/.test(APP_JS),
+    "there must be a change listener on the target dropdown"
+  );
+  assert.ok(
+    /proposal-field-category[\s\S]{0,300}sel\.value === "knowledge"/.test(APP_JS),
+    "the section field must show only for the Knowledge Base"
+  );
+});
+
+// Users cannot know backend category keys, so the field must be a selector of
+// real sections — built from the live KB, not a stale hard-coded list.
+test("the section field is a selector built from real knowledge categories", () => {
+  assert.ok(
+    /<select class="proposal-catkey text-input">/.test(APP_JS),
+    "the section field must be a <select>, not a free-text input"
+  );
+  assert.ok(
+    !/<input class="proposal-catkey/.test(APP_JS),
+    "the old free-text category input must be gone"
+  );
+  assert.ok(
+    /function kbCategoryOptions/.test(APP_JS) && /kbData\.categories/.test(APP_JS),
+    "options must come from the live knowledge-base categories"
   );
 });
 

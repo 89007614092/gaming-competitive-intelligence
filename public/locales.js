@@ -99,7 +99,7 @@
       'reader.openButton': 'Read & write summary',
       'reader.openOriginal': 'Open original ↗',
       'common.visitProductPage': 'Visit product page',
-      'common.suggestedUpdates': 'Suggested updates',
+      'common.suggestedUpdates': 'Updates',
       'common.articlesTracked': 'Articles Tracked',
       'common.competitorsMonitored': 'Competitors Monitored',
       'common.sources': 'Sources',
@@ -123,7 +123,9 @@
       'review.empty': "Nothing to review. The app's content already matches the monitored official sources.",
 
       // Recently integrated (Suggested Updates attribution)
-      'review.recent.title': 'Recently integrated',
+      'review.tab.pending': 'Suggested updates',
+      'review.tab.recent': 'Recently integrated',
+      'review.recent.empty': 'Nothing has been integrated yet.',
       'review.recent.hint': 'Updates the team has already added. A new entry can be removed; one that was merged into existing text can only be flagged for an admin to revert.',
       'review.removeEntry': 'Remove',
       'review.undoRemove': 'Undo removal',
@@ -297,7 +299,7 @@
       'reader.openButton': '阅读并撰写摘要',
       'reader.openOriginal': '打开原文 ↗',
       'common.visitProductPage': '访问产品页面',
-      'common.suggestedUpdates': '建议更新',
+      'common.suggestedUpdates': '更新',
       'common.articlesTracked': '追踪文章数',
       'common.competitorsMonitored': '监控竞争对手数',
       'common.sources': '来源',
@@ -321,7 +323,9 @@
       'review.empty': '暂无需审核的内容。应用内容已与受监控的官方来源一致。',
 
       // 最近已整合（建议更新署名）
-      'review.recent.title': '最近已整合',
+      'review.tab.pending': '建议更新',
+      'review.tab.recent': '最近已整合',
+      'review.recent.empty': '尚未整合任何更新。',
       'review.recent.hint': '团队已添加的更新。新增条目可以移除；已合并到现有文本中的更新只能标记，由管理员手动还原。',
       'review.removeEntry': '移除',
       'review.undoRemove': '撤销移除',
@@ -496,7 +500,8 @@
     { sel: '#reviewPanelOverlay .modal-subtitle', key: 'modal.review.subtitle' },
     { sel: '#reviewPanelEmpty p', key: 'review.empty' },
     // Recently integrated section (Suggested Updates attribution)
-    { sel: '#reviewRecentTitle', key: 'review.recent.title' },
+    { sel: '#reviewTabPending .i18n-label', key: 'review.tab.pending' },
+    { sel: '#reviewTabRecent .i18n-label', key: 'review.tab.recent' },
     { sel: '#reviewRecentHint', key: 'review.recent.hint' },
     { sel: '#settingsProfileTitle', key: 'settings.profile.title' },
     { sel: '#settingsProfileHint', key: 'settings.profile.hint' },

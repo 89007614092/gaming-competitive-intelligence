@@ -785,16 +785,24 @@
         <button class="btn btn-sm" id="closeReviewPanel" type="button" aria-label="Close">&#x2715;</button>
       </div>
       <div class="review-panel-body">
-        <div class="review-empty" id="reviewPanelEmpty" style="display:none;">
-          <p>Nothing to review. The app's content already matches the monitored official sources.</p>
-        </div>
-        <div class="review-list" id="reviewPanelList"></div>
+        <nav class="sub-tab-bar review-tabs" id="reviewTabs" aria-label="Updates sections">
+          <button class="sub-tab-btn active" id="reviewTabPending" data-review-tab="pending" type="button">
+            <span class="i18n-label">Suggested updates</span> <span class="workspace-count" id="reviewTabPendingCount">0</span>
+          </button>
+          <button class="sub-tab-btn" id="reviewTabRecent" data-review-tab="recent" type="button">
+            <span class="i18n-label">Recently integrated</span> <span class="workspace-count" id="reviewTabRecentCount">0</span>
+          </button>
+        </nav>
 
-        <div class="review-recent" id="reviewRecentSection" style="display:none;">
-          <div class="review-recent-head">
-            <h4 id="reviewRecentTitle">Recently integrated</h4>
-            <p class="review-recent-hint" id="reviewRecentHint">Updates the team has already added. A new entry can be removed; one that was merged into existing text can only be flagged for an admin to revert.</p>
+        <div class="review-pane" id="reviewPanePending">
+          <div class="review-empty" id="reviewPanelEmpty" style="display:none;">
+            <p>Nothing to review. The app's content already matches the monitored official sources.</p>
           </div>
+          <div class="review-list" id="reviewPanelList"></div>
+        </div>
+
+        <div class="review-pane" id="reviewPaneRecent" style="display:none;">
+          <p class="review-recent-hint" id="reviewRecentHint">Updates the team has already added. A new entry can be removed; one that was merged into existing text can only be flagged for an admin to revert.</p>
           <div class="review-list" id="reviewRecentList"></div>
         </div>
 
