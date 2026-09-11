@@ -6178,6 +6178,11 @@ module.exports = {
 
   // Profile display names (Suggested Updates v2 attribution) — pure/DB helpers
   // exported so they can be tested without standing up a session.
+  // The reserved-name lists are exported so a test can assert the browser's
+  // mirror of them has not drifted.
+  RESERVED_EXACT_NAMES,
+  RESERVED_SUBSTRING_NAMES,
+  LEET_MAP,
   normaliseDisplayName,
   displayNameMatchKey,
   displayNameRejection,

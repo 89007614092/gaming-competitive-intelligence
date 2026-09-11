@@ -140,6 +140,8 @@
       'settings.profile.hint': 'Shown publicly as "Added by ..." on knowledge-base entries you add or update.',
       'settings.profile.save': 'Save',
       'settings.profile.saved': 'Saved. It will appear on entries you add from now on.',
+      'settings.profile.reserved': 'That name could be mistaken for the system or an official account. Please choose another.',
+      'settings.profile.noVisible': 'That name has no visible characters.',
 
       // Modals
       'modal.addCompetitors.title': 'Add Competitors',
@@ -340,6 +342,8 @@
       'settings.profile.hint': '将公开显示为「添加者：…」，出现在你添加或更新的知识库条目上。',
       'settings.profile.save': '保存',
       'settings.profile.saved': '已保存。此后你添加的条目都会显示该名称。',
+      'settings.profile.reserved': '该名称可能被误认为系统或官方账号，请更换。',
+      'settings.profile.noVisible': '该名称没有可见字符。',
 
       // Modals
       'modal.addCompetitors.title': '添加竞争对手',

@@ -17,6 +17,7 @@ const path = require("path");
 
 const srv = require("../server");
 const { attachDb } = require("../lib/datasets");
+const APP_JS = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
 
 const {
   normaliseDisplayName,
@@ -181,6 +182,81 @@ test("a refused name is never written to the database", async () => {
   } finally {
     attachDb(null);
   }
+});
+
+// --- Client mirror ----------------------------------------------------------
+// The browser keeps its own copy of the blocklist so the field can warn as you
+// type. That copy is a liability the moment it disagrees with the server: it
+// either blocks real names or waves through names the server then refuses.
+// These tests load the browser's ACTUAL code and run it, so a divergence in
+// either the data or the logic fails here.
+
+function loadClientValidator() {
+  const grab = (re, what) => {
+    const m = re.exec(APP_JS);
+    assert.ok(m, `could not find ${what} in app.js`);
+    return m[0];
+  };
+  const src = [
+    grab(/const RESERVED_EXACT_NAMES = \[[^\]]*\];/, "RESERVED_EXACT_NAMES"),
+    grab(/const RESERVED_SUBSTRING_NAMES = \[[^\]]*\];/, "RESERVED_SUBSTRING_NAMES"),
+    grab(/const LEET_MAP = \{[^}]*\};/, "LEET_MAP"),
+    grab(/function displayNameMatchKey\(name\) \{[\s\S]*?\n\}/, "displayNameMatchKey"),
+    grab(/function displayNameRejection\(name\) \{[\s\S]*?\n\}/, "displayNameRejection"),
+  ].join("\n");
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src}\nreturn { RESERVED_EXACT_NAMES, RESERVED_SUBSTRING_NAMES, LEET_MAP, displayNameMatchKey, displayNameRejection };`)();
+}
+
+test("the browser's reserved-name lists are identical to the server's", () => {
+  const client = loadClientValidator();
+  assert.deepStrictEqual(
+    client.RESERVED_EXACT_NAMES, srv.RESERVED_EXACT_NAMES,
+    "the client blocklist has drifted from the server's"
+  );
+  assert.deepStrictEqual(
+    client.RESERVED_SUBSTRING_NAMES, srv.RESERVED_SUBSTRING_NAMES,
+    "the client substring list has drifted from the server's"
+  );
+  assert.deepStrictEqual(client.LEET_MAP, srv.LEET_MAP, "the client leet map has drifted");
+});
+
+test("the browser and server agree on every kind of name", () => {
+  const client = loadClientValidator();
+  const samples = [
+    "Molly Barlow", "Molly", "mollybarlow", "Sam L", "Modesto", "Olivia", "Li Wei",
+    "root admin", "RoOt   AdMiN", "r00t 4dm1n", "root-admin", "admin (official)",
+    "Admin", "administrator", "SYSTEM", "support", "official", "anonymous", "test",
+    "drop table", "DROP TABLE", "'; drop table users; --", "delete from users",
+    "Mol\u200Bly", "\u200B\u200C\u200D", "", "   ", "A",
+  ];
+  for (const name of samples) {
+    // Compare on the SAME normalised input, so this checks the decision logic
+    // rather than re-testing sanitisation.
+    const normalised = srv.normaliseDisplayName(name);
+    assert.strictEqual(
+      client.displayNameRejection(normalised), srv.displayNameRejection(normalised),
+      `browser and server disagree about ${JSON.stringify(name)}`
+    );
+  }
+});
+
+// Instant feedback only works if something listens for typing.
+test("the field validates as the user types", () => {
+  assert.ok(
+    /displayNameInput[\s\S]{0,2000}addEventListener\("input", validate\)/.test(APP_JS),
+    "the display-name input must validate on input"
+  );
+  // ...and Save is blocked while the name is refused, not merely warned about.
+  assert.ok(
+    /saveBtn\.disabled = !!problem/.test(APP_JS),
+    "Save must be disabled while the name is reserved"
+  );
+  // The server still re-checks: the client check is a courtesy, not the gate.
+  assert.ok(
+    /if \(!validate\(\)\) return;/.test(APP_JS),
+    "save must refuse to submit a name the client knows is reserved"
+  );
 });
 
 test("saveDisplayName upserts by email, and an empty name clears it to NULL", async () => {
