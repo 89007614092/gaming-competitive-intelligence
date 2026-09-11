@@ -4732,6 +4732,11 @@ const REVERT_NOTE_MAX = 200;
 function safeText(raw, max) {
   return String(raw == null ? "" : raw)
     .replace(/[\u0000-\u001F\u007F]/g, " ")
+    // Invisible and bidi-control characters. These are the nasty ones: a
+    // right-to-left override (U+202E) can make a name DISPLAY as something
+    // other than what it is, and zero-width characters can make two different
+    // names look identical - or make one look blank.
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u00AD\uFEFF]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, max);
@@ -4739,6 +4744,54 @@ function safeText(raw, max) {
 
 function normaliseDisplayName(raw) {
   return safeText(raw, DISPLAY_NAME_MAX);
+}
+
+// --- Display names that could mislead ---------------------------------------
+// The label is public ("Added by X" on knowledge-base entries), so the real risk
+// is TRUST rather than injection: a name that looks like the system or an
+// authority makes content seem official. Matching is deliberately loose - case,
+// spacing, punctuation and leetspeak all fold away, so "RoOt  AdMiN" and
+// "r00t 4dm1n" cannot sneak past.
+const RESERVED_EXACT_NAMES = [
+  "admin", "administrator", "root", "sysadmin", "system", "systemadmin",
+  "moderator", "mod", "owner", "superuser", "webmaster",
+  "support", "help", "helpdesk", "service", "servicedesk",
+  "security", "securityteam", "official", "staff", "team",
+  "anonymous", "anon", "guest", "nobody", "unknown",
+  "null", "undefined", "none", "na", "test",
+];
+// Matched as substrings so "'; drop table users; --" is caught too.
+const RESERVED_SUBSTRING_NAMES = [
+  "droptable", "dropdatabase", "deletefrom", "insertinto", "updateusers",
+  "or11", "script", "javascript", "onerror",
+];
+const LEET_MAP = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
+
+// Fold a name down to the form reserved entries are compared against:
+// lowercase, leet digits turned back into letters, everything else removed.
+function displayNameMatchKey(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[0-9]/g, (d) => LEET_MAP[d] || d)
+    .replace(/[^a-z]/g, "");
+}
+
+// Why a name must be refused, or null when it is fine.
+function displayNameRejection(name) {
+  const key = displayNameMatchKey(name);
+  if (!key) return null;
+  // Word level FIRST: "root admin" folds to "rootadmin", which is not in the
+  // list on its own. Checking each word catches multi-word impersonation and
+  // things like "Admin (official)".
+  const words = String(name || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (const w of words) {
+    if (RESERVED_EXACT_NAMES.includes(displayNameMatchKey(w))) return "reserved";
+  }
+  if (RESERVED_EXACT_NAMES.includes(key)) return "reserved";
+  // Substring pass catches injection-flavoured strings such as
+  // "'; drop table users; --".
+  if (RESERVED_SUBSTRING_NAMES.some((s) => key.includes(s))) return "reserved";
+  return null;
 }
 
 // What we show when nobody has chosen a name: the email LOCAL PART only, never
@@ -4773,6 +4826,18 @@ async function saveDisplayName(email, raw) {
   if (!pool) return { ok: false, error: "no database configured" };
   // An empty name clears it back to the fallback rather than storing "".
   const name = normaliseDisplayName(raw);
+  // A name made only of invisible characters would render as blank attribution,
+  // which defeats the point of labelling who added something.
+  if (!name && String(raw || "").trim()) {
+    return { ok: false, error: "no-visible-characters", message: "That name has no visible characters." };
+  }
+  if (displayNameRejection(name)) {
+    return {
+      ok: false,
+      error: "reserved",
+      message: "That name could be mistaken for the system or an official account. Please choose another.",
+    };
+  }
   await pool.query(
     `INSERT INTO allowed_emails (email, display_name)
      VALUES ($1, $2)
@@ -4899,9 +4964,12 @@ app.put("/api/profile", whenAuth(requireAuth), async (req, res) => {
   }
   try {
     const r = await saveDisplayName(req.user.email, body.displayName);
-    // No database configured is a 503, not a 500 — it is a deployment state,
-    // not a bug in the request.
-    if (!r.ok) return res.status(503).json({ error: r.error });
+    // A refused name is the caller's problem (400); no database configured is a
+    // deployment state, not a bug in the request (503).
+    if (!r.ok) {
+      const status = r.error === "reserved" || r.error === "no-visible-characters" ? 400 : 503;
+      return res.status(status).json({ error: r.error, message: r.message || r.error });
+    }
     res.json({
       success: true,
       displayName: r.displayName,
@@ -6111,6 +6179,8 @@ module.exports = {
   // Profile display names (Suggested Updates v2 attribution) — pure/DB helpers
   // exported so they can be tested without standing up a session.
   normaliseDisplayName,
+  displayNameMatchKey,
+  displayNameRejection,
   fallbackDisplayName,
   lookupDisplayName,
   saveDisplayName,

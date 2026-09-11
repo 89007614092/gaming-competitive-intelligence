@@ -880,7 +880,9 @@ function setupDisplayNameField() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        say((json && json.error) || "Could not save that name.", false);
+        // The server returns a human `message` alongside the machine `error`
+        // code — prefer it, so a refused name explains itself.
+        say((json && json.message) || (json && json.error) || "Could not save that name.", false);
         return;
       }
       say(window.t ? window.t("settings.profile.saved") : "Saved. It will appear on entries you add from now on.", true);
