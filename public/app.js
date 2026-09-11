@@ -853,9 +853,42 @@ async function loadProfileIntoSettings() {
     input.placeholder = (user && user.usingFallbackName && user.email)
       ? user.email.split("@")[0] + " (not set)"
       : "e.g. Molly Barlow";
-    if (saveBtn) saveBtn.disabled = false;
-    if (statusEl) statusEl.style.display = "none";
+    // Re-run the check so a name already stored as reserved (e.g. set before
+    // the blocklist existed) is flagged the moment the field is shown.
+    if (input) input.dispatchEvent(new Event("input"));
   } catch (_) { /* leave the field empty rather than blocking the modal */ }
+}
+
+// --- Reserved display names (mirror of the server's lists) -------------------
+// Mirrored so the field can warn as you type instead of only after a round trip.
+// The SERVER is still the authority — this is only a courtesy, and anyone can
+// bypass it — but a mirror that drifts is worse than none, so a test asserts
+// these arrays stay identical to the server's (see test/profile-display-name).
+const RESERVED_EXACT_NAMES = ["admin", "administrator", "root", "sysadmin", "system", "systemadmin", "moderator", "mod", "owner", "superuser", "webmaster", "support", "help", "helpdesk", "service", "servicedesk", "security", "securityteam", "official", "staff", "team", "anonymous", "anon", "guest", "nobody", "unknown", "null", "undefined", "none", "na", "test"];
+const RESERVED_SUBSTRING_NAMES = ["droptable", "dropdatabase", "deletefrom", "insertinto", "updateusers", "or11", "script", "javascript", "onerror"];
+const LEET_MAP = { 0: "o", 1: "i", 3: "e", 4: "a", 5: "s", 7: "t", 8: "b", 9: "g" };
+
+// Same folding the server uses: lowercase, leet digits back to letters, strip
+// everything else. Must stay identical or the two sides disagree.
+function displayNameMatchKey(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[0-9]/g, (d) => LEET_MAP[d] || d)
+    .replace(/[^a-z]/g, "");
+}
+
+// Why the name would be refused, or null if it is fine.
+function displayNameRejection(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return null; // empty simply clears the name
+  const key = displayNameMatchKey(trimmed);
+  if (!key) return "no-visible-characters";
+  for (const word of trimmed.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) {
+    if (RESERVED_EXACT_NAMES.includes(displayNameMatchKey(word))) return "reserved";
+  }
+  if (RESERVED_EXACT_NAMES.includes(key)) return "reserved";
+  if (RESERVED_SUBSTRING_NAMES.some((s) => key.includes(s))) return "reserved";
+  return null;
 }
 
 function setupDisplayNameField() {
@@ -869,8 +902,29 @@ function setupDisplayNameField() {
     statusEl.className = "settings-profile-status " + (ok ? "is-ok" : "is-error");
     statusEl.style.display = "";
   };
+  const clear = () => { statusEl.style.display = "none"; };
+  const t = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
+
+  // Warn as they type rather than making them press Save to find out. The
+  // server still re-checks — this is convenience, not enforcement.
+  const validate = () => {
+    const problem = displayNameRejection(input.value);
+    if (problem === "reserved") {
+      say(t("settings.profile.reserved", "That name could be mistaken for the system or an official account. Please choose another."), false);
+    } else if (problem === "no-visible-characters") {
+      say(t("settings.profile.noVisible", "That name has no visible characters."), false);
+    } else {
+      clear();
+    }
+    saveBtn.disabled = !!problem;
+    return !problem;
+  };
+
+  input.addEventListener("input", validate);
 
   const save = async () => {
+    // Client-side courtesy only — the server re-checks and is the authority.
+    if (!validate()) return;
     saveBtn.disabled = true;
     try {
       const res = await fetch("/api/profile", {
