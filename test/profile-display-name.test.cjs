@@ -20,6 +20,8 @@ const { attachDb } = require("../lib/datasets");
 
 const {
   normaliseDisplayName,
+  displayNameMatchKey,
+  displayNameRejection,
   fallbackDisplayName,
   lookupDisplayName,
   saveDisplayName,
@@ -97,6 +99,85 @@ test("lookupDisplayName falls back to the local part with no row / no pool / on 
   attachDb({ async query() { throw new Error("connection refused"); } });
   try {
     assert.strictEqual(await lookupDisplayName("someone@example.com"), "someone");
+  } finally {
+    attachDb(null);
+  }
+});
+
+// The label is public ("Added by X"), so the risk being managed here is TRUST,
+// not injection — the value is bound as a query parameter and escaped in HTML.
+// What must not happen is a name that reads as the system or an official account.
+test("names that could pass as the system or an authority are refused", () => {
+  const mustBlock = [
+    "root admin", "RoOt   AdMiN", "r00t 4dm1n", "root-admin", "admin (official)",
+    "Admin", "administrator", "SYSTEM", "sysadmin", "superuser", "webmaster",
+    "support", "helpdesk", "security", "official", "anonymous", "guest", "null",
+    "drop table", "DROP TABLE", "'; drop table users; --", "delete from users",
+  ];
+  for (const name of mustBlock) {
+    assert.strictEqual(
+      displayNameRejection(normaliseDisplayName(name)), "reserved",
+      `"${name}" must be refused`
+    );
+  }
+});
+
+// Over-blocking is its own bug: a blocklist that eats ordinary names is worse
+// than no blocklist.
+test("ordinary names are left alone", () => {
+  for (const name of ["Molly Barlow", "Molly", "mollybarlow", "Sam L", "Modesto", "Olivia", "Li Wei"]) {
+    assert.strictEqual(
+      displayNameRejection(normaliseDisplayName(name)), null,
+      `"${name}" must be allowed`
+    );
+  }
+});
+
+test("the reserved match folds case, spacing, punctuation and leetspeak", () => {
+  // All of these are the same word as far as the check is concerned.
+  assert.strictEqual(displayNameMatchKey("Admin"), "admin");
+  assert.strictEqual(displayNameMatchKey("  ad-min  "), "admin");
+  assert.strictEqual(displayNameMatchKey("4DM1N"), "admin");
+  assert.strictEqual(displayNameMatchKey("r00t"), "root");
+});
+
+// Invisible characters are the sneaky ones: a right-to-left override can make a
+// name DISPLAY as something else, and zero-width characters can make two
+// different names look identical.
+test("invisible and bidi-control characters are stripped", () => {
+  assert.strictEqual(normaliseDisplayName("Mol\u200Bly"), "Molly", "zero-width space");
+  assert.strictEqual(normaliseDisplayName("Molly\u202Egnp"), "Mollygnp", "right-to-left override");
+  assert.strictEqual(normaliseDisplayName("Mol\u00ADly"), "Molly", "soft hyphen");
+  assert.strictEqual(normaliseDisplayName("Molly\uFEFF"), "Molly", "byte-order mark");
+  // Two names that look the same on screen must be the same stored value.
+  assert.strictEqual(normaliseDisplayName("Molly\u200B"), normaliseDisplayName("Molly"));
+});
+
+test("a name with no visible characters is refused, not stored as blank", async () => {
+  attachDb({ async query() { return { rows: [] }; } });
+  try {
+    const r = await saveDisplayName("someone@example.com", "\u200B\u200C\u200D");
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, "no-visible-characters", "must not silently become blank attribution");
+  } finally {
+    attachDb(null);
+  }
+});
+
+test("a refused name is never written to the database", async () => {
+  const calls = [];
+  attachDb({
+    async query(sql, params) {
+      calls.push({ sql: String(sql), params });
+      return { rows: [] };
+    },
+  });
+  try {
+    const r = await saveDisplayName("someone@example.com", "root admin");
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, "reserved");
+    assert.ok(r.message && r.message.length > 10, "the user gets a reason, not a bare error code");
+    assert.strictEqual(calls.length, 0, "nothing must be persisted");
   } finally {
     attachDb(null);
   }
