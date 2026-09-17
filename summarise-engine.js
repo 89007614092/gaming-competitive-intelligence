@@ -436,7 +436,7 @@ async function postQaChatCompletions({ body, timeoutMs = 60000 }) {
 // the model omitted them, ask once more — permitting co-citation — and accept
 // the nudged answer only if it actually recovers at least one [S#]. Capped at a
 // single call (no loop). Best-effort: on any failure, returns the original answer.
-async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEvidenceIds) {
+async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEvidenceIds, lang = "en") {
   const nudgeMessages = [
     ...baseMessages,
     {
@@ -448,7 +448,7 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
   ];
   try {
     const { content: nudged } = await postQaChatCompletions({
-      body: { messages: nudgeMessages, max_tokens: 1800, temperature: 0 },
+      body: { messages: nudgeMessages, max_tokens: maxTokensForLang(lang), temperature: 0 },
       timeoutMs: 60000,
     });
     if (nudged.trim().length < 80) return currentAnswer;
@@ -465,6 +465,33 @@ async function nudgeForUserSources(baseMessages, currentAnswer, evidence, userEv
   }
 }
 
+// --- Language-aware output budget -------------------------------------------
+// The English budget was tuned for English. Chinese carries meaning far more
+// densely per token (roughly 2-3x), so the same cap produces a much shorter
+// answer — and because "## Conclusion" is emitted LAST, it is the section that
+// gets squeezed first when the budget runs out. Scale it so a Chinese answer has
+// room to finish all three sections.
+const QA_MAX_TOKENS_EN = 1800;
+const QA_MAX_TOKENS_ZH_CN = 4000;
+
+// Deliberately NOT auto-retried on truncation: /api/summarise races a 70s budget
+// in server.js, and a second call risks blowing it — which falls back to the
+// extractive answer, i.e. an even more degraded result. Truncation is logged
+// instead (see looksTruncated) so it is visible rather than silent.
+function maxTokensForLang(lang = "en") {
+  return lang === "zh-CN" ? QA_MAX_TOKENS_ZH_CN : QA_MAX_TOKENS_EN;
+}
+
+// A budget-starved answer is usually cut mid-sentence. Trailing citation chips
+// are stripped first so "[A3]" is not mistaken for an unfinished sentence.
+function looksTruncated(answer) {
+  const tail = String(answer || "")
+    .replace(/(?:\s*\[[AWST]\d+\])+$/, "")
+    .trim();
+  if (!tail) return true;
+  return !/[.!?。！？…"”」）)\]\]]$/.test(tail);
+}
+
 // PR #90 — Hybrid translation: append a language directive to the Q&A system
 // prompt when the user's UI is Simplified Chinese. The base prompt is left
 // untouched by this function (it only ever APPENDS, and is a no-op for 'en'),
@@ -477,7 +504,7 @@ function applyLanguageInstruction(systemPrompt, lang = "en") {
   return (
     systemPrompt +
     "\n\n语言要求（LANGUAGE REQUIREMENT · Simplified Chinese）：用户的界面语言为简体中文，请严格遵循以下要求：\n" +
-    "1. 使用简体中文撰写【完整、结构化】的分析，至少包含“详细回答 / 关键点 / 结论”三部分；结论须基于所引证据充分展开，不得仅用一句话草草收尾。\n" +
+    "1. 使用简体中文撰写【完整、结构化】的分析，必须包含全部三个部分；【小节标题必须逐字保留英文原文】“## Detailed Answer”“## Key Points”“## Conclusion”，不得翻译为“详细回答”“关键点”“结论”等中文标题（标题下的正文使用简体中文即可）；结论须基于所引证据充分展开，不得仅用一句话草草收尾。\n" +
     "2. 论述须连贯、专业，不要在中文学术中夹杂英文句式或英文连接词（如 however、therefore、in summary 等）；公司名、产品名、模型名、法规缩写（如 EU AI Act、GDPR）等专有名词可保留英文原文，但整句应为中文。\n" +
     "3. 必须【逐字保留】每一个引用标记（[A#]、[W#]、[S#]、[T#]）与每一个 {placeholder} 占位符，位置不变，不得翻译、转写、重排或删除。\n" +
     "4. 紧扣证据作答，引用标记须落在真正支撑该论断的出处上。"
@@ -572,13 +599,18 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   let rawAnswer;
   try {
     ({ content: rawAnswer } = await postQaChatCompletions({
-      body: { messages, max_tokens: 1800, temperature: 0 },
+      body: { messages, max_tokens: maxTokensForLang(lang), temperature: 0 },
       timeoutMs: 60000,
     }));
   } catch (err) {
     throw err; // server.js extractive fallback engages unchanged
   }
   let answer = rawAnswer;
+  // Observable rather than silent: if a Chinese answer is still being cut off,
+  // we want that in the logs instead of only being told "the conclusion is short".
+  if (lang === "zh-CN" && looksTruncated(rawAnswer)) {
+    console.warn(`[qa] zh-CN answer looks truncated (lang=${lang}, ${rawAnswer.length} chars) — consider raising QA_MAX_TOKENS_ZH_CN`);
+  }
   const validCitationIds = new Set(evidence.map(item => item.id));
   answer = answer.replace(/\[([AWST]\d+)\]/g, (match, id) => (validCitationIds.has(id) ? match : ""));
   if (answer.trim().length < 80) throw new Error("Model returned a degenerate answer");
@@ -592,7 +624,7 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   // residual uncited [S#] is disclosed to the user via a client-side notice.
   if (userEvidenceIds.length && !citedUser) {
     try {
-      answer = await nudgeForUserSources(messages, answer, evidence, userEvidenceIds);
+      answer = await nudgeForUserSources(messages, answer, evidence, userEvidenceIds, lang);
     } catch (_) {
       // nudge is best-effort; keep the reasoned answer and let the client
       // notice disclose any residual gap.
@@ -935,6 +967,9 @@ function buildExtractiveAnswer(question, evidence, style = "full") {
 
 module.exports = {
   DEFAULT_MODEL,
+  // Language-aware output budget + truncation check (zh-CN answers).
+  maxTokensForLang,
+  looksTruncated,
   OPEN_MODEL_NAME_SCAN,
   OPEN_MODEL_NAME_FALLBACK,
   QA_FAILOVER_ENABLED,
