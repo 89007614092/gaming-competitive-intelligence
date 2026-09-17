@@ -535,7 +535,17 @@ function parseAnswer(text, sources) {
     return out.join("");
   };
 
-  const SECTION_IDS = { "detailed answer": "detailed", "key points": "keyPoints", "conclusion": "conclusion" };
+  // The prompt tells the model to keep the English headings even in Chinese
+  // mode, but it may translate them anyway. An unrecognised heading degrades to
+  // "other", which silently breaks style selection — picking "Conclusion" then
+  // finds no conclusion and falls back to showing the whole answer instead. So
+  // the Chinese aliases are accepted too: belt and braces.
+  const SECTION_IDS = {
+    "detailed answer": "detailed", "key points": "keyPoints", "conclusion": "conclusion",
+    "详细回答": "detailed", "详细答复": "detailed", "详细解答": "detailed", "详细答案": "detailed",
+    "关键点": "keyPoints", "关键要点": "keyPoints", "要点": "keyPoints",
+    "结论": "conclusion", "总结": "conclusion", "结论与建议": "conclusion",
+  };
   const classify = (title) => SECTION_IDS[title.trim().toLowerCase()] || "other";
 
   const lines = String(text || "").split("\n");
