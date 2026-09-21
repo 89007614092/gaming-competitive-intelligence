@@ -774,6 +774,21 @@ function cjkRuns(text) {
   return String(text || "").match(/[㐀-鿿豈-﫿]+/g) || [];
 }
 
+// Whole Han runs only match when the result happens to contain the SAME
+// contiguous phrase — in practice, near-duplicate text. Chinese has no word
+// boundaries, so a natural question yields long runs that match almost nothing.
+// Character BIGRAMS are the standard approach for unsegmented text: a question
+// about a company's game AI strategy yields 腾讯/游戏/战略/…, so a result that
+// phrases the idea differently still matches on the meaningful pairs.
+function cjkBigrams(text) {
+  const out = new Set();
+  for (const run of cjkRuns(text)) {
+    if (run.length < 2) continue;
+    for (let i = 0; i < run.length - 1; i += 1) out.add(run.slice(i, i + 2));
+  }
+  return out;
+}
+
 // Relevance-filter raw web-search hits against the question so noisy or
 // off-topic results never reach the answer. Matching is token-based (so
 // "compared" doesn't falsely match "compare"), and a result is only kept if it
@@ -791,7 +806,11 @@ function webResultRelevance(question, results, limit = 5) {
   const substantive = queryWords.filter(
     w => (w.length >= 4 && !GENERIC_WEAK_TERMS.has(w)) || DOMAIN_CORE_TERMS.has(w)
   );
-  const queryCjkRuns = cjkRuns(question).filter(r => r.length >= 2);
+  const queryBigrams = cjkBigrams(question);
+  // Two bigrams are required so a single common pair cannot carry an
+  // unrelated result over the line — but a query that only HAS one bigram
+  // to give still gets its chance.
+  const cjkBar = Math.min(2, queryBigrams.size);
   const questionLower = String(question || "").toLowerCase();
   const wantsDefinition = /\b(define|definition|meaning of|what (is|does|are) .* mean)\b/.test(questionLower);
 
@@ -802,9 +821,9 @@ function webResultRelevance(question, results, limit = 5) {
       const blob = `${item.title || ""} ${item.description || item.content || item.text || ""}`;
       // Must contain at least one substantive query term (Latin) OR a CJK run
       // shared with the question, otherwise it is almost certainly off-topic.
-      const overlapCjk = queryCjkRuns.filter(run => blob.includes(run));
+      const overlapCjk = [...queryBigrams].filter(bg => blob.includes(bg));
       const hasSubstantive =
-        substantive.some(w => titleWords.has(w) || textWords.has(w)) || overlapCjk.length > 0;
+        substantive.some(w => titleWords.has(w) || textWords.has(w)) || overlapCjk.length >= cjkBar;
       if (!hasSubstantive) return { ...item, _score: -1 };
 
       let score = 0;
@@ -816,7 +835,7 @@ function webResultRelevance(question, results, limit = 5) {
       }
       // CJK overlap contributes a positive score so relevant Chinese-language
       // results clear the `_score > 0` filter even with no Latin token match.
-      score += overlapCjk.length * 5;
+      score += Math.min(overlapCjk.length, 6) * 5;
       if (!wantsDefinition && /definition|meaning|synonym|dictionary|merriam|cambridge|oxford|collins|transitive verb|intransitive verb/i.test(blob)) {
         score -= 10;
       }
@@ -987,6 +1006,7 @@ module.exports = {
   normaliseStyle,
   postQaChatCompletions,
   webResultRelevance,
+  cjkBigrams,
   isModelReady,
   isScanModelReady,
   isScanRateLimited,
