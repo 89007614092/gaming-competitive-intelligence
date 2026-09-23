@@ -5397,3 +5397,13 @@ body {
 .unmapped-companies-title { margin: 0 0 0.4rem; font-size: 0.95rem; font-weight: 600; }
 .unmapped-companies ul { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; color: var(--text-muted, #6b7280); }
 .unmapped-companies li { margin-bottom: 0.35rem; }
+
+/* A model FAILURE is visually distinct from "you didn't opt in to the model" —
+   the plain warning is easy to scroll past, and the difference matters. */
+.summary-warning.is-degraded {
+  border-color: #f3b1b1;
+  border-left: 4px solid #b91c1c;
+  background: #fef2f2;
+  color: #7f1d1d;
+  font-weight: 600;
+}

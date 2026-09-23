@@ -203,6 +203,14 @@ function buildCorpus() {
   return corpusCache;
 }
 
+// A "worth quoting" sentence minimum, by script. 40 characters was tuned for
+// English (roughly seven words); a normal Chinese sentence is far shorter, and
+// applying the English floor silently discarded almost every Chinese sentence —
+// which is why Chinese Key Points collapsed to whole excerpts.
+function minSentenceLen(text) {
+  return cjkRuns(text).length ? 10 : 40;
+}
+
 function words(text) {
   return (String(text || "").toLowerCase().match(/[a-z][a-z0-9'-]{1,}/g) || [])
     .filter(word => !STOP_WORDS.has(word) && (word.length > 2 || ["ai", "eu", "uk", "vr"].includes(word)));
@@ -256,7 +264,7 @@ function relevantExcerpt(item, question, sentenceLimit = 2, maxChars = 620, titl
   const queryWords = new Set(words(question));
   const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
   const tnorm = norm(title);
-  const sentences = item.text.match(/[^.!?]+(?:[.!?]+|$)/g) || [item.text];
+  const sentences = item.text.match(/[^.!?。！？]+(?:[.!?。！？]+|$)/g) || [item.text];
   const ranked = sentences
     .map((sentence, index) => ({
       sentence: sentence.trim(),
@@ -264,7 +272,7 @@ function relevantExcerpt(item, question, sentenceLimit = 2, maxChars = 620, titl
         + (/\b(?:risk|exposure|liability|compliance|copyright|privacy|transparency|moderation|requires?|creates?|faces?|enables?|allows?)\b/i.test(sentence) ? 4 : 0)
         + Math.max(0, 1 - index / 10),
     }))
-    .filter(item => item.sentence.length >= 35)
+    .filter(item => item.sentence.length >= (cjkRuns(item.sentence).length ? 10 : 35))
     // Skip sentences that just restate the source title (they read as noise once
     // the title is already shown as the claim's label).
     .filter(item => {
@@ -857,7 +865,7 @@ function webResultRelevance(question, results, limit = 5) {
 //     by a local scorer (real extractive summarisation, no API).
 //   - Conclusion       = a metadata-driven coverage note (counts, source types,
 //     recency) that uses the same calibrated thin/no-evidence phrasing.
-function buildExtractiveAnswer(question, evidence, style = "full") {
+function buildExtractiveAnswer(question, evidence, style = "full", lang = "en") {
   const usable = evidence.filter(item => (item.excerpt || item.text || "").length >= 40);
   if (!usable.length) {
     return "## Conclusion\nNo sufficiently relevant evidence was found in the application data for that question. Try rephrasing, or enable internet search for broader coverage.";
@@ -912,10 +920,10 @@ function buildExtractiveAnswer(question, evidence, style = "full") {
   for (const item of usable) {
     const excerpt = relevantExcerpt(item, question, 3, 900, item.title);
     if (!excerpt) continue;
-    const sentences = excerpt.match(/[^.!?]+(?:[.!?]+|$)/g) || [excerpt];
+    const sentences = excerpt.match(/[^.!?。！？]+(?:[.!?。！？]+|$)/g) || [excerpt];
     for (const raw of sentences) {
       const s = raw.trim();
-      if (s.length < 40 || s.length > 300) continue;
+      if (s.length < minSentenceLen(s) || s.length > 300) continue;
       candidates.push({ sentence: s, score: scoreSentence(s, questionWords), id: item.id });
     }
   }
@@ -943,24 +951,52 @@ function buildExtractiveAnswer(question, evidence, style = "full") {
     }
   }
 
-  // --- Conclusion: metadata-driven coverage note (no fabrication) ---
+  // --- Conclusion -----------------------------------------------------------
+  // Previously this was ONE line of coverage metadata, which made the whole
+  // "Conclusion" view useless — the reader asked for a conclusion and got
+  // "based on 9 records, the evidence covers the main aspects". Now it leads
+  // with the highest-ranked extracted sentences. Those are verbatim evidence
+  // WITH their citation IDs, so quoting them is summarising the retrieved
+  // material, not fabricating anything.
+  const zh = lang === "zh-CN";
   const appCount = appItems.length;
   const webCount = webItems.length;
   const total = usable.length;
   const lowerQuestion = question.toLowerCase();
   const wantsRecency = /\b(latest|recent|current|new|deadline|when|2024|2025|2026)\b/.test(lowerQuestion);
   const conclusionLines = [];
+
+  for (const kp of rankedKeyPoints.slice(0, 3)) {
+    conclusionLines.push(`${kp.sentence.replace(/\s+$/, "")} [${kp.id}]`);
+  }
+
   if (total < 3) {
-    conclusionLines.push(`Evidence on this topic is limited — only ${total} relevant record${total === 1 ? "" : "s"} were found. Try rephrasing the question or enabling internet search for broader coverage.`);
+    conclusionLines.push(zh
+      ? `关于该主题的证据有限——仅找到 ${total} 条相关记录。建议改写问题，或启用联网搜索以获得更广泛的覆盖。`
+      : `Evidence on this topic is limited — only ${total} relevant record${total === 1 ? "" : "s"} were found. Try rephrasing the question or enabling internet search for broader coverage.`);
   } else {
-    let lead = `Based on ${appCount} curated application record${appCount === 1 ? "" : "s"}`;
-    if (webCount) lead += ` and ${webCount} web source${webCount === 1 ? "" : "s"}`;
-    lead += `, the evidence above covers the main aspects of "${truncate(question, 120)}".`;
+    let lead;
+    if (zh) {
+      lead = `基于 ${appCount} 条策展应用记录`;
+      if (webCount) lead += ` 与 ${webCount} 个网络来源`;
+      lead += `，上述证据涵盖了“${truncate(question, 120)}”的主要方面。`;
+    } else {
+      lead = `Based on ${appCount} curated application record${appCount === 1 ? "" : "s"}`;
+      if (webCount) lead += ` and ${webCount} web source${webCount === 1 ? "" : "s"}`;
+      lead += `, the evidence above covers the main aspects of "${truncate(question, 120)}".`;
+    }
     conclusionLines.push(lead);
   }
   if (wantsRecency && !webCount) {
-    conclusionLines.push("This answer draws only on curated application data and may not reflect the very latest developments — enable internet search for the most recent context.");
+    conclusionLines.push(zh
+      ? "本回答仅依据策展应用数据，可能未反映最新进展——启用联网搜索可获取最新背景。"
+      : "This answer draws only on curated application data and may not reflect the very latest developments — enable internet search for the most recent context.");
   }
+  // The fallback never ran the model, so say so plainly rather than letting the
+  // reader assume this is an AI synthesis.
+  conclusionLines.push(zh
+    ? "（说明：AI 模型当前不可用，以上为基于检索证据的自动摘要，非 AI 综合生成。）"
+    : "(Note: the AI model was unavailable, so this is an automated summary of the retrieved evidence rather than an AI synthesis.)");
 
   const s = normaliseStyle(style);
 

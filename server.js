@@ -1544,13 +1544,13 @@ app.post("/api/summarise", whenAuth(requireAuth), async (req, res) => {
       } catch (error) {
         modelError = error.message;
         mode = "extractive-fallback";
-        answer = buildExtractiveAnswer(question, evidence, style);
+        answer = buildExtractiveAnswer(question, evidence, style, lang);
       } finally {
         clearTimeout(modelTimer);
       }
     } else {
       mode = "extractive-citation";
-      answer = buildExtractiveAnswer(question, evidence, style);
+      answer = buildExtractiveAnswer(question, evidence, style, lang);
     }
 
     res.json({
