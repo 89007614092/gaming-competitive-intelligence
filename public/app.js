@@ -463,11 +463,12 @@ async function runSummary() {
     // surface a clear notice so readers don't mistake a citation summary for
     // an AI synthesis. The meta line already says "extractive · cited", but
     // this makes the distinction unmistakable.
+    const tQa = (key, fallback) => (typeof window.t === "function" ? window.t(key) : fallback);
     const tierNotice = document.getElementById("summaryTierNotice");
     if (data.model?.mode === "local-open-source-model") {
       tierNotice.style.display = "none";
     } else {
-      tierNotice.textContent = "AI analysis unavailable - knowledge base summary only.";
+      tierNotice.textContent = tQa("qa.tier.notice", "AI analysis unavailable - knowledge base summary only.");
       tierNotice.style.display = "block";
     }
 
@@ -475,11 +476,20 @@ async function runSummary() {
     const warnings = [];
     // Only warn about the model when the user actually opted in and it fell back
     // (the default extractive mode is not an error condition).
-    if (useModel && data.model?.mode === "extractive-fallback") warnings.push("The AI model was unavailable or still warming up, so an extractive evidence summary was returned.");
+    const degraded = useModel && data.model?.mode === "extractive-fallback";
+    if (degraded) warnings.push(tQa("qa.degraded.notice", "AI synthesis is unavailable, so this is an automated summary of the retrieved evidence - not an AI-written answer."));
     if (data.webSearchError) warnings.push(`Internet search was unavailable: ${data.webSearchError}`);
     if (data.internetDropped) warnings.push("Internet search was skipped — web evidence needs the AI model, which is currently unavailable. Add a model API key to include web results.");
     if (warnings.length) {
-      warning.textContent = warnings.join(" ");
+      // A model FAILURE is not the same as "you didn't opt in" — make it look
+      // like one, and surface WHY so it is diagnosable from the page rather
+      // than only from the network tab.
+      warning.className = degraded ? "summary-warning is-degraded" : "summary-warning";
+      let text = warnings.join(" ");
+      if (degraded && data.model?.error) {
+        text += ` ${tQa("qa.degraded.reason", "Reason:")} ${data.model.error}`;
+      }
+      warning.textContent = text;
       warning.style.display = "block";
     }
 

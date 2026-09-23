@@ -141,6 +141,9 @@
       'settings.profile.save': 'Save',
       'settings.profile.saved': 'Saved. It will appear on entries you add from now on.',
       'settings.profile.reserved': 'That name could be mistaken for the system or an official account. Please choose another.',
+      'qa.tier.notice': 'AI analysis unavailable - knowledge base summary only.',
+      'qa.degraded.notice': 'AI synthesis is unavailable, so this is an automated summary of the retrieved evidence - not an AI-written answer.',
+      'qa.degraded.reason': 'Reason:',
       'settings.profile.noVisible': 'That name has no visible characters.',
 
       // Modals
@@ -343,6 +346,9 @@
       'settings.profile.save': '保存',
       'settings.profile.saved': '已保存。此后你添加的条目都会显示该名称。',
       'settings.profile.reserved': '该名称可能被误认为系统或官方账号，请更换。',
+      'qa.tier.notice': 'AI 分析不可用——仅提供知识库摘要。',
+      'qa.degraded.notice': 'AI 综合生成不可用，以下是基于检索证据的自动摘要，并非 AI 撰写答案。',
+      'qa.degraded.reason': '原因：',
       'settings.profile.noVisible': '该名称没有可见字符。',
 
       // Modals
