@@ -4960,6 +4960,107 @@ app.get("/api/profile", whenAuth(requireAuth), async (req, res) => {
   });
 });
 
+// --- C2: cross-device preference sync ---------------------------------------
+// What maybe synced, and what must never be. The whitelist is enforced SERVER
+// side, so a misbehaving (or future, buggy) client cannot push a credential into
+// the database even if it tried.
+const SYNCABLE_PREF_KEYS = ["savedArticles", "newsFolders", "newsCompetitorIds", "tabOrder"];
+// Deliberately NOT syncable:
+//   adminKey — a credential; it stays in localStorage on the device that entered it
+//   LANG     — UI language; keeping it local avoids a round trip before first paint
+const MAX_PREFS_JSON_CHARS = 256 * 1024;
+
+// Self-healing, matching every other table in this app: created on first DB
+// contact, memoised so the DDL runs once per process. No manual migration needed.
+let _userPrefsTableEnsured = false;
+async function ensureUserPrefsTable(pool) {
+  if (_userPrefsTableEnsured) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      email      TEXT PRIMARY KEY,
+      payload    JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  _userPrefsTableEnsured = true;
+}
+
+// Keep only whitelisted keys, in a fixed order.
+function sanitisePrefs(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const key of SYNCABLE_PREF_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(raw, key)) out[key] = raw[key];
+  }
+  return out;
+}
+
+// Fail soft by design: no database (or a DB error) means "no synced prefs", and
+// the browser simply keeps using its local copy. Sync must never break the app.
+async function loadUserPrefs(email) {
+  const pool = getDbPool();
+  if (!pool) return { prefs: null, error: "no database configured" };
+  try {
+    await ensureUserPrefsTable(pool);
+    const { rows } = await pool.query(
+      "SELECT payload, updated_at FROM user_prefs WHERE email = $1 LIMIT 1",
+      [String(email || "").trim().toLowerCase()]
+    );
+    if (!rows.length) return { prefs: null };
+    return { prefs: sanitisePrefs(rows[0].payload), updatedAt: rows[0].updated_at };
+  } catch (e) {
+    console.warn("[prefs] load failed:", e.message);
+    return { prefs: null, error: e.message };
+  }
+}
+
+async function saveUserPrefs(email, raw) {
+  const prefs = sanitisePrefs(raw);
+  const serialised = JSON.stringify(prefs);
+  if (serialised.length > MAX_PREFS_JSON_CHARS) {
+    return { ok: false, error: "too-large", message: "Those preferences are too large to sync." };
+  }
+  const pool = getDbPool();
+  if (!pool) return { ok: false, error: "no database configured" };
+  try {
+    await ensureUserPrefsTable(pool);
+    await pool.query(
+      `INSERT INTO user_prefs (email, payload, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (email) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
+      [String(email || "").trim().toLowerCase(), serialised]
+    );
+    return { ok: true, prefs };
+  } catch (e) {
+    console.warn("[prefs] save failed:", e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// GET /api/prefs — the signed-in user's synced preferences, or null when there
+// are none yet (the client then seeds from its local copy).
+app.get("/api/prefs", whenAuth(requireAuth), async (req, res) => {
+  if (!req.user || !req.user.email) return res.status(401).json({ error: "not signed in" });
+  const r = await loadUserPrefs(req.user.email);
+  res.json({ success: true, prefs: r.prefs, updatedAt: r.updatedAt || null, error: r.error || null });
+});
+
+// PUT /api/prefs — replace the stored preferences. Last write wins; the client
+// sends its whole (whitelisted) set.
+app.put("/api/prefs", whenAuth(requireAuth), async (req, res) => {
+  if (!req.user || !req.user.email) return res.status(401).json({ error: "not signed in" });
+  const body = req.body && typeof req.body === "object" ? req.body : null;
+  if (!body || !Object.prototype.hasOwnProperty.call(body, "prefs")) {
+    return res.status(400).json({ error: "Expected a prefs field" });
+  }
+  const r = await saveUserPrefs(req.user.email, body.prefs);
+  if (!r.ok) {
+    const status = r.error === "too-large" ? 400 : 503;
+    return res.status(status).json({ error: r.error, message: r.message || r.error });
+  }
+  res.json({ success: true, prefs: r.prefs });
+});
+
 // PUT /api/profile — set your own display name. Self-service only: admins
 // cannot rename other people (deliberate v1 limit, easy to add later).
 app.put("/api/profile", whenAuth(requireAuth), async (req, res) => {
@@ -6196,4 +6297,11 @@ module.exports = {
   lookupDisplayName,
   saveDisplayName,
   DISPLAY_NAME_MAX,
+
+  // C2 cross-device preference sync — exported so the whitelist and the
+  // fail-soft behaviour are testable without standing up a session.
+  SYNCABLE_PREF_KEYS,
+  sanitisePrefs,
+  loadUserPrefs,
+  saveUserPrefs,
 };
