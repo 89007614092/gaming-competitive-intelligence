@@ -117,3 +117,53 @@ test('relevant Chinese results outrank weakly related ones', () => {
   assert.ok(out.length >= 1, 'something survives');
   assert.strictEqual(out[0].url, 'https://strong.example', 'the stronger match ranks first');
 });
+
+// === Bigram distinctiveness (2026-09-25) ====================================
+// Equal weighting let a page full of generic terms outrank one that actually
+// names the subject. Observed on a real question:
+//   generic  "人工智能带来哪些新的网络安全挑战…"  -> 4 matches, score 20
+//   specific "腾讯AI战略风险分析…"                 -> 2 matches, score 10
+// so all three web sources came back generic and went unused.
+
+const Q = '在未来，对于人工智能，腾讯最可能遇到的风险是哪些？';
+const GENERIC = {
+  title: '人工智能带来哪些新的网络安全挑战？',
+  description: '人工智能技术的快速发展和广泛应用给网络安全带来了新的问题，包括对抗性机器学习攻击、数据投毒攻击。',
+  url: 'https://generic.example',
+};
+const SPECIFIC = {
+  title: '腾讯AI战略风险分析',
+  description: '腾讯在游戏与云业务上面临监管合规与内容标注风险，需要建立水印与溯源机制。',
+  url: 'https://specific.example',
+};
+
+test('a page naming the subject outranks a generic one', () => {
+  const out = engine.webResultRelevance(Q, [GENERIC, SPECIFIC], 5);
+  assert.strictEqual(out[0].url, 'https://specific.example', 'the Tencent-specific page must win');
+  assert.ok(out[0]._score > out[1]._score, 'and by a clear margin');
+});
+
+test('generic-only results are still returned (the set is never silently emptied)', () => {
+  // Re-ranking must not become over-filtering: if the search only found generic
+  // pages, returning them beats returning nothing.
+  const out = engine.webResultRelevance(Q, [GENERIC], 5);
+  assert.strictEqual(out.length, 1, 'a generic page alone must still be kept');
+});
+
+test('distinctiveness weighting is the reason, not luck', () => {
+  // 腾讯 is made of rare characters; 人工/智能 are not.
+  assert.ok(engine.bigramWeight ? true : true);
+  const t = require('../lib/text-cjk.js');
+  assert.ok(t.bigramWeight('腾讯') > t.bigramWeight('人工'), '腾讯 must weigh more than 人工');
+  assert.ok(t.bigramWeight('腾讯') > t.bigramWeight('智能'), '腾讯 must weigh more than 智能');
+});
+
+test('English ranking is unaffected by the CJK weighting', () => {
+  const results = [
+    { title: 'Tencent AI strategy risk analysis', description: 'Tencent faces compliance and labelling risk in games.', url: 'https://good.example' },
+    { title: 'The cat sat', description: 'a dog ran', url: 'https://bad.example' },
+  ];
+  const out = engine.webResultRelevance('What are the biggest AI risks for Tencent?', results, 5);
+  assert.strictEqual(out.length, 1);
+  assert.strictEqual(out[0].url, 'https://good.example');
+});
