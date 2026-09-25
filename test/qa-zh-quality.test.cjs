@@ -134,8 +134,29 @@ test('the browser renders full-width citations as chips too', () => {
   // The server folds these before storing, but cached/older answers still carry
   // them, and without this they render as inert text. It must come from the
   // SHARED module (lib/text-cjk.js) rather than a private copy.
-  assert.ok(/TEXT_CJK\.foldBrackets/.test(APP_JS), 'parseAnswer must fold via the shared module');
+  assert.ok(
+    /TEXT_CJK\.normaliseCitations/.test(APP_JS),
+    'parseAnswer must normalise citations via the shared module'
+  );
   assert.ok(!/u3010/.test(APP_JS), 'and must not keep its own bracket regex');
+  // The "not cited" badge must judge the same normalised text, or it contradicts
+  // what the reader can see.
+  assert.ok(
+    /lastAnswerText = \(window\.TEXT_CJK \|\| \{\}\)\.normaliseCitations/.test(APP_JS),
+    'the not-cited badge must use the normalised answer'
+  );
+});
+
+test('a run of citations is bracketed, not just its first id', () => {
+  const t = require('../lib/text-cjk.js');
+  // Models habitually write "[A1]A7" — only the first id resolves.
+  assert.strictEqual(t.normaliseCitations('罚款[A1]A7。'), '罚款[A1][A7]。');
+  assert.strictEqual(t.normaliseCitations('[S2]S3'), '[S2][S3]');
+  assert.strictEqual(t.normaliseCitations('[A1]A7W2S1'), '[A1][A7][W2][S1]');
+  // Full-width plus a run, together.
+  assert.strictEqual(t.normaliseCitations('【A1】A7'), '[A1][A7]');
+  // Prose containing a capital letter must be left alone.
+  assert.strictEqual(t.normaliseCitations('[A1] and A7'), '[A1] and A7');
 });
 
 test('the model generation path normalises before the gate inspects it', () => {
@@ -206,4 +227,10 @@ test('uncitedSegments is observability only, never enforcement', () => {
   assert.ok(/console\.warn\(`\[qa\] \$\{uncited\.length\}/.test(src), 'it must log');
   // It must NOT throw or reject an answer — a noisy answer still beats none.
   assert.ok(!/if \(uncited\.length\) throw/.test(src), 'and must never reject the answer');
+});
+
+test('unknown citation ids are stripped, and that is logged', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
+  assert.ok(/strippedIds/.test(src), 'invalid ids must be removed, not shown to the reader');
+  assert.ok(/console\.warn\(`\[qa\] stripped/.test(src), 'and the removal must be visible in logs');
 });

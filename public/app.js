@@ -444,7 +444,12 @@ async function runSummary() {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || "Answer generation failed");
 
-    lastAnswerText = data.answer || "";
+    // Normalised, so the "not cited" badge judges the same text the reader sees.
+    // Without this, an id written bare ("[A1]A7") is badged as never referenced
+    // even though it is visibly cited.
+    lastAnswerText = (window.TEXT_CJK || {}).normaliseCitations
+      ? window.TEXT_CJK.normaliseCitations(data.answer || "")
+      : (data.answer || "");
     lastAnswerSources = data.sources || [];
     lastAnswerStyle = style;
     lastSummaryPayload = payload;
@@ -513,8 +518,8 @@ function parseAnswer(rawText, sources) {
   // without this they render as inert text instead of citation chips.
   // Same helpers the server uses (lib/text-cjk.js) — no second copy of the
   // bracket rules to drift out of sync.
-  const text = (window.TEXT_CJK || {}).foldBrackets
-    ? window.TEXT_CJK.foldBrackets(rawText)
+  const text = (window.TEXT_CJK || {}).normaliseCitations
+    ? window.TEXT_CJK.normaliseCitations(rawText)
     : String(rawText || "");
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
   const renderInline = (line) => {
