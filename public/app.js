@@ -734,6 +734,7 @@ function getTabOrder() {
 
 function saveTabOrder(order) {
   localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(order));
+  queuePrefsSync();   // C2
 }
 
 function restoreTabOrder() {
@@ -889,6 +890,9 @@ async function loadProfileIntoSettings() {
     // Re-run the check so a name already stored as reserved (e.g. set before
     // the blocklist existed) is flagged the moment the field is shown.
     if (input) input.dispatchEvent(new Event("input"));
+    // C2: we now know a session exists — adopt the account's preferences, or seed
+    // them from this device when the account has none yet.
+    syncPrefsWithServer();
   } catch (_) { /* leave the field empty rather than blocking the modal */ }
 }
 
@@ -1063,6 +1067,7 @@ async function setupNewsCompetitors() {
     if (!selectedNewsCompetitorIds.length) selectedNewsCompetitorIds = [...DEFAULT_NEWS_COMPETITORS];
     pendingNewsCompetitorIds = new Set(selectedNewsCompetitorIds);
     localStorage.setItem(NEWS_COMPETITORS_KEY, JSON.stringify(selectedNewsCompetitorIds));
+  queuePrefsSync();   // C2
     updateCompetitorMonitorCard();
   } catch (_) {
     // The defaults remain usable even if the network list cannot be loaded.
@@ -1228,6 +1233,7 @@ function applyCompetitorSelection() {
   }
   selectedNewsCompetitorIds = [...pendingNewsCompetitorIds];
   localStorage.setItem(NEWS_COMPETITORS_KEY, JSON.stringify(selectedNewsCompetitorIds));
+  queuePrefsSync();   // C2
   updateCompetitorMonitorCard();
   closeCompetitorModal();
   loadNews(true);
@@ -1309,6 +1315,86 @@ async function loadNews(forceRefresh = false) {
 
 const SAVED_ARTICLES_KEY = "savedNewsArticles";
 const NEWS_FOLDERS_KEY = "newsFolders";
+
+// --- C2: cross-device preference sync ---------------------------------------
+// Each entry maps the localStorage key to the field name the server stores.
+// Anything NOT listed here is never sent — notably adminKey (a credential) and
+// LANG (UI language, kept local to avoid a round trip before first paint).
+const PREF_STORAGE_MAP = [
+  { field: "savedArticles", key: SAVED_ARTICLES_KEY, parse: (v) => (Array.isArray(v) ? v : null) },
+  { field: "newsFolders", key: NEWS_FOLDERS_KEY, parse: (v) => (Array.isArray(v) ? v : null) },
+  { field: "newsCompetitorIds", key: NEWS_COMPETITORS_KEY, parse: (v) => (Array.isArray(v) ? v : null) },
+  { field: "tabOrder", key: TAB_ORDER_KEY, parse: (v) => (Array.isArray(v) ? v : null) },
+];
+const PREF_NON_SYNCABLE = ["adminKey", "LANG"];
+
+function readLocalPrefs() {
+  const out = {};
+  for (const { field, key, parse } of PREF_STORAGE_MAP) {
+    try {
+      const parsed = parse(JSON.parse(localStorage.getItem(key) || "null"));
+      if (parsed !== null) out[field] = parsed;
+    } catch (_) { /* unreadable local value: just don't sync it */ }
+  }
+  return out;
+}
+
+function applyServerPrefs(prefs) {
+  if (!prefs || typeof prefs !== "object") return false;
+  let applied = false;
+  for (const { field, key, parse } of PREF_STORAGE_MAP) {
+    const value = parse(prefs[field]);
+    if (value === null) continue;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      applied = true;
+    } catch (_) { /* storage full or blocked; keep going */ }
+  }
+  return applied;
+}
+
+// Push the local set to the server, debounced: saving an article can trigger
+// several writes in quick succession and we only care about the final state.
+let prefSyncTimer = null;
+let prefSyncInFlight = false;
+function queuePrefsSync() {
+  if (prefSyncTimer) clearTimeout(prefSyncTimer);
+  prefSyncTimer = setTimeout(async () => {
+    prefSyncTimer = null;
+    if (prefSyncInFlight) return;
+    prefSyncInFlight = true;
+    try {
+      await authedFetch(`${API_BASE}/prefs`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prefs: readLocalPrefs() }),
+      });
+    } catch (_) {
+      // Sync is a convenience, never a requirement: the local copy stays
+      // authoritative on this device and we simply try again next change.
+    } finally {
+      prefSyncInFlight = false;
+    }
+  }, 800);
+}
+
+// Called once we know there IS a signed-in session. Server wins if it has
+// anything; otherwise we seed it from this device's local copy.
+async function syncPrefsWithServer() {
+  try {
+    const res = await authedFetch(`${API_BASE}/prefs`, { headers: { Accept: "application/json" } });
+    if (!res.ok) return false;                       // no session / auth off
+    const data = await res.json().catch(() => ({}));
+    if (data && data.prefs && Object.keys(data.prefs).length) {
+      return applyServerPrefs(data.prefs);
+    }
+    queuePrefsSync();                                // seed from this device
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 let currentFilter = null;
 let allArticles = [];
 let newsViewMode = "recent";
@@ -1343,10 +1429,12 @@ function loadNewsFolders() {
 function saveNewsArticles() {
   localStorage.setItem(SAVED_ARTICLES_KEY, JSON.stringify(savedNewsArticles));
   updateSavedArticleCount();
+  queuePrefsSync();   // C2: mirror to the account so other devices see it
 }
 
 function saveNewsFolders() {
   localStorage.setItem(NEWS_FOLDERS_KEY, JSON.stringify(newsFolders));
+  queuePrefsSync();
 }
 
 function newsArticleKey(article) {
