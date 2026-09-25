@@ -564,7 +564,7 @@ function applyStyleInstruction(systemPrompt, style = "full") {
 // invalid-id strip, the browser's chip renderer) matches ASCII brackets, so an
 // otherwise well-cited answer scored ZERO citations and fell back to the
 // extractive evidence dump. Fold the variants back before anything inspects it.
-const normaliseCitations = textCjk.foldBrackets;
+const normaliseCitations = textCjk.normaliseCitations;
 
 // Pure citation gate used by runApiModelGeneration and unit-tested directly.
 // Accepts a reasoned model answer when it cites at least one source; the
@@ -648,7 +648,18 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
     console.warn(`[qa] zh-CN answer looks truncated (lang=${lang}, ${rawAnswer.length} chars) — consider raising QA_MAX_TOKENS_ZH_CN`);
   }
   const validCitationIds = new Set(evidence.map(item => item.id));
-  answer = answer.replace(/\[([AWST]\d+)\]/g, (match, id) => (validCitationIds.has(id) ? match : ""));
+  // Strip ids the model invented. Logged, because a citation that survives to
+  // the reader without a matching source resolves to nothing — and we have seen
+  // one ([S9], with no S9 in evidence), so this needs to be visible.
+  const strippedIds = [];
+  answer = answer.replace(/\[([AWST]\d+)\]/g, (match, id) => {
+    if (validCitationIds.has(id)) return match;
+    strippedIds.push(id);
+    return "";
+  });
+  if (strippedIds.length) {
+    console.warn(`[qa] stripped ${strippedIds.length} unknown citation id(s): ${[...new Set(strippedIds)].join(",")}`);
+  }
   if (answer.trim().length < 80) throw new Error("Model returned a degenerate answer");
   if (/^(?:\s*\[[AWST]\d+\]\s*){3,}$/.test(answer.trim())) throw new Error("Model returned a degenerate answer");
   const userEvidenceIds = evidence.filter(item => item.sourceType === "user").map(item => item.id);
