@@ -794,11 +794,23 @@ function truncate(text, n) {
 // risk/action keyword boost (mirroring the scoring inside relevantExcerpt), so
 // the model-free fallback can surface the most on-topic sentences. Short
 // takeaways are gently preferred to keep Key Points punchy.
-function scoreSentence(sentence, questionWords) {
+// For a Chinese question `questionWords` is empty and the English risk regex
+// never fires, so EVERY sentence scored 0 and ranking was meaningless — the
+// Key Points became whatever fragment happened to come first (observed: a
+// glossary definition torn out of a PDF). Score CJK by bigram overlap, weighted
+// by distinctiveness, so relevance actually decides the order.
+function scoreSentence(sentence, questionWords, questionBigrams) {
   const matched = words(sentence).filter(word => questionWords.has(word)).length * 3;
   const riskBoost = /\b(?:risk|exposure|liability|compliance|copyright|privacy|transparency|moderation|requires?|creates?|faces?|enables?|allows?)\b/i.test(sentence) ? 4 : 0;
+  const riskBoostZh = /风险|合规|透明度|版权|诉讼|罚款|标识|监管/.test(sentence) ? 4 : 0;
+  let cjk = 0;
+  if (questionBigrams && questionBigrams.size) {
+    for (const bg of textCjk.cjkBigrams(sentence)) {
+      if (questionBigrams.has(bg)) cjk += textCjk.bigramWeight(bg);
+    }
+  }
   const lengthPenalty = sentence.length > 240 ? 2 : 0;
-  return matched + riskBoost - lengthPenalty;
+  return matched + riskBoost + riskBoostZh + cjk * 3 - lengthPenalty;
 }
 
 // Generic comparison/relation verbs that are weak topical signals on their own
@@ -909,10 +921,13 @@ function buildExtractiveAnswer(question, evidence, style = "full", lang = "en") 
   const userItems = usable.filter(item => item.sourceType === "user");
   const teamItems = usable.filter(item => item.sourceType === "team");
   const questionWords = new Set(words(question));
+  const questionBigrams = cjkBigrams(question);
 
   // --- Detailed Answer: grouped, cited evidence (app vs web) ---
   const detailedLines = [
-    `Here is what the curated evidence shows for "${truncate(question, 160)}":`,
+    lang === "zh-CN"
+      ? `以下是策展证据中关于"${truncate(question, 160)}"的内容：`
+      : `Here is what the curated evidence shows for "${truncate(question, 160)}":`,
   ];
   if (appItems.length) {
     detailedLines.push("\n**Application evidence**");
@@ -957,7 +972,7 @@ function buildExtractiveAnswer(question, evidence, style = "full", lang = "en") 
     for (const raw of sentences) {
       const s = raw.trim();
       if (s.length < textCjk.minSentenceLen(s) || s.length > 300) continue;
-      candidates.push({ sentence: s, score: scoreSentence(s, questionWords), id: item.id });
+      candidates.push({ sentence: s, score: scoreSentence(s, questionWords, questionBigrams), id: item.id });
     }
   }
   const seenSentences = new Set();

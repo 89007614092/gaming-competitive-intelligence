@@ -173,3 +173,37 @@ test("English sentence handling is unchanged", () => {
   const citations = conclusionOf(answer).match(/\[A1\]/g) || [];
   assert.ok(citations.length >= 2, "English still yields multiple sentences");
 });
+
+// === Fallback quality, round two (2026-09-25) ==============================
+// A deployed run fell back to extractive and exposed two things I had missed.
+
+test('the fallback opening line is localised, not hardcoded English', () => {
+  // NB: an item only counts as usable evidence at >= 40 chars, so the text must
+  // be long enough or the function returns its no-evidence message instead.
+  const items = [1, 2, 3].map(i => ({
+    id: `A${i}`, sourceType: 'application', dataset: 'KB', title: `风险${i}`,
+    text: `腾讯在游戏业务中面临监管合规与内容标注风险，需要建立水印与溯源机制。第${i}项说明补充内容在这里。`,
+  }));
+  const zh = engine.buildExtractiveAnswer('腾讯最可能面临的风险有哪些？', items, 'full', 'zh-CN');
+  const en = engine.buildExtractiveAnswer('What are the risks?', items, 'full', 'en');
+  // THE BUG: a Chinese answer opened with "Here is what the curated evidence shows…".
+  assert.ok(!/Here is what the curated evidence shows/.test(zh), 'no English opening in Chinese');
+  assert.ok(/以下是策展证据中关于/.test(zh), 'a Chinese opening instead');
+  assert.ok(/Here is what the curated evidence shows/.test(en), 'English keeps its own wording');
+});
+
+test('Key Points rank by relevance in Chinese, not by document order', () => {
+  // Every Chinese sentence scored 0 because scoring used Latin tokens only, so
+  // the ranking was meaningless and a PDF glossary fragment topped the list.
+  const items = [{
+    id: 'A1',
+    sourceType: 'application',
+    dataset: 'KB',
+    title: '风险',
+    text: '风险承受度是指组织愿意承担的风险程度。腾讯在游戏业务中面临监管合规与内容标注风险，需要建立水印机制。',
+  }];
+  const out = engine.buildExtractiveAnswer('腾讯最可能面临的风险有哪些？', [items[0]], 'full', 'zh-CN');
+  const kp = out.split('## Key Points')[1].split('## Conclusion')[0];
+  const first = kp.trim().split('\n')[0];
+  assert.ok(/腾讯/.test(first), `the Tencent-specific sentence must rank first, got: ${first}`);
+});
