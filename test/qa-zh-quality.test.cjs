@@ -108,3 +108,59 @@ test("every style can still find the section it needs in both languages", () => 
     assert.ok(cn.length >= 2, `"${id}" must be reachable from more than just the English heading`);
   }
 });
+
+// === Full-width citation brackets (2026-09-25) ==============================
+// Chinese models routinely write 【A1】 instead of [A1]. Everything downstream —
+// the citation gate, the invalid-id strip, the browser's chip renderer — matches
+// ASCII brackets, so a well-cited answer scored ZERO citations and was replaced
+// by the extractive evidence dump.
+
+test('normaliseCitations folds full-width brackets back to ASCII', () => {
+  assert.strictEqual(engine.normaliseCitations('结论【A1】'), '结论[A1]');
+  assert.strictEqual(engine.normaliseCitations('混合［W2］与【S1】'), '混合[W2]与[S1]');
+  // Already-correct text is untouched.
+  assert.strictEqual(engine.normaliseCitations('结论 [A1]'), '结论 [A1]');
+});
+
+test('the citation gate accepts a full-width-bracket answer once normalised', () => {
+  const evidence = [{ id: 'A1' }, { id: 'W1' }, { id: 'S2' }];
+  const withFullWidth = '腾讯面临监管风险【A1】，供应链风险【W1】。';
+  // THE BUG: unnormalised this scores zero and falls back to the extractive dump.
+  assert.strictEqual(engine.evaluateCitationGate(withFullWidth, evidence).pass, false);
+  assert.strictEqual(engine.evaluateCitationGate(engine.normaliseCitations(withFullWidth), evidence).pass, true);
+});
+
+test('the browser renders full-width citations as chips too', () => {
+  // The server folds these before storing, but cached/older answers still carry
+  // them, and without this they render as inert text.
+  const m = /const text = String\(rawText \|\| ""\)\.replace\(\/\[[^\]]*\]\/g, "\["\)/.exec(APP_JS);
+  assert.ok(m, 'parseAnswer must normalise full-width brackets');
+});
+
+test('the model generation path normalises before the gate inspects it', () => {
+  assert.ok(
+    /let answer = normaliseCitations\(rawAnswer\)/.test(
+      require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8')
+    ),
+    'rawAnswer must be normalised before citation counting'
+  );
+});
+
+test('the zh-CN directive forbids a conclusion written as an instruction list', () => {
+  const zh = engine.applyLanguageInstruction('BASE', 'zh-CN');
+  // The observed output read as a chain of imperatives ("应加强…、完善…、关注…").
+  assert.ok(zh.includes('指令清单'), 'must ban the instruction-list style');
+  assert.ok(zh.includes('陈述性'), 'and require a declarative conclusion');
+  // The earlier rules must survive the edit.
+  assert.ok(zh.includes('## Conclusion'), 'English headings still required');
+});
+
+test('the gate fallback keeps the chosen style and language', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
+  // Previously this dropped both, so a failed model silently gave you the full
+  // English answer regardless of what you asked for.
+  assert.ok(
+    /return buildExtractiveAnswer\(question, evidence, style, lang\);/.test(src),
+    'the gate fallback must pass style and lang'
+  );
+});
