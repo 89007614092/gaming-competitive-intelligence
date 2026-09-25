@@ -159,13 +159,36 @@ test('a run of citations is bracketed, not just its first id', () => {
   assert.strictEqual(t.normaliseCitations('[A1] and A7'), '[A1] and A7');
 });
 
-test('the model generation path normalises before the gate inspects it', () => {
+test('the model generation path normalises, and brackets known ids, before the gate', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
+  // Fold bracket variants AND bracket bare ids we issued, before citation counting.
   assert.ok(
-    /let answer = normaliseCitations\(rawAnswer\)/.test(
-      require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8')
-    ),
-    'rawAnswer must be normalised before citation counting'
+    /bracketKnownIds\(normaliseCitations\(rawAnswer\), validCitationIds\)/.test(src),
+    'rawAnswer must be normalised and known ids bracketed before citation counting'
   );
+});
+
+test('bare ids count as citations once they are known ids', () => {
+  const t = require('../lib/text-cjk.js');
+  const ev = new Set(['A1', 'W1']);
+  // "风险A1" previously scored as citing nothing at all.
+  const normalised = t.bracketKnownIds(t.normaliseCitations('腾讯面临监管风险A1与网络安全风险W1。'), ev);
+  assert.ok(/\[A1\]/.test(normalised) && /\[W1\]/.test(normalised), 'known bare ids must be bracketed');
+  assert.strictEqual(engine.evaluateCitationGate(normalised, [{ id: 'A1' }, { id: 'W1' }]).pass, true);
+  // An id we never issued must be left as prose.
+  assert.ok(!/\[X9\]/.test(t.bracketKnownIds('型号X9芯片', ev)), 'unknown ids must not be bracketed');
+});
+
+test('a gate failure is loud, not a silent substitution', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
+  // The old code RETURNED the extractive dump, so server.js never entered its
+  // catch: mode stayed "local-open-source-model" and the UI claimed "AI model"
+  // while showing a dump, with no error anywhere.
+  assert.ok(!/if \(gate\.pass\) return answer;\s*\n\s*return buildExtractiveAnswer/.test(src),
+    'the gate must not silently substitute the dump');
+  assert.ok(/citation gate failed/.test(src), 'the cause must be logged');
+  assert.ok(/throw new Error\("The model answered but cited no usable sources/.test(src),
+    'and it must fail so the degradation is visible');
 });
 
 test('the zh-CN directive forbids a conclusion written as an instruction list', () => {
@@ -177,13 +200,13 @@ test('the zh-CN directive forbids a conclusion written as an instruction list', 
   assert.ok(zh.includes('## Conclusion'), 'English headings still required');
 });
 
-test('the gate fallback keeps the chosen style and language', () => {
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
-  // Previously this dropped both, so a failed model silently gave you the full
-  // English answer regardless of what you asked for.
+test('when the model path fails, the fallback keeps the chosen style and language', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  // The gate now throws, so this runs in the catch. It must still pass style and
+  // lang — previously it dropped both, silently giving the full English answer.
   assert.ok(
-    /return buildExtractiveAnswer\(question, evidence, style, lang\);/.test(src),
-    'the gate fallback must pass style and lang'
+    /buildExtractiveAnswer\(question, evidence, style, lang\)/.test(src),
+    'the fallback must pass style and lang'
   );
 });
 
