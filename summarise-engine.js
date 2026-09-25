@@ -512,7 +512,7 @@ function applyLanguageInstruction(systemPrompt, lang = "en") {
   return (
     systemPrompt +
     "\n\n语言要求（LANGUAGE REQUIREMENT · Simplified Chinese）：用户的界面语言为简体中文，请严格遵循以下要求：\n" +
-    "1. 使用简体中文撰写【完整、结构化】的分析，必须包含全部三个部分；【小节标题必须逐字保留英文原文】“## Detailed Answer”“## Key Points”“## Conclusion”，不得翻译为“详细回答”“关键点”“结论”等中文标题（标题下的正文使用简体中文即可）；结论须基于所引证据充分展开，不得仅用一句话草草收尾。\n" +
+    "1. 使用简体中文撰写【完整、结构化】的分析，必须包含全部三个部分；【小节标题必须逐字保留英文原文】“## Detailed Answer”“## Key Points”“## Conclusion”，不得翻译为“详细回答”“关键点”“结论”等中文标题（标题下的正文使用简体中文即可）；结论须基于所引证据充分展开，不得仅用一句话草草收尾；且必须写成陈述性的结论（这些风险意味着什么、应如何理解），不得写成一连串“应/需/建议”开头的指令清单——建议最多 1–2 条，须用完整句子表述，不要用顿号把多个动作串成一句长句。\n" +
     "2. 论述须连贯、专业，不要在中文学术中夹杂英文句式或英文连接词（如 however、therefore、in summary 等）；公司名、产品名、模型名、法规缩写（如 EU AI Act、GDPR）等专有名词可保留英文原文，但整句应为中文。\n" +
     "3. 必须【逐字保留】每一个引用标记（[A#]、[W#]、[S#]、[T#]）与每一个 {placeholder} 占位符，位置不变，不得翻译、转写、重排或删除。\n" +
     "4. 紧扣证据作答，引用标记须落在真正支撑该论断的出处上。"
@@ -554,6 +554,17 @@ function applyStyleInstruction(systemPrompt, style = "full") {
     `\n\nANSWER STYLE — the reader has selected the "${s}" view. Emit ONLY the sections listed below, using the same headings and in the same order. Where this conflicts with the three-section instruction above, THIS instruction takes precedence.\n` +
     STYLE_DIRECTIVES[s]
   );
+}
+
+// Chinese-language models very often write citations with full-width brackets —
+// 【A1】 instead of [A1]. Everything downstream (the citation gate, the
+// invalid-id strip, the browser's chip renderer) matches ASCII brackets, so an
+// otherwise well-cited answer scored ZERO citations and fell back to the
+// extractive evidence dump. Fold the variants back before anything inspects it.
+function normaliseCitations(text) {
+  return String(text || "")
+    .replace(/[【［〖【]/g, "[")
+    .replace(/[】］〗】]/g, "]");
 }
 
 // Pure citation gate used by runApiModelGeneration and unit-tested directly.
@@ -613,7 +624,7 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   } catch (err) {
     throw err; // server.js extractive fallback engages unchanged
   }
-  let answer = rawAnswer;
+  let answer = normaliseCitations(rawAnswer);
   // Observable rather than silent: if a Chinese answer is still being cut off,
   // we want that in the logs instead of only being told "the conclusion is short".
   if (lang === "zh-CN" && looksTruncated(rawAnswer)) {
@@ -644,7 +655,7 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   // uncited answer.
   const gate = evaluateCitationGate(answer, evidence);
   if (gate.pass) return answer;
-  return buildExtractiveAnswer(question, evidence);
+  return buildExtractiveAnswer(question, evidence, style, lang);
 }
 
 // Serialise model calls so we never open two concurrent API requests at once
@@ -1035,6 +1046,7 @@ module.exports = {
   runModelChat,
   buildExtractiveAnswer,
   evaluateCitationGate,
+  normaliseCitations,
   nudgeForUserSources,
   runApiModelGeneration,
   applyLanguageInstruction,

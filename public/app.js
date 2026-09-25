@@ -507,7 +507,11 @@ async function runSummary() {
 // Supports: "## " headings -> <h4.ans-section>, "- "/"* " bullets -> <ul><li>,
 // **bold**, and [A#]/[W#]/[T#] inline citation chips/links. Legacy "■ " headings and
 // citation behaviour are preserved. Unknown headings become "other" sections.
-function parseAnswer(text, sources) {
+function parseAnswer(rawText, sources) {
+  // Chinese models often emit 【A1】 rather than [A1]. The server folds these
+  // back before storing, but older/cached answers may still carry them — and
+  // without this they render as inert text instead of citation chips.
+  const text = String(rawText || "").replace(/[\u3010\uFF3B\u3016]/g, "[").replace(/[\u3011\uFF3D\u3017]/g, "]");
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
   const renderInline = (line) => {
     let html = escapeHtml(line);
