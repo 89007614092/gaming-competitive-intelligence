@@ -132,9 +132,10 @@ test('the citation gate accepts a full-width-bracket answer once normalised', ()
 
 test('the browser renders full-width citations as chips too', () => {
   // The server folds these before storing, but cached/older answers still carry
-  // them, and without this they render as inert text.
-  const m = /const text = String\(rawText \|\| ""\)\.replace\(\/\[[^\]]*\]\/g, "\["\)/.exec(APP_JS);
-  assert.ok(m, 'parseAnswer must normalise full-width brackets');
+  // them, and without this they render as inert text. It must come from the
+  // SHARED module (lib/text-cjk.js) rather than a private copy.
+  assert.ok(/TEXT_CJK\.foldBrackets/.test(APP_JS), 'parseAnswer must fold via the shared module');
+  assert.ok(!/u3010/.test(APP_JS), 'and must not keep its own bracket regex');
 });
 
 test('the model generation path normalises before the gate inspects it', () => {

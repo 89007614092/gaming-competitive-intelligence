@@ -511,7 +511,11 @@ function parseAnswer(rawText, sources) {
   // Chinese models often emit 【A1】 rather than [A1]. The server folds these
   // back before storing, but older/cached answers may still carry them — and
   // without this they render as inert text instead of citation chips.
-  const text = String(rawText || "").replace(/[\u3010\uFF3B\u3016]/g, "[").replace(/[\u3011\uFF3D\u3017]/g, "]");
+  // Same helpers the server uses (lib/text-cjk.js) — no second copy of the
+  // bracket rules to drift out of sync.
+  const text = (window.TEXT_CJK || {}).foldBrackets
+    ? window.TEXT_CJK.foldBrackets(rawText)
+    : String(rawText || "");
   const sourceMap = new Map((sources || []).map(s => [s.id, s]));
   const renderInline = (line) => {
     let html = escapeHtml(line);

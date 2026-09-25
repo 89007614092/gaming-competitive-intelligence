@@ -57,6 +57,12 @@ app.use(express.json({ limit: "1mb" }));
 app.use(auth.authGate);
 
 app.use(express.static(path.join(__dirname, "public")));
+// Shared CJK text helpers: required by the server AND loaded as a classic
+// script by the browser. Served from lib/ so there is exactly one copy.
+app.get("/text-cjk.js", (req, res) => {
+  res.type("application/javascript");
+  res.sendFile(path.join(__dirname, "lib", "text-cjk.js"));
+});
 
 // ===== Accounts v1: Supabase Auth login (env-gated; see lib/auth.js) =========
 app.get("/login", (req, res) => {
