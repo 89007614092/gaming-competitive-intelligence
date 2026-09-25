@@ -1,4 +1,7 @@
 const fs = require("fs");
+// CJK-aware text primitives. Anything touching free text must use these rather
+// than re-deriving its own punctuation regex — see lib/text-cjk.js.
+const textCjk = require("./lib/text-cjk");
 const path = require("path");
 
 // Open-source model served over an OpenAI-compatible chat-completions API
@@ -207,9 +210,9 @@ function buildCorpus() {
 // English (roughly seven words); a normal Chinese sentence is far shorter, and
 // applying the English floor silently discarded almost every Chinese sentence —
 // which is why Chinese Key Points collapsed to whole excerpts.
-function minSentenceLen(text) {
-  return cjkRuns(text).length ? 10 : 40;
-}
+
+const cjkRuns = textCjk.cjkRuns;
+const cjkBigrams = textCjk.cjkBigrams;
 
 function words(text) {
   return (String(text || "").toLowerCase().match(/[a-z][a-z0-9'-]{1,}/g) || [])
@@ -264,7 +267,7 @@ function relevantExcerpt(item, question, sentenceLimit = 2, maxChars = 620, titl
   const queryWords = new Set(words(question));
   const norm = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
   const tnorm = norm(title);
-  const sentences = item.text.match(/[^.!?。！？]+(?:[.!?。！？]+|$)/g) || [item.text];
+  const sentences = textCjk.splitSentences(item.text);
   const ranked = sentences
     .map((sentence, index) => ({
       sentence: sentence.trim(),
@@ -272,7 +275,7 @@ function relevantExcerpt(item, question, sentenceLimit = 2, maxChars = 620, titl
         + (/\b(?:risk|exposure|liability|compliance|copyright|privacy|transparency|moderation|requires?|creates?|faces?|enables?|allows?)\b/i.test(sentence) ? 4 : 0)
         + Math.max(0, 1 - index / 10),
     }))
-    .filter(item => item.sentence.length >= (cjkRuns(item.sentence).length ? 10 : 35))
+    .filter(item => item.sentence.length >= (textCjk.cjkRuns(item.sentence).length ? 10 : 35))
     // Skip sentences that just restate the source title (they read as noise once
     // the title is already shown as the claim's label).
     .filter(item => {
@@ -561,11 +564,7 @@ function applyStyleInstruction(systemPrompt, style = "full") {
 // invalid-id strip, the browser's chip renderer) matches ASCII brackets, so an
 // otherwise well-cited answer scored ZERO citations and fell back to the
 // extractive evidence dump. Fold the variants back before anything inspects it.
-function normaliseCitations(text) {
-  return String(text || "")
-    .replace(/[【［〖【]/g, "[")
-    .replace(/[】］〗】]/g, "]");
-}
+const normaliseCitations = textCjk.foldBrackets;
 
 // Pure citation gate used by runApiModelGeneration and unit-tested directly.
 // Accepts a reasoned model answer when it cites at least one source; the
@@ -789,9 +788,6 @@ const DOMAIN_CORE_TERMS = new Set([
 // yields nothing for a Chinese query, which previously caused every web result
 // to be scored -1 and dropped (so zh-CN questions never cited [W#] sources).
 // Han runs of length >= 2 are treated as substantive match candidates.
-function cjkRuns(text) {
-  return String(text || "").match(/[㐀-鿿豈-﫿]+/g) || [];
-}
 
 // Whole Han runs only match when the result happens to contain the SAME
 // contiguous phrase — in practice, near-duplicate text. Chinese has no word
@@ -799,14 +795,6 @@ function cjkRuns(text) {
 // Character BIGRAMS are the standard approach for unsegmented text: a question
 // about a company's game AI strategy yields 腾讯/游戏/战略/…, so a result that
 // phrases the idea differently still matches on the meaningful pairs.
-function cjkBigrams(text) {
-  const out = new Set();
-  for (const run of cjkRuns(text)) {
-    if (run.length < 2) continue;
-    for (let i = 0; i < run.length - 1; i += 1) out.add(run.slice(i, i + 2));
-  }
-  return out;
-}
 
 // Relevance-filter raw web-search hits against the question so noisy or
 // off-topic results never reach the answer. Matching is token-based (so
@@ -931,10 +919,10 @@ function buildExtractiveAnswer(question, evidence, style = "full", lang = "en") 
   for (const item of usable) {
     const excerpt = relevantExcerpt(item, question, 3, 900, item.title);
     if (!excerpt) continue;
-    const sentences = excerpt.match(/[^.!?。！？]+(?:[.!?。！？]+|$)/g) || [excerpt];
+    const sentences = textCjk.splitSentences(excerpt);
     for (const raw of sentences) {
       const s = raw.trim();
-      if (s.length < minSentenceLen(s) || s.length > 300) continue;
+      if (s.length < textCjk.minSentenceLen(s) || s.length > 300) continue;
       candidates.push({ sentence: s, score: scoreSentence(s, questionWords), id: item.id });
     }
   }
