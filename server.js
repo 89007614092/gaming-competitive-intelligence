@@ -172,6 +172,7 @@ const {
   isCpcCode,              // normalises to the concatenated form OPS expects
   normaliseCpc,
   CPC_CODE_RE,
+  parseThrottlingControl,
   MAX_ITEMS: EPO_MAX_ITEMS,
 } = require("./lib/epoOps");
 const epoClient = createEpoClient({
@@ -5947,6 +5948,47 @@ app.get("/api/patents/validate-cpc", whenAuth(requireAuth), async (req, res) => 
 // that means the owner). It deliberately issues a few live OPS searches, so it
 // is not opened to anonymous callers, but it does NOT require the admin role —
 // the earlier admin gate was a regression that blocked running the probe.
+// GET /api/patents/quota — READ the real OPS allowance instead of inferring it.
+//
+// Why this exists: every scheduling decision for the Phase 2 landscape depends on
+// the quota WINDOW, and we have been guessing it. "15 per minute" and "15 per week"
+// imply completely different designs, and a naive warmer would burn the allowance
+// and take interactive search down with it. One cheap call settles it.
+//
+// Cost: ONE search per invocation. It is auth-gated and must be used sparingly —
+// the passive route is better: lib/epoOps.js now LOGS the throttling control
+// whenever it changes, so normal usage reveals the window for free.
+app.get("/api/patents/quota", whenAuth(requireAuth), async (req, res) => {
+  try {
+    if (!epoClient.isConfigured()) {
+      return res.status(503).json({ success: false, code: "epo_not_configured", error: "EPO OPS not configured." });
+    }
+    // Cheapest possible call: one CPC count query, limit 1, no document bodies.
+    const cql = `cpc=/low ${isCpcCode("A63F13/00")}`;
+    let probe = { ok: true, error: null };
+    try {
+      await epoClient.searchCql(cql, { limit: 1, bypassBreaker: true });
+    } catch (e) {
+      probe = { ok: false, error: String(e.message || e).slice(0, 180) };
+    }
+    const st = epoClient.status();
+    res.json({
+      success: true,
+      // The raw header, e.g. "idle (4/hour)" — the ground truth.
+      throttlingControl: st.throttlingControl || null,
+      // And parsed, because the window is the number we actually need.
+      parsed: parseThrottlingControl(st.throttlingControl),
+      status: { configured: st.configured, circuitOpen: st.circuitOpen, throttled: st.throttled, failures: st.failures },
+      probe,
+      observedAt: new Date().toISOString(),
+      costNote: "This call consumed one OPS search. Prefer the [epo-ops] log line, which costs nothing.",
+      attribution: "Data: EPO OPS",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get("/api/patents/probe-cpc-format", whenAuth(requireAuth), async (req, res) => {
   try {
     if (!epoClient.isConfigured()) {
