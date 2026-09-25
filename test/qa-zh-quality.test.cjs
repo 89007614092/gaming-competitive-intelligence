@@ -165,3 +165,45 @@ test('the gate fallback keeps the chosen style and language', () => {
     'the gate fallback must pass style and lang'
   );
 });
+
+// === Citation discipline + observability (2026-09-25) ========================
+// A real answer stated the Joey Wong / AI-likeness claim with NO citation, and
+// one Key Point repeated it uncited, even though the source was retrieved.
+
+test('the prompt requires a citation in every paragraph and bullet', () => {
+  const base = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
+  assert.ok(base.includes('CITATION DISCIPLINE'), 'the base prompt must state the rule');
+  // ...and forbid force-citing, which is the failure mode of over-constraining.
+  assert.ok(/do NOT force-cite a source that does not bear on it/.test(base), 'must forbid force-citing');
+});
+
+test('the Chinese directive repeats the citation rule in Chinese', () => {
+  const zh = engine.applyLanguageInstruction('BASE', 'zh-CN');
+  assert.ok(zh.includes('每一段正文与每一条要点都必须带至少一个引用标记'), 'zh rule present');
+  assert.ok(zh.includes('不得裸述'), 'must forbid uncited claims');
+  assert.ok(zh.includes('不得为凑引用而引用无关的出处'), 'and forbid force-citing');
+});
+
+test('uncitedSegments finds claims made with no citation', () => {
+  const answer = [
+    '## Detailed Answer',
+    '腾讯面临监管风险[A1]。',
+    '这一段完全没有引用。',
+    '- 有引用的要点 [S2]',
+    '- 没有引用的要点',
+  ].join('\n');
+  const found = engine.uncitedSegments(answer);
+  assert.deepStrictEqual(found, ['这一段完全没有引用。']);
+});
+
+test('uncitedSegments ignores headings and cited lines', () => {
+  const answer = '## Key Points\n- 全部都有引用 [A1] [W2]\n## Conclusion\n结论也有引用 [T2]';
+  assert.strictEqual(engine.uncitedSegments(answer).length, 0, 'nothing should be flagged');
+});
+
+test('uncitedSegments is observability only, never enforcement', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'summarise-engine.js'), 'utf8');
+  assert.ok(/console\.warn\(`\[qa\] \$\{uncited\.length\}/.test(src), 'it must log');
+  // It must NOT throw or reject an answer — a noisy answer still beats none.
+  assert.ok(!/if \(uncited\.length\) throw/.test(src), 'and must never reject the answer');
+});
