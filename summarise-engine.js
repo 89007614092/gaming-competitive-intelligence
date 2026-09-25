@@ -637,7 +637,11 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   } catch (err) {
     throw err; // server.js extractive fallback engages unchanged
   }
-  let answer = normaliseCitations(rawAnswer);
+  const validCitationIds = new Set(evidence.map(item => item.id));
+  // Fold bracket variants, then bracket any BARE id we actually issued — a
+  // model that writes "风险A1" instead of "风险[A1]" was otherwise scored as
+  // citing nothing at all.
+  let answer = textCjk.bracketKnownIds(normaliseCitations(rawAnswer), validCitationIds);
   const uncited = uncitedSegments(answer);
   if (uncited.length) {
     console.warn(`[qa] ${uncited.length} segment(s) with no citation (lang=${lang})`);
@@ -647,7 +651,6 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   if (lang === "zh-CN" && looksTruncated(rawAnswer)) {
     console.warn(`[qa] zh-CN answer looks truncated (lang=${lang}, ${rawAnswer.length} chars) — consider raising QA_MAX_TOKENS_ZH_CN`);
   }
-  const validCitationIds = new Set(evidence.map(item => item.id));
   // Strip ids the model invented. Logged, because a citation that survives to
   // the reader without a matching source resolves to nothing — and we have seen
   // one ([S9], with no S9 in evidence), so this needs to be visible.
@@ -683,7 +686,15 @@ async function runApiModelGeneration(question, evidence, lang = "en", style = "f
   // uncited answer.
   const gate = evaluateCitationGate(answer, evidence);
   if (gate.pass) return answer;
-  return buildExtractiveAnswer(question, evidence, style, lang);
+  // This used to RETURN the extractive dump without throwing. server.js never
+  // entered its catch, so `mode` stayed "local-open-source-model" and the UI
+  // reported "AI model" while showing an evidence dump — with no error anywhere.
+  // Log the cause, then fail so the degradation is visible (and honest).
+  const idTokens = (rawAnswer.match(/[AWST]\d+/g) || []).join(",") || "none";
+  console.warn(
+    `[qa] citation gate failed (lang=${lang}, style=${style}) — replacing the model answer with an extractive summary. id-like tokens in the raw answer: ${idTokens}`
+  );
+  throw new Error("The model answered but cited no usable sources, so an extractive evidence summary was shown instead.");
 }
 
 // Serialise model calls so we never open two concurrent API requests at once
