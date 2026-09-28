@@ -4164,8 +4164,51 @@ function renderGamingTrends() {
           </article>
         `).join("")}
       </div>
+      <div id="trendsPatentsLive" class="patent-live"></div>
       <p class="patents-source-note">${landscape.sourceNote}</p>
     `;
+    loadPatentLandscapeLive();
+  }
+
+  // T1 — live technology volume, which AUGMENTS the curated prose above rather
+  // than replacing it. A filing count cannot express WHAT a company is
+  // protecting, so the narrative stays; the numbers just make it current. When
+  // OPS is unavailable, or nothing has been warmed yet, this renders nothing and
+  // the section still reads perfectly well.
+  async function loadPatentLandscapeLive() {
+    const host = document.getElementById("trendsPatentsLive");
+    if (!host) return;
+    try {
+      const res = await fetch("/api/patents/landscape");
+      const json = await res.json().catch(() => null);
+      const chips = json && json.success && Array.isArray(json.chips) ? json.chips : [];
+      if (!chips.length) { host.innerHTML = ""; return; }
+      const asOf = (chips.find((c) => c.observedAt) || {}).observedAt;
+      host.innerHTML = `
+        <div class="patent-live-head">
+          <span class="patent-live-title">Live filing volume by technology</span>
+          ${asOf ? `<span class="patent-live-asof">as of ${escapeHtml(String(asOf).slice(0, 10))}</span>` : ""}
+        </div>
+        <div class="patent-live-grid">
+          ${chips.map((c) => `
+            <div class="patent-live-row">
+              <span class="patent-live-label">${escapeHtml(String(c.label || c.id))}</span>
+              <span class="patent-live-count">${Number(c.count || 0).toLocaleString()}</span>
+              ${c.matched > 0 && c.sampleSize > 0 ? `
+                <span class="patent-live-signal">${c.matched} of the ${c.sampleSize} most recent
+                  from tracked competitors${c.competitors && c.competitors.length
+                    ? ` (${c.competitors.slice(0, 3).map((x) => escapeHtml(String(x.name))).join(", ")})`
+                    : ""}</span>
+              ` : `<span class="patent-live-signal patent-live-muted">no tracked competitor in the latest sample</span>`}
+            </div>
+          `).join("")}
+        </div>
+        <p class="patent-live-note">Counts are EPO OPS totals. The competitor figure is a share of the most
+          recent filings sampled — not of all filings. Data: EPO OPS</p>
+      `;
+    } catch {
+      host.innerHTML = "";
+    }
   }
 
   // Render trend cards

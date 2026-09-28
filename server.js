@@ -334,7 +334,7 @@ async function jinaExtract(url, timeoutMs = 20000) {
 // ===== Website and Video Transcript Extraction — free, no API key needed =====
 
 const { createExtractor } = require("./lib/extractor");
-const { createPatentWarmer } = require("./lib/patentWarm");
+const { createPatentWarmer, describeChipRow } = require("./lib/patentWarm");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
 const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool: datasetsGetDbPool, DATASET_FILE } = require("./lib/datasets");
@@ -5911,14 +5911,18 @@ async function warmChip(chip) {
   const patents = res.patents || [];
   const companies = trackedCompanies();
   const competitors = {};
+  let matched = 0;
   for (const p of patents) {
-    for (const id of matchPatentCompanies(p, companies)) {
+    const ids = matchPatentCompanies(p, companies);
+    if (ids.length) matched += 1; // patents, not hits: one patent can match two
+    for (const id of ids) {
       competitors[id] = (competitors[id] || 0) + 1;
     }
   }
   const row = {
     count: res.totalAvailable || 0,
     sampleSize: patents.length,
+    matched,
     competitors,
     observedAt: new Date().toISOString(),
     attribution: "Data: EPO OPS",
@@ -5966,6 +5970,33 @@ if (require.main === module && config.PATENT_WARM_ENABLED) {
   }, config.PATENT_WARM_TICK_MS);
   console.info(`[patent-warm] enabled — 1 search per ${Math.round(config.PATENT_WARM_TICK_MS / 1000)}s, reserve ${config.PATENT_WARM_RESERVE}`);
 }
+
+// GET /api/patents/landscape — T1 technology volume, read from the warm cache.
+//
+// Deliberately makes NO OPS call. Fetching 24 chips on demand is precisely the
+// burst the governor exists to prevent, and this endpoint is hit on page load.
+// So it shows whatever has been warmed, and degrades to an empty list when
+// nothing has been — the curated prose it sits beside still reads perfectly.
+app.get("/api/patents/landscape", whenAuth(requireAuth), async (req, res) => {
+  try {
+    const names = new Map(trackedCompanies().map((c) => [c.id, c.name]));
+    const chips = [];
+    for (const chip of CPC_CHIPS) {
+      const cached = await readPatentCache(countCacheKey("chip", chip.id, chip.codes || [chip.code]));
+      const row = describeChipRow(chip, cached, names);
+      if (row) chips.push(row);
+    }
+    chips.sort((a, b) => b.count - a.count);
+    res.json({
+      success: true,
+      chips,
+      warm: patentWarmer.status(),
+      attribution: "Data: EPO OPS",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/patents/validate-cpc — per-CODE counts. Admin-only: this is a
 // one-off verification tool, not a UI data source, and it costs one OPS call
