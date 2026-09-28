@@ -51,6 +51,19 @@ module.exports = {
   // so 12h is a safe default.
   PATENT_CACHE_TTL_MS: num(process.env.PATENT_CACHE_TTL_MS, 12 * 60 * 60 * 1000),
 
+  // --- Patent landscape warming (Phase 2) ---
+  // OPS reports search=green:5, so the governor paces: one search per tick, and
+  // it never spends into the reserve. Volume is not the constraint (24 chips a
+  // month is nothing) — BURST is, because ~19 x 403 opens the breaker and takes
+  // interactive search down with it. Disabled by default: wire it, watch it,
+  // then enable.
+  PATENT_WARM_ENABLED: process.env.PATENT_WARM_ENABLED === "1" || process.env.PATENT_WARM_ENABLED === "true",
+  PATENT_WARM_TICK_MS: num(process.env.PATENT_WARM_TICK_MS, 60 * 1000),
+  PATENT_WARM_RESERVE: num(process.env.PATENT_WARM_RESERVE, 2),
+  // Sample size for the competitor signal. Small on purpose: the weekly fair-use
+  // cap is measured in BYTES, and the applicant names ride along free.
+  PATENT_WARM_SAMPLE: num(process.env.PATENT_WARM_SAMPLE, 10),
+
   // --- Scan-lane pacing / quota (free-tier OpenRouter, ~50 req/day ceiling) ---
   // Min spacing between two scan model calls. This is a PROCESS-GLOBAL slot
   // (see paceScanModelCall), NOT per-scan: 4s => 15 calls/min, safely under the
