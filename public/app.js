@@ -3415,6 +3415,32 @@ async function runPatentSearch() {
   }
 }
 
+// Compact age for a cached answer: "45m", "5h", "2d".
+function patentAgeShort(ms) {
+  const mins = Math.round(Number(ms) / 60000);
+  if (!Number.isFinite(mins) || mins <= 0) return window.t('patents.ageNow', 'just now');
+  if (mins < 60) return window.t('patents.ageMinutes', '{n}m', { n: mins });
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return window.t('patents.ageHours', '{n}h', { n: hours });
+  return window.t('patents.ageDays', '{n}d', { n: Math.floor(hours / 24) });
+}
+
+// "Cached" on its own reads like a failure. Naming the age makes it obvious the
+// answer is a deliberate cache hit (12h TTL is the EPO quota guard), and the
+// tooltip gives the exact moment it was fetched from OPS.
+function patentCacheBadgeHtml(data) {
+  if (!data || !data.cached) return "";
+  const ageMs = Number(data.cacheAgeMs);
+  const age = Number.isFinite(ageMs) ? patentAgeShort(ageMs) : "";
+  const label = age
+    ? window.t('patents.cachedAgo', 'cached result · {age}', { age })
+    : window.t('patents.cached', 'cached result');
+  const title = data.cachedAt
+    ? `${window.t('patents.fetchedAt', 'Fetched from EPO OPS')} ${new Date(data.cachedAt).toLocaleString()}`
+    : "";
+  return `<span class="patent-cache-badge"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(label)}</span>`;
+}
+
 function renderPatents(data) {
   const results = document.getElementById("patentResults");
   if (!results) return;
@@ -3439,7 +3465,7 @@ function renderPatents(data) {
     <div class="patent-results-header">
       <span class="patents-eyebrow">${window.t('patents.resultsLabel')}</span>
       <span class="patent-results-count">${window.t('patents.showing', { count: patents.length, total })}</span>
-      ${data.cached ? `<span class="patent-cache-badge">${window.t('patents.cached')}</span>` : ""}
+      ${patentCacheBadgeHtml(data)}
     </div>
     <div class="patent-card-grid">
       ${patents.map(patentCardHtml).join("")}

@@ -69,6 +69,14 @@
       'patents.resultsLabel': 'Patent results',
       'patents.showing': 'Showing {count} of {total} matches',
       'patents.cached': 'cached result',
+      // Age of a cached answer. Without it, "cached result" is indistinguishable
+      // from "the live call failed" — which is the opposite of what it means.
+      'patents.cachedAgo': 'cached result · {age}',
+      'patents.ageNow': 'just now',
+      'patents.ageMinutes': '{n}m ago',
+      'patents.ageHours': '{n}h ago',
+      'patents.ageDays': '{n}d ago',
+      'patents.fetchedAt': 'Fetched from EPO OPS',
       'patents.viewOnEspacenet': 'View on Espacenet',
       // Opt-in headline translation. Titles arrive in the filing language;
       // translating them all automatically would burn DeepL quota, so the
@@ -279,6 +287,12 @@
       'patents.resultsLabel': '专利检索结果',
       'patents.showing': '显示 {count} 条，共 {total} 条匹配结果',
       'patents.cached': '缓存结果',
+      'patents.cachedAgo': '缓存结果 · {age}',
+      'patents.ageNow': '刚刚',
+      'patents.ageMinutes': '{n} 分钟前',
+      'patents.ageHours': '{n} 小时前',
+      'patents.ageDays': '{n} 天前',
+      'patents.fetchedAt': '获取自 EPO OPS',
       'patents.viewOnEspacenet': '在 Espacenet 上查看',
       'patents.translate': '翻译标题',
       'patents.showOriginal': '显示原文',

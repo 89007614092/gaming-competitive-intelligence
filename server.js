@@ -5570,9 +5570,11 @@ async function ensurePatentsCacheTable(pool) {
   _patentsCacheEnsured = true;
 }
 
-// Returns the cached payload, or null on a miss / expiry / ANY DB error. The
-// feature must degrade to a live OPS call — never fail because the cache did.
-async function readPatentCache(key) {
+// Same cache read as readPatentCache, but also hands back `updated_at` so the
+// caller can tell the user HOW OLD a cached answer is. A bare "cached result"
+// badge is indistinguishable from "we tried and failed" — which is exactly the
+// misreading it was supposed to prevent.
+async function readPatentCacheWithAge(key) {
   const pool = getDbPool();
   if (!pool) return null;
   try {
@@ -5585,11 +5587,31 @@ async function readPatentCache(key) {
     if (!row || !row.payload) return null;
     const age = Date.now() - new Date(row.updated_at).getTime();
     if (Number.isFinite(age) && age > config.PATENT_CACHE_TTL_MS) return null;
-    return typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+    return {
+      payload: typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload,
+      updatedAt: row.updated_at,
+    };
   } catch (e) {
     console.warn("[patents] cache read failed; going live:", e.message);
     return null;
   }
+}
+
+// Returns the cached payload, or null on a miss / expiry / ANY DB error. The
+// feature must degrade to a live OPS call — never fail because the cache did.
+async function readPatentCache(key) {
+  const hit = await readPatentCacheWithAge(key);
+  return hit ? hit.payload : null;
+}
+
+// Pure: the freshness fields the UI renders next to a cached result. Exported
+// for tests because the DB-backed path is not exercisable without a database.
+// cacheAgeMs is clamped at 0 so clock skew between Postgres and Node can never
+// render a negative age.
+function patentCacheMeta(updatedAt, now = Date.now()) {
+  const t = updatedAt ? new Date(updatedAt).getTime() : NaN;
+  if (!Number.isFinite(t)) return { cachedAt: null, cacheAgeMs: null };
+  return { cachedAt: new Date(t).toISOString(), cacheAgeMs: Math.max(0, now - t) };
 }
 
 // Cache hygiene. Bumping the key prefix in buildCacheKey already makes stale
@@ -5762,10 +5784,14 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
       });
     }
 
-    // Cache FIRST — this is the quota guard, not just a latency win.
+    // Cache FIRST — this is the quota guard, not just a latency win. The age
+    // travels with the payload: a cached hit is a deliberate 12h decision, and
+    // saying so stops it reading as "the live call failed".
     const cacheKey = buildCacheKey(query);
-    const cached = await readPatentCache(cacheKey);
-    if (cached) return res.json({ ...cached, cached: true });
+    const cached = await readPatentCacheWithAge(cacheKey);
+    if (cached) {
+      return res.json({ ...cached.payload, cached: true, ...patentCacheMeta(cached.updatedAt) });
+    }
 
     const { patents, totalAvailable, diagnostics, cql } = await epoClient.search(query, { limit: query.range });
 
@@ -6395,6 +6421,8 @@ module.exports = {
   matchPatentCompanies,
   companyTokens,
   readPatentCache,
+  readPatentCacheWithAge,
+  patentCacheMeta,
   writePatentCache,
   ensurePatentsCacheTable,
   purgeStalePatentCache,
