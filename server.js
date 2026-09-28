@@ -334,6 +334,7 @@ async function jinaExtract(url, timeoutMs = 20000) {
 // ===== Website and Video Transcript Extraction — free, no API key needed =====
 
 const { createExtractor } = require("./lib/extractor");
+const { createPatentWarmer } = require("./lib/patentWarm");
 const { applyLicenseGate } = require("./lib/licenseGate");
 const retention = require("./lib/retention");
 const { getDataset, clearDatasetCache, setDatasetCache, attachDb, primeDatasetCacheFromDb, getDbPool: datasetsGetDbPool, DATASET_FILE } = require("./lib/datasets");
@@ -4314,7 +4315,7 @@ app.get("/healthz", (req, res) => {
     // process, and whether the client is currently throttled or circuit-broken.
     // Makes a quota lockout diagnosable from a live probe instead of only
     // showing up as an empty Patents view. Never exposes the key itself.
-    patents: epoClient.status(),
+    patents: { ...epoClient.status(), warm: patentWarmer.status() },
   });
 });
 
@@ -5891,6 +5892,80 @@ app.get("/api/patents/cpc-counts", whenAuth(requireAuth), async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Patent landscape warming (Phase 2) — the data layer T1 reads.
+//
+// One search per chip, storing the count AND the competitor signal. The
+// applicant names are already in the response we pay for, so the "N of the M
+// most recent are from tracked competitors" figure costs ZERO extra OPS calls.
+//
+// Sample size stays small deliberately: OPS enforces a weekly fair-use cap
+// measured in BYTES, and 24 chips x 10 bibliographic records is a rounding error
+// against it, where 24 x 100 would not be.
+const PATENT_WARM_SAMPLE = config.PATENT_WARM_SAMPLE;
+
+async function warmChip(chip) {
+  const codes = chip.codes || [chip.code];
+  const res = await epoClient.search({ cpc: codes }, { limit: PATENT_WARM_SAMPLE });
+  const patents = res.patents || [];
+  const companies = trackedCompanies();
+  const competitors = {};
+  for (const p of patents) {
+    for (const id of matchPatentCompanies(p, companies)) {
+      competitors[id] = (competitors[id] || 0) + 1;
+    }
+  }
+  const row = {
+    count: res.totalAvailable || 0,
+    sampleSize: patents.length,
+    competitors,
+    observedAt: new Date().toISOString(),
+    attribution: "Data: EPO OPS",
+  };
+  await writePatentCache(
+    countCacheKey("chip", chip.id, codes),
+    { kind: "chip", id: chip.id, codes },
+    row
+  );
+  return row;
+}
+
+// Stalest first, so a warm interrupted by a restart resumes where it left off
+// rather than starting over. Falls back to round-robin if the cache is unreadable.
+async function stalestChip(chips) {
+  try {
+    let best = null;
+    let oldest = Infinity;
+    for (const chip of chips) {
+      const cached = await readPatentCache(countCacheKey("chip", chip.id, chip.codes || [chip.code]));
+      const at = cached && cached.observedAt ? Date.parse(cached.observedAt) : 0;
+      if (at < oldest) { oldest = at; best = chip; }
+    }
+    if (best) return best;
+  } catch { /* fall through to round-robin */ }
+  return chips[0] || null;
+}
+
+const patentWarmer = createPatentWarmer({
+  epoClient,
+  chips: CPC_CHIPS,
+  enabled: !!config.PATENT_WARM_ENABLED,
+  reserve: config.PATENT_WARM_RESERVE,
+  tickMs: config.PATENT_WARM_TICK_MS,
+  warm: warmChip,
+  next: stalestChip,
+  log: (m) => console.info(m),
+});
+
+// Dark by default: the timer is only armed when explicitly enabled, and the
+// warmer itself refuses to spend when disabled, so an env typo fails safe.
+if (require.main === module && config.PATENT_WARM_ENABLED) {
+  setInterval(() => {
+    patentWarmer.tick().catch((err) => console.warn("[patent-warm] tick failed:", err && err.message));
+  }, config.PATENT_WARM_TICK_MS);
+  console.info(`[patent-warm] enabled — 1 search per ${Math.round(config.PATENT_WARM_TICK_MS / 1000)}s, reserve ${config.PATENT_WARM_RESERVE}`);
+}
 
 // GET /api/patents/validate-cpc — per-CODE counts. Admin-only: this is a
 // one-off verification tool, not a UI data source, and it costs one OPS call
