@@ -581,7 +581,7 @@
           "competitorReference": ["bethesda", "gsc", "monolith", "ubisoft", "take-two", "hello-games"],
           "sources": [
             { "label": "S.T.A.L.K.E.R. A-Life developer interview", "url": "https://www.gamedeveloper.com/pc/interview-inside-the-ai-of-i-s-t-a-l-k-e-r-i-" },
-            { "label": "Nemesis System patent", "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS10926179B2" },
+            { "label": "Nemesis System patent", "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10926179" },
             { "label": "Watch Dogs: Legion simulation design", "url": "https://www.gamedeveloper.com/design/how-watch-dogs-legion-s-play-as-anyone-simulation-works" }
           ]
         },
@@ -740,7 +740,7 @@
       "summary": "F.E.A.R.'s GOAP and the Nemesis System show the value and complexity of persistent authored AI. Key exposure includes reproducibility of emergent failures, save-state integrity, offensive procedural combinations, quest recovery, and strategic dependence on patented architectures.",
       "sources": [
         { "label": "F.E.A.R. AI — GDC paper", "url": "https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf" },
-        { "label": "Nemesis System patent", "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS10926179B2" }
+        { "label": "Nemesis System patent", "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10926179" }
       ]
     },
     "bethesda": {
