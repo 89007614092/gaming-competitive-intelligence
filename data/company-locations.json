@@ -239,7 +239,7 @@
       "description": "Lead Grand Theft Auto studio and major contributor to Rockstar's large-scale open-world systems.",
       "officeFunction": "Core Grand Theft Auto production: open-world architecture, mission and world design, NPC population systems and integration of shared Rockstar technology. Public claims that GTA VI uses machine-learning NPCs remain unconfirmed.",
       "relevantProducts": ["Grand Theft Auto series", "Open-world NPC and traffic simulation", "Shared Rockstar navigation and animation technology"],
-      "sources": [{"label":"Official GTA VI page","url":"https://www.rockstargames.com/VI"},{"label":"Take-Two virtual-world patent","url":"https://patents.google.com/patent/US11684855B2/en"}],
+      "sources": [{"label":"Official GTA VI page","url":"https://www.rockstargames.com/VI"},{"label":"Take-Two virtual-world patent","url":"https://worldwide.espacenet.com/patent/search?q=pn%3DUS11684855B2"}],
       "url": "https://www.rockstargames.com"
     },
     {
@@ -389,7 +389,7 @@
       "description": "Studio responsible for F.E.A.R.'s GOAP combat AI and the patented Nemesis System.",
       "officeFunction": "Core game-development studio for tactical planning and persistent procedural characters. Its systems span F.E.A.R.'s real-time action planning and Shadow of Mordor/War's memory, hierarchy, rivalry and dialogue framework.",
       "relevantProducts": ["F.E.A.R. GOAP combat AI", "Nemesis System", "Shadow of Mordor and Shadow of War"],
-      "sources": [{"label":"F.E.A.R. AI — GDC paper","url":"https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf"},{"label":"Nemesis System patent","url":"https://patents.google.com/patent/US10926179B2/en"}],
+      "sources": [{"label":"F.E.A.R. AI — GDC paper","url":"https://www.gamedevs.org/uploads/three-states-plan-ai-of-fear.pdf"},{"label":"Nemesis System patent","url":"https://worldwide.espacenet.com/patent/search?q=pn%3DUS10926179B2"}],
       "url": "https://www.wbgames.com"
     },
     {
