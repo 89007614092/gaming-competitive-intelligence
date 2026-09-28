@@ -3472,6 +3472,16 @@ function renderPatents(data) {
     </div>`;
 }
 
+// The card's heading link opens the document itself — USPTO's own PDF for US
+// publications, Espacenet otherwise — so the tooltip names the office rather
+// than leaving the user to guess. The footer link is always the EPO record.
+function patentLinkTitle(p) {
+  const isUspto = p && p.documentUrl && p.documentUrl !== p.espacenetUrl;
+  return isUspto
+    ? window.t('patents.usptoFullText', 'USPTO full text (PDF)')
+    : window.t('patents.viewOnEspacenet', 'View on Espacenet');
+}
+
 function patentCardHtml(p) {
   const applicants = (p.applicants || []).join(", ");
   const cpc = (p.classifications || []).slice(0, 4)
@@ -3482,7 +3492,7 @@ function patentCardHtml(p) {
   return `
     <article class="patent-result-card">
       <div class="patent-result-head">
-        <a class="patent-number" href="${safeHref(p.espacenetUrl)}" target="_blank" rel="noopener">${escapeHtml(p.id)}</a>
+        <a class="patent-number" href="${safeHref(p.documentUrl || p.espacenetUrl)}" target="_blank" rel="noopener" title="${escapeHtml(patentLinkTitle(p))}">${escapeHtml(p.id)}</a>
         <span class="patent-date">${escapeHtml(p.publicationDate || "")}</span>
       </div>
       <h4><span class="patent-title-text">${escapeHtml(p.title)}</span></h4>

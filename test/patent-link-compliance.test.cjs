@@ -36,18 +36,24 @@ test("no source links to Google Patents", () => {
   );
 });
 
-test("patent deep-links resolve through Espacenet", () => {
-  // Curated links only: lib/epoOps.js holds the URL *template*, which has no
-  // publication number until a document is rendered, so it is checked separately.
+test("patent deep-links land on the document, not on a search box", () => {
+  // Curated links only: lib/epoOps.js holds the URL *templates*, which have no
+  // publication number until a document is rendered, so they are checked
+  // separately in test/patent-link-target.test.cjs.
+  //
+  // Two approved hosts now: Espacenet (everything non-US) and the USPTO's own
+  // document server (US publications). Espacenet enforces a Fair Use policy
+  // against the BROWSER and 403s shared corporate egress, which left users
+  // looking at "rejected due to the violation of Fair Use policy" instead of the
+  // patent, while OPS itself stayed perfectly healthy.
   const links = readAll(path.join(ROOT, "data"), [".json", ".txt"])
-    .flatMap((s) => (s.text.match(/https:\/\/worldwide\.espacenet\.com\/[^"\s)]+/g) || []));
-  assert.ok(links.length > 0, "the curated patent links should exist and be Espacenet");
-  // A bare home page is fine — it is the "Espacenet (EPO) patent database"
-  // source citation. Anything claiming to be a patent must carry a publication
-  // number, so it lands on the document rather than on a search box.
-  const patents = links.filter((l) => l.includes("/patent/"));
+    .flatMap((s) => (s.text.match(/https:\/\/(?:worldwide\.espacenet\.com|image-ppubs\.uspto\.gov)\/[^"\s)]+/g) || []));
+  const patents = links.filter((l) => l.includes("/patent/") || l.includes("/print/downloadPdf/"));
   assert.ok(patents.length >= 14, `expected the curated patent links, found ${patents.length}`);
-  const bare = patents.filter((l) => !/q=pn%3D[A-Z]{2}[0-9A-Z]+/.test(l));
+  // Anything claiming to be a patent must carry a publication number, so it
+  // resolves to the document rather than to a search box.
+  const bare = patents.filter((l) =>
+    !/q=pn%3D[A-Z]{2}[0-9A-Z]+/.test(l) && !/\/print\/downloadPdf\/\d+$/.test(l));
   assert.deepStrictEqual(bare, [], `patent links must carry a publication number: ${bare.join(", ")}`);
 });
 

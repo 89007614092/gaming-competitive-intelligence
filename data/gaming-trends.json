@@ -262,48 +262,48 @@
             "title": "Individualized NPC personality and behavior",
             "description": "Each non-player character can receive its own personality parameters, including aggression, patience, and reactions to weather. The system supports large libraries of ambient dialogue that trigger only when multiple contextual conditions are simultaneously satisfied, such as time of day, weather, witnessed crimes, and recognition of the player.",
             "trendLinks": ["NPC Behavior", "Dynamic Narrative", "Contextual Dialogue"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS11684855B2"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11684855"
           },
           {
             "number": "US11620781B1",
             "title": "Real-time modular character movement",
             "description": "Character movement is assembled in real time from modular motion blocks according to factors such as injury state, fatigue, terrain, and weather, rather than relying only on fixed animation clips.",
             "trendLinks": ["Procedural Animation", "Context Awareness"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS11620781B1"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11620781"
           },
           {
             "number": "US10685152B2",
             "title": "Dynamic fluid and surface simulation",
             "description": "Sweat, blood, rain, and other fluids are simulated dynamically on 3D surfaces in real time according to the properties of the surface and material involved.",
             "trendLinks": ["Physical Simulation", "Rendering"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS10685152B2"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/10685152"
           },
           {
             "number": "US11951384B2",
             "title": "AI-assisted body-part motion prediction",
             "description": "Motion-capture data is used to predict how individual body parts should move during an action. Instead of simply replaying a complete animation clip, the system predicts movement as the action unfolds.",
             "trendLinks": ["Motion Prediction", "Character Animation"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS11951384B2"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11951384"
           },
           {
             "number": "US11794114B2",
             "title": "Continuous world streaming between sessions",
             "description": "Technology for reducing or eliminating loading screens between online sessions through continuous world streaming, supporting a more persistent and uninterrupted player experience.",
             "trendLinks": ["World Streaming", "Persistent Worlds"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS11794114B2"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11794114"
           },
           {
             "number": "US11273380B1",
             "title": "AI-based anti-cheat detection",
             "description": "An anti-cheat system intended to identify cheating behavior in online play. The supplied research notes that this type of detection is computationally intensive but strategically important for live-service integrity.",
             "trendLinks": ["Trust & Safety", "Live Services"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS11273380B1"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/11273380"
           }
         ],
         "sources": [
           {
-            "label": "Espacenet (EPO) patent database",
-            "url": "https://worldwide.espacenet.com"
+            "label": "USPTO patent full text (PDF) — publication numbers identified via EPO OPS",
+            "url": "https://www.uspto.gov/patents/search"
           }
         ]
       },
@@ -323,7 +323,7 @@
             "title": "Multiplayer video-game matchmaking",
             "description": "A patented system and method for matching players in multiplayer video games, reflecting the strategic importance of matchmaking design to engagement, competition, and online retention.",
             "trendLinks": ["Matchmaking", "Player Engagement"],
-            "url": "https://worldwide.espacenet.com/patent/search?q=pn%3DUS20160001181A1"
+            "url": "https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/20160001181"
           }
         ],
         "sources": [

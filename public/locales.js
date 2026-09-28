@@ -77,6 +77,9 @@
       'patents.ageHours': '{n}h ago',
       'patents.ageDays': '{n}d ago',
       'patents.fetchedAt': 'Fetched from EPO OPS',
+      // US publications deep-link to the USPTO's own PDF: Espacenet enforces a
+      // Fair Use policy against the browser and 403s shared corporate egress.
+      'patents.usptoFullText': 'USPTO full text (PDF)',
       'patents.viewOnEspacenet': 'View on Espacenet',
       // Opt-in headline translation. Titles arrive in the filing language;
       // translating them all automatically would burn DeepL quota, so the
@@ -293,6 +296,7 @@
       'patents.ageHours': '{n} 小时前',
       'patents.ageDays': '{n} 天前',
       'patents.fetchedAt': '获取自 EPO OPS',
+      'patents.usptoFullText': 'USPTO 全文（PDF）',
       'patents.viewOnEspacenet': '在 Espacenet 上查看',
       'patents.translate': '翻译标题',
       'patents.showOriginal': '显示原文',
