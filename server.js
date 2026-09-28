@@ -173,6 +173,7 @@ const {
   normaliseCpc,
   CPC_CODE_RE,
   parseThrottlingControl,
+  searchBudget,
   MAX_ITEMS: EPO_MAX_ITEMS,
 } = require("./lib/epoOps");
 const epoClient = createEpoClient({
@@ -5978,6 +5979,8 @@ app.get("/api/patents/quota", whenAuth(requireAuth), async (req, res) => {
       throttlingControl: st.throttlingControl || null,
       // And parsed, because the window is the number we actually need.
       parsed: parseThrottlingControl(st.throttlingControl),
+      // What a background warmer would be allowed to spend right now.
+      budget: searchBudget(st.throttlingControl),
       status: { configured: st.configured, circuitOpen: st.circuitOpen, throttled: st.throttled, failures: st.failures },
       probe,
       observedAt: new Date().toISOString(),

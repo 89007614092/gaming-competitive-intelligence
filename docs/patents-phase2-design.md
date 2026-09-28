@@ -247,3 +247,99 @@ budget.
 
 Lesson recorded: verify membership by id/normalised name, not by exact display
 string.
+
+---
+
+## 12. The real quota — read from production, 2026-09-28
+
+```
+[epo-ops] throttling control: overloaded (images=green:50, inpadoc=green:30, other=green:1000, retrieval=green:50, search=green:5)
+```
+
+This arrived **for free**, as a by-product of the source scan — which is the
+cheapest possible way to learn it, and validates logging on change rather than
+probing.
+
+### Three corrections to what we assumed
+
+1. **The shape is not the one we assumed.** We built for `idle (4/hour)`. OPS
+   actually sends a per-service breakdown. The shipped parser would have returned
+   the entire string as the state with `rate: null` — the measurement could not
+   read the thing it existed to read. Rewritten.
+2. **The leading word is SYSTEM load, not our allowance.** OPS said
+   `overloaded` while `search` was `green:5`. A governor keyed on that word would
+   stop work OPS is perfectly willing to serve — and, worse, would make the
+   landscape look broken for reasons that have nothing to do with us. Each
+   service must be read individually.
+3. **The window is never stated in the header.** So we must never hard-code a
+   rate ("5 per minute"). Gate on the colour and the remaining rate, which OPS
+   reports per response and which are true whatever the window is.
+
+### What follows — and what does not
+
+- Search budget: **5 in flight**. EPO documents per-minute per-service quotas;
+  treat it as "about 5 available at once", and never assume more.
+- **Monthly T1 = 24 searches per month** (24 chips, one search each — multi-code
+  chips are OR'd into a single query, confirmed at `epoOps.js:363`). Affordable
+  by orders of magnitude, even if the window turned out to be hourly or daily.
+  T2 would be ~43/month — also affordable.
+
+**So quota VOLUME was never the real risk. BURST is.** A naive loop issuing 24
+searches back to back against 5 in flight produces roughly 19 × HTTP 403
+(`quota exceeded`), and two failures open the circuit breaker — which
+short-circuits *every* OPS call, so the warmer would take interactive search
+down with it. **That** is the failure the governor exists to prevent, and it is a
+different failure from the one we set out to measure.
+
+A second, invisible limit: OPS also applies a **weekly fair-use cap measured in
+bytes, not requests**, which surfaces only as a 403 citing fair use. Mitigation:
+keep landscape searches bibliographic and small (limit 25, no full-text
+retrieval).
+
+---
+
+## 13. Governor design
+
+The governor is therefore a **pacer**, not a rationer. Its job is not "spend
+carefully over a month" — monthly volume is trivial — but "never burst, never
+starve a user, never trip the breaker".
+
+| Element | Decision | Why |
+|---|---|---|
+| Gate | `searchBudget(lastHeader, RESERVE).allowed` | Header-driven, so correct whatever the window is |
+| Reserve | `SEARCH_RESERVE = 2` | Warming will not spend the last 2; interactive search always finds room |
+| Unknown | skip, do not spend | We have seen no header yet — never warm on a guess |
+| Per-tick cap | **1 search per tick** | 24 chips therefore take 24 ticks; no burst is possible by construction |
+| Tick | `PATENT_WARM_TICK_MS`, default 60 s | Full cycle ≈ 24 min, then idle until next month |
+| Backoff | on 403 / non-green: `Retry-After` or 60 s, doubling, capped 30 min | OPS tells us when to return; respect it |
+| Breaker | existing 2-failure breaker already covers it | Do not add a second one |
+| Kill switch | `PATENT_WARM_ENABLED`, **default false** | Ship dark, observe, then enable |
+| Order | stalest-first, fixed chip order | Resumable and predictable |
+| TTL | landscape rows exempt from the 12 h sweep | Precedent: `cpccount:` rows are deliberately kept |
+| Sleep | if Render sleeps, warming simply does not happen | On-demand still works; acceptable |
+| Observability | `/healthz` → `patents.warm { enabled, lastTickAt, lastBudget, lastSkipReason, backoffUntil, warmed }` | One place to see whether it is behaving |
+
+Open choices for Molly: tick interval (60 s vs 5 min — both fine, 60 s warms in
+~24 min); reserve (2 vs 1); whether to ship enabled or dark (**recommend dark**).
+
+---
+
+## 14. T1 — technology volume, with the competitor highlight for free
+
+One search per chip (24), each returning a count plus the sample documents'
+applicants. `server.js` already cross-references a patent to the tracked
+companies on distinctive tokens, so per chip we can show:
+
+> Virtual worlds & agents — 1,240 filings · **9 of the 25 most recent are from
+> tracked competitors** (Tencent, NetEase, Unity)
+
+**Zero extra OPS calls** — the applicant names are already in the response we pay
+for. Two honesty requirements, both enforced in the wording:
+
+- it is a share **of the sample returned** ("of the most recent N filings"), never
+  a share of the whole corpus
+- applicant matching is imperfect, so it is a **signal**, not an exact count
+
+Per D4 this **augments** the curated prose rather than replacing it: a filing
+count cannot express *what* a company is protecting, and keeping the narrative
+means the section degrades gracefully when OPS is unavailable.
