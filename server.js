@@ -5815,6 +5815,7 @@ app.get("/api/patents", whenAuth(requireAuth), async (req, res) => {
     const code = (err && err.code) || "epo_error";
     const status =
       code === "epo_not_configured" ? 503 :
+      code === "epo_fair_use" ? 429 :
       code === "epo_throttled" ? 429 :
       code === "epo_circuit_open" ? 503 :
       /required|Provide a/i.test(String((err && err.message) || "")) ? 400 : 502;
